@@ -221,3 +221,13 @@ export const syncEntityEnum = pgEnum('sync_entity', [
   'CUSTOMER', 'VEHICLE', 'APPOINTMENT', 'REPAIR_ORDER', 'RO_LINE',
   'INSPECTION', 'CONTRACT', 'OP_CODE', 'TECHNICIAN',
 ])
+
+/**
+ * What the advisor did with a ranked opportunity.
+ * SKIPPED means it was never raised with the customer — not that they said no.
+ */
+export const opportunityOutcomeEnum = pgEnum('opportunity_outcome', [
+  'ACCEPTED',
+  'DECLINED',
+  'SKIPPED',
+])

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { loadVehicleRecord } from '@/lib/records/vehicle'
+import { WearPanel } from '@/components/wear/wear-panel'
 import { getDefaultStore } from '@/lib/prep-sheet/load'
 import type { TermStatus } from '@/lib/warranty'
 import type { WearPrediction } from '@/lib/prep-sheet'
@@ -196,6 +197,15 @@ export default async function VehiclePage({
                 )}
               </div>
             )}
+
+            {/* The chart is the persuasive version of the table below it. */}
+            <WearPanel
+              history={v.inspectionHistory}
+              avgMilesPerDay={v.avgMilesPerDay}
+              vehicleLabel={v.label}
+              customerName={v.owner?.name}
+              asOf={AS_OF}
+            />
             {v.wear.treadSeries.length > 1 && (
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full text-sm">

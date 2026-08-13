@@ -25,6 +25,7 @@
     "db:test:down": "powershell -ExecutionPolicy Bypass -File scripts/test-db.ps1 down"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
     "date-fns": "^4.4.0",

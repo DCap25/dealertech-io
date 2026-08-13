@@ -43,7 +43,7 @@ export default async function CustomersPage({
           </div>
           <nav className="flex gap-3 text-sm text-neutral-500">
             <Link href="/drive" className="hover:underline">Today&rsquo;s drive</Link>
-            <Link href="/bdc" className="hover:underline">BDC worklist</Link>
+            <Link href="/follow-up" className="hover:underline">Follow-ups</Link>
           </nav>
         </div>
       </header>

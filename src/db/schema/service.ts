@@ -1,12 +1,13 @@
 import {
   pgTable, uuid, text, timestamp, boolean, integer, numeric, index, unique,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core'
 import { stores, users } from './tenancy'
 import { customers, vehicles } from './customers'
 import {
   appointmentSourceEnum, appointmentStatusEnum, inspectionStatusEnum, measurementUnitEnum,
   payTypeEnum, payerEnum, roLineStatusEnum, roStatusEnum, transportTypeEnum, wheelPositionEnum,
-  confidenceEnum,
+  confidenceEnum, opportunityOutcomeEnum,
 } from './enums'
 
 /** The store's own service menu. Every store already has one; this is the source of truth. */
@@ -339,5 +340,49 @@ export const coverageDeterminations = pgTable(
     index('coverage_determinations_vehicle_idx').on(t.vehicleId),
     index('coverage_determinations_ro_idx').on(t.repairOrderId),
     index('coverage_determinations_store_created_idx').on(t.storeId, t.createdAt),
+  ],
+)
+
+/**
+ * What the advisor did with each ranked opportunity on a prep sheet.
+ *
+ * The only place SKIPPED is knowable. Sold work shows up as an RO line and
+ * declined work as a declined service, but an opportunity the advisor never
+ * raised leaves no trace anywhere else — and that gap is exactly what a
+ * capture-rate metric is measuring. One row per opportunity per visit.
+ */
+export const prepSheetOutcomes = pgTable(
+  'prep_sheet_outcomes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    storeId: uuid('store_id').notNull().references(() => stores.id, { onDelete: 'cascade' }),
+    appointmentId: uuid('appointment_id').references(() => appointments.id, { onDelete: 'cascade' }),
+    advisorId: uuid('advisor_id').references(() => users.id, { onDelete: 'set null' }),
+    customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
+    vehicleId: uuid('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
+
+    /** Engine-assigned key, stable within one build of this visit's sheet. */
+    opportunityKey: text('opportunity_key').notNull(),
+    opportunityType: text('opportunity_type').notNull(),
+    title: text('title').notNull(),
+    urgency: text('urgency').notNull(),
+    likelyPayer: payerEnum('likely_payer').notNull(),
+
+    /**
+     * Snapshotted rather than re-derived at read time: prices move, and a
+     * scorecard that silently restates last month's numbers is worthless.
+     */
+    estimatedAmount: numeric('estimated_amount', { precision: 10, scale: 2 }).notNull().default('0'),
+    customerOutOfPocket: numeric('customer_out_of_pocket', { precision: 10, scale: 2 }).notNull().default('0'),
+
+    outcome: opportunityOutcomeEnum('outcome').notNull(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('prep_sheet_outcomes_advisor_idx').on(t.storeId, t.advisorId, t.decidedAt),
+    index('prep_sheet_outcomes_appointment_idx').on(t.appointmentId),
+    // Re-deciding an item updates the row rather than double-counting it.
+    uniqueIndex('prep_sheet_outcomes_unique_idx').on(t.appointmentId, t.opportunityKey),
   ],
 )

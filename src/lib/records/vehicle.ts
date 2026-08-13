@@ -3,7 +3,7 @@ import { getDb, schema } from '@/db/client'
 import { computeWarrantySnapshot, type WarrantySnapshot } from '@/lib/warranty'
 import {
   predictWorstCorner, predictWear, TIRE_THRESHOLDS, BRAKE_THRESHOLDS,
-  type WearPrediction, type WearReading,
+  type InspectionSnapshot, type WearPrediction, type WearReading,
 } from '@/lib/prep-sheet'
 
 /**
@@ -97,6 +97,12 @@ export interface VehicleRecord {
     treadSeries: { mileage: number; recordedAt: Date; byPosition: Record<string, number> }[]
   }
 
+  /**
+   * The same measurement history in the shape the wear chart consumes, so the
+   * vehicle page and the drive prep sheet render one component rather than two.
+   */
+  inspectionHistory: InspectionSnapshot[]
+
   mileageHistory: { mileage: number; recordedAt: Date }[]
 }
 
@@ -166,16 +172,25 @@ export async function loadVehicleRecord(
   const treadByPosition = new Map<string, WearReading[]>()
   const brakeReadings: WearReading[] = []
   const treadSeries: VehicleRecord['wear']['treadSeries'] = []
+  const inspectionHistory: InspectionSnapshot[] = []
 
   for (const inspection of inspectionRows) {
     if (inspection.mileage === null) continue
     const recordedAt = inspection.completedAt ?? inspection.createdAt
     const byPosition: Record<string, number> = {}
+    const snapshotItems: InspectionSnapshot['items'] = []
 
     for (const item of itemsByInspection.get(inspection.id) ?? []) {
       if (item.measurementValue === null) continue
       const value = num(item.measurementValue)
       const reading: WearReading = { mileage: inspection.mileage, value, recordedAt }
+      snapshotItems.push({
+        itemKey: item.itemKey,
+        componentGroupKey: item.componentGroupKey,
+        value,
+        unit: item.measurementUnit,
+        position: item.wheelPosition,
+      })
 
       if (item.componentGroupKey === 'TIRES' && item.wheelPosition) {
         treadByPosition.set(item.wheelPosition, [
@@ -189,6 +204,9 @@ export async function loadVehicleRecord(
     }
     if (Object.keys(byPosition).length > 0) {
       treadSeries.push({ mileage: inspection.mileage, recordedAt, byPosition })
+    }
+    if (snapshotItems.length > 0) {
+      inspectionHistory.push({ mileage: inspection.mileage, recordedAt, items: snapshotItems })
     }
   }
 
@@ -288,6 +306,7 @@ export async function loadVehicleRecord(
       parkIt: r.parkIt,
     })),
 
+    inspectionHistory,
     wear: {
       tires: predictWorstCorner(treadByPosition, TIRE_THRESHOLDS, avgMilesPerDay),
       brakes: predictWear(brakeReadings, BRAKE_THRESHOLDS, avgMilesPerDay),

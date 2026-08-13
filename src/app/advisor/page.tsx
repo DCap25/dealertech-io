@@ -51,7 +51,10 @@ export default async function AdvisorPage() {
           <nav className="flex gap-3 text-sm text-neutral-500">
             <Link href="/drive" className="hover:underline">Prep sheets</Link>
             <Link href="/customers" className="hover:underline">Customers</Link>
-            <Link href="/bdc" className="hover:underline">BDC worklist</Link>
+            <Link href="/follow-up" className="hover:underline">Follow-ups</Link>
+            <Link href="/advisor/scorecard" className="font-semibold hover:underline">
+              My scorecard
+            </Link>
           </nav>
         </div>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">My day</h1>

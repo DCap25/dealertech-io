@@ -281,6 +281,11 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
       type: 'MAINTENANCE_DUE',
       title: interval.description,
       detail,
+      // The advisor version asks them to confirm history — fine to read, not
+      // fine to hand to the customer on a tablet.
+      customerDetail: !hasRecord
+        ? `Recommended at ${dueAt.toLocaleString()} miles.`
+        : detail,
       componentGroupKey: interval.componentGroupKey,
       estimatedAmount: interval.estimatedAmount,
       customerOutOfPocket: determination.customerOutOfPocket,
@@ -393,6 +398,9 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
     vehicle,
     appointment: input.appointment,
     warranty,
+    contracts: input.contracts,
+    prepaidEntitlements: input.prepaidEntitlements,
+    inspectionHistory: input.inspectionHistory,
     projectedMileage,
     opportunities,
     totals: {

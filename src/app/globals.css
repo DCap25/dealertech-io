@@ -3,11 +3,16 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --surface: #ffffff;
+  --surface-muted: #fafafa;
+  --border: #e5e5e5;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -16,6 +21,11 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    /* Slightly lifted from the page so cards read as physical objects under
+       shop lighting, where contrast is already poor. */
+    --surface: #111111;
+    --surface-muted: #171717;
+    --border: #262626;
   }
 }
 
@@ -27,3 +37,72 @@ body {
      of loading. */
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
+
+/* ---------------------------------------------------------------------------
+   Prep sheet micro-interactions.
+   Plain CSS rather than an animation library — the whole vocabulary is a
+   handful of keyframes, and the drive runs on tablets where bundle size and
+   jank matter more than expressiveness.
+   --------------------------------------------------------------------------- */
+
+@keyframes ring-draw {
+  from { stroke-dashoffset: var(--ring-circumference); }
+  to   { stroke-dashoffset: var(--ring-offset); }
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes card-accept {
+  0%   { transform: none; }
+  35%  { transform: translateX(10px) scale(1.015); }
+  100% { opacity: 0; transform: translateX(90px) scale(0.94); }
+}
+
+@keyframes card-decline {
+  0%   { transform: none; }
+  35%  { transform: translateX(-8px); }
+  100% { opacity: 0; transform: translateX(-70px) scale(0.94); }
+}
+
+@keyframes card-skip {
+  to { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes total-bump {
+  0%, 100% { transform: none; }
+  40%      { transform: scale(1.11); }
+}
+
+@keyframes expand-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.ring-animate circle[data-progress] {
+  animation: ring-draw 900ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.card-enter        { animation: card-in 320ms cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.card-exit-accept  { animation: card-accept 420ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+.card-exit-decline { animation: card-decline 360ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+.card-exit-skip    { animation: card-skip 260ms ease-out forwards; }
+.total-bump        { animation: total-bump 420ms cubic-bezier(0.16, 1, 0.3, 1); }
+.expand-in         { animation: expand-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* Respect the system setting — a service drive is a busy, noisy place and
+   some people genuinely cannot tolerate motion. */
+@media (prefers-reduced-motion: reduce) {
+  .ring-animate circle[data-progress],
+  .card-enter, .card-exit-accept, .card-exit-decline, .card-exit-skip,
+  .total-bump, .expand-in {
+    animation: none !important;
+  }
+  .card-exit-accept, .card-exit-decline, .card-exit-skip { opacity: 0; }
+}
+
+/* Touch targets on the drive. An advisor is standing, holding a tablet, often
+   wearing gloves — 44px is the floor, not the goal. */
+.touch-target { min-height: 44px; min-width: 44px; }

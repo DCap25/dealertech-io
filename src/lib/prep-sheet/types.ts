@@ -32,6 +32,12 @@ export interface Opportunity {
 
   /** What the advisor should actually say. A task without one is just a chore. */
   talkTrack: string
+  /**
+   * Wording safe to show the customer, when `detail` carries instructions
+   * meant for the advisor. Turning the tablet around must never expose
+   * "confirm history with the customer".
+   */
+  customerDetail?: string
   /** Row this came from — declined service, entitlement, recall campaign. */
   sourceId?: string
 }
@@ -115,6 +121,19 @@ export interface PrepSheet {
   vehicle: PrepSheetVehicle
   appointment: PrepSheetInput['appointment']
   warranty: WarrantySnapshot
+  /**
+   * Passed straight through so the UI can render the products a customer owns
+   * alongside factory warranty. Data only — no decision is made from it here;
+   * the coverage engine remains the sole authority on who pays.
+   */
+  contracts: Contract[]
+  prepaidEntitlements: (PrepaidEntitlement & { label: string })[]
+  /**
+   * Raw measurement history, passed straight through so the UI can chart the
+   * same series the wear engine fitted. Data only — the engine remains the
+   * sole authority on rates and projections.
+   */
+  inspectionHistory: InspectionSnapshot[]
   /** Odometer projected to the appointment date, not the last known reading. */
   projectedMileage: number
   opportunities: Opportunity[]

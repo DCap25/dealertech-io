@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm'
+import { addDays } from 'date-fns'
 import { getDb, schema } from '@/db/client'
 import { displayDetail } from './run'
 import type { CadenceTrigger } from './types'
@@ -28,6 +29,11 @@ export interface WorklistItem {
   visitCount: number
   lifetimeSpend: number
   lastVisitAt: Date | null
+
+  /** Role the generating rule assigns to — advisor or BDC. */
+  assignToRole: string | null
+  /** TCPA: a text may only be offered where consent is on file. */
+  smsConsent: boolean
 }
 
 export interface Worklist {
@@ -53,22 +59,32 @@ export async function loadWorklist(
   storeId: string,
   asOf: Date = new Date(),
   trigger?: CadenceTrigger,
+  /**
+   * How far ahead to include not-yet-due tasks. Zero keeps the historical
+   * behaviour — everything due now or overdue and nothing else.
+   */
+  lookaheadDays = 0,
 ): Promise<Worklist> {
   const db = getDb()
+  const horizon = lookaheadDays > 0 ? addDays(asOf, lookaheadDays) : asOf
 
   const rows = await db
     .select({
       task: schema.cadenceTasks,
       customer: schema.customers,
       vehicle: schema.vehicles,
+      // The rule carries the ownership, so a worklist can split advisor work
+      // from BDC work without the task table duplicating it.
+      assignToRole: schema.cadenceRules.assignToRole,
     })
     .from(schema.cadenceTasks)
     .innerJoin(schema.customers, eq(schema.cadenceTasks.customerId, schema.customers.id))
     .leftJoin(schema.vehicles, eq(schema.cadenceTasks.vehicleId, schema.vehicles.id))
+    .leftJoin(schema.cadenceRules, eq(schema.cadenceTasks.cadenceRuleId, schema.cadenceRules.id))
     .where(and(
       eq(schema.cadenceTasks.storeId, storeId),
       inArray(schema.cadenceTasks.status, ['PENDING', 'IN_PROGRESS']),
-      lte(schema.cadenceTasks.dueAt, asOf),
+      lte(schema.cadenceTasks.dueAt, horizon),
       ...(trigger ? [eq(schema.cadenceTasks.trigger, trigger)] : []),
     ))
     .orderBy(asc(schema.cadenceTasks.priority), desc(schema.cadenceTasks.estimatedValue))
@@ -102,6 +118,8 @@ export async function loadWorklist(
       visitCount: r.customer.visitCount,
       lifetimeSpend: num(r.customer.lifetimeSpend),
       lastVisitAt: r.customer.lastVisitAt,
+      assignToRole: r.assignToRole,
+      smsConsent: r.customer.smsConsent,
     }))
 
   const byTriggerMap = new Map<CadenceTrigger, { count: number; value: number }>()
