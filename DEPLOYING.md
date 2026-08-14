@@ -54,7 +54,27 @@ URL** and **Redirect URLs**. Sign-in sets a cookie on the domain that served
 the request, so without this you will sign in and bounce straight back to the
 login page.
 
-## 4. After the first deploy
+## 4. Storage for photographed documents
+
+```bash
+npm run storage:provision
+```
+
+Creates the private `customer-documents` bucket that photographed service
+contracts are stored in. Run once per Supabase project — it is idempotent, and
+it warns if the bucket already exists and is public.
+
+Deliberately a setup step rather than something the upload path does on demand:
+creating infrastructure from inside a request means every advisor taking a
+photo carries the permission to create buckets, and a first-run failure
+surfaces to them as "could not store the photo" instead of to whoever set the
+project up.
+
+The bucket stays private. Documents are read back through short-lived signed
+URLs, so it never needs to be public — and a customer's contract carries their
+name, VIN and often a signature.
+
+## 5. After the first deploy
 
 The database is already seeded and shared with local development, so there is
 nothing to run. Sign in with any of the seeded accounts.

@@ -108,7 +108,7 @@ export const contractStatusEnum = pgEnum('contract_status', [
 ])
 
 export const contractSourceEnum = pgEnum('contract_source', [
-  'MANUAL', 'CSV_IMPORT', 'PDF_EXTRACTION', 'DMS',
+  'MANUAL', 'CSV_IMPORT', 'PDF_EXTRACTION', 'PHOTO_EXTRACTION', 'DMS',
 ])
 
 export const confidenceEnum = pgEnum('confidence', ['HIGH', 'MEDIUM', 'LOW'])

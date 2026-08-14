@@ -27,7 +27,25 @@ export type DeductibleType = 'PER_VISIT' | 'PER_REPAIR' | 'NONE'
 export type ContractStatus = 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'EXHAUSTED'
 
 /** Where the contract record came from — drives how much we trust it. */
-export type ContractSource = 'MANUAL' | 'CSV_IMPORT' | 'PDF_EXTRACTION' | 'DMS'
+export type ContractSource =
+  | 'MANUAL'
+  | 'CSV_IMPORT'
+  | 'PDF_EXTRACTION'
+  | 'PHOTO_EXTRACTION'
+  | 'DMS'
+
+/**
+ * Sources where a machine did the reading.
+ *
+ * Grouped rather than listed at each call site: the trust rules below key off
+ * this, and a new extraction source added later must inherit them by default
+ * rather than by somebody remembering to.
+ */
+export const MACHINE_READ_SOURCES: ContractSource[] = ['PDF_EXTRACTION', 'PHOTO_EXTRACTION']
+
+export function isMachineRead(source: ContractSource): boolean {
+  return MACHINE_READ_SOURCES.includes(source)
+}
 
 export interface Contract {
   id: string

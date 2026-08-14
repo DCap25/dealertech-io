@@ -257,6 +257,7 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
     <div className="space-y-4 pb-28">
       <OwnershipRow
         summary={ownership}
+        vehicleId={sheet.vehicle.id}
         onAskCopilot={(product) => {
           setCopilotTarget({
             coverageLabel: `${product.label} — ${product.adminCompany}`,

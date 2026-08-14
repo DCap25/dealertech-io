@@ -1,6 +1,7 @@
 import { addMonths, differenceInCalendarMonths, isAfter } from 'date-fns'
 import { getComponentGroup, resolveComponentGroup, type ComponentGroup } from '@/lib/taxonomy'
 import { computeWarrantySnapshot, type TermStatus, type WarrantySnapshot } from '@/lib/warranty'
+import { isMachineRead } from './types'
 import type {
   Confidence,
   Contract,
@@ -149,7 +150,7 @@ function findEntitlement(
 
 /** Contracts whose provenance is shaky must not produce confident answers. */
 function contractTrustPenalty(contract: Contract): Confidence {
-  if (contract.source === 'PDF_EXTRACTION' && !contract.verifiedAt) return 'LOW'
+  if (isMachineRead(contract.source) && !contract.verifiedAt) return 'LOW'
   if (contract.extractionConfidence === 'LOW') return 'LOW'
   if (contract.extractionConfidence === 'MEDIUM') return 'MEDIUM'
   return 'HIGH'
@@ -437,7 +438,7 @@ export function evaluateCoverage(input: CoverageInput): CoverageDetermination {
       continue
     }
     confidence = downgrade(confidence, contractTrustPenalty(vsc))
-    if (vsc.source === 'PDF_EXTRACTION' && !vsc.verifiedAt) {
+    if (isMachineRead(vsc.source) && !vsc.verifiedAt) {
       requiredActions.push(
         'This contract was read from a document and has not been verified by a human. Confirm the terms before relying on them.',
       )

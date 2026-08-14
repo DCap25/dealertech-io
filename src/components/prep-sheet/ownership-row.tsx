@@ -2,7 +2,24 @@
 
 import { useState } from 'react'
 import { Card } from '@/components/ui/primitives'
+import Link from 'next/link'
 import type { OwnedProduct, OwnershipSummary } from '@/lib/prep-sheet/ownership'
+
+/**
+ * A customer standing at the podium is the one moment they have the paperwork
+ * on them, or on their phone. Every visit after this one is a visit where
+ * somebody has to ask them again.
+ */
+function CaptureLink({ vehicleId }: { vehicleId: string }) {
+  return (
+    <Link
+      href={`/vehicles/${vehicleId}/contract`}
+      className="touch-target mt-3 inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-3.5 py-2 text-xs font-bold transition hover:border-neutral-900 dark:hover:border-neutral-300"
+    >
+      <span aria-hidden>📷</span> Photograph a contract
+    </Link>
+  )
+}
 
 /**
  * What the customer already owns.
@@ -17,9 +34,12 @@ import type { OwnedProduct, OwnershipSummary } from '@/lib/prep-sheet/ownership'
  */
 export function OwnershipRow({
   summary,
+  vehicleId,
   onAskCopilot,
 }: {
   summary: OwnershipSummary
+  /** Enables the capture link. Omit and the link is not shown. */
+  vehicleId?: string
   onAskCopilot?: (product: OwnedProduct) => void
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null)
@@ -34,6 +54,7 @@ export function OwnershipRow({
         <p className="mt-1.5 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
           {summary.emptyNote}
         </p>
+        {vehicleId && <CaptureLink vehicleId={vehicleId} />}
       </Card>
     )
   }
@@ -44,14 +65,31 @@ export function OwnershipRow({
         <p className="text-xs font-bold uppercase tracking-[0.15em] text-neutral-500">
           What they own
         </p>
-        <p className="text-[11px] font-semibold text-neutral-500">
-          {summary.activeCount} active
-          {summary.expiringCount > 0 && (
-            <span className="ml-2 text-amber-700 dark:text-amber-400">
-              {summary.expiringCount} expiring
-            </span>
+        <div className="flex items-center gap-3">
+          <p className="text-[11px] font-semibold text-neutral-500">
+            {summary.activeCount} active
+            {summary.expiringCount > 0 && (
+              <span className="ml-2 text-amber-700 dark:text-amber-400">
+                {summary.expiringCount} expiring
+              </span>
+            )}
+          </p>
+          {/*
+            Quiet here, prominent on the empty state. A car with a prepaid plan
+            on file may still have a tire & wheel policy nobody has recorded —
+            what is listed is what we know about, not what they bought.
+          */}
+          {vehicleId && (
+            <Link
+              href={`/vehicles/${vehicleId}/contract`}
+              title="Photograph a contract"
+              className="touch-target inline-flex items-center rounded-lg px-2 py-1 text-xs font-semibold text-neutral-500 transition hover:text-neutral-900 dark:hover:text-white"
+            >
+              <span aria-hidden>📷</span>
+              <span className="ml-1.5 hidden sm:inline">Add from photo</span>
+            </Link>
           )}
-        </p>
+        </div>
       </div>
 
       <ul className="divide-y divide-[var(--border)]">

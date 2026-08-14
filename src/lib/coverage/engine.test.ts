@@ -524,3 +524,21 @@ describe('goodwill prompting', () => {
     expect(result.requiredActions.join(' ')).not.toContain('GOODWILL CANDIDATE')
   })
 })
+
+describe('machine-read contracts', () => {
+  it('treats a photographed contract with the same suspicion as a PDF one', () => {
+    // The rule was written when PDF_EXTRACTION was the only machine-read
+    // source. A new source must inherit it by default, not by somebody
+    // remembering to add it at two call sites.
+    const result = evaluate({ contracts: [vsc({ source: 'PHOTO_EXTRACTION' })] })
+    expect(result.confidence).toBe('LOW')
+    expect(result.requiredActions.join(' ')).toMatch(/read from a document/i)
+  })
+
+  it('stops warning once a human has verified it', () => {
+    const result = evaluate({
+      contracts: [vsc({ source: 'PHOTO_EXTRACTION', verifiedAt: new Date('2026-08-12') })],
+    })
+    expect(result.requiredActions.join(' ')).not.toMatch(/read from a document/i)
+  })
+})
