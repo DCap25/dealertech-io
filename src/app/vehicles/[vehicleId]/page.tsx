@@ -7,6 +7,7 @@ import type { TermStatus } from '@/lib/warranty'
 import type { WearPrediction } from '@/lib/prep-sheet'
 import { Empty, money, Panel, shortDate, Stat } from '../../records-ui'
 import { demoNow } from '@/lib/demo-day'
+import { requireUser } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,6 +116,10 @@ export default async function VehiclePage({
 }: {
   params: Promise<{ vehicleId: string }>
 }) {
+  // Enforced here, not only in the middleware. The middleware is a separate
+  // deploy artifact on the host, and this page must not serve a dealership
+  // to an anonymous request even if it never runs.
+  await requireUser()
   const { vehicleId } = await params
   const store = await getDefaultStore()
   if (!store) notFound()

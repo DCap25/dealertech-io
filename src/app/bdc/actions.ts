@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { addDays } from 'date-fns'
 import { eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+import { requireUser } from '@/lib/auth/session'
 
 export type Outcome =
   | 'APPOINTMENT_SET'
@@ -31,6 +32,9 @@ export async function logOutcome(
   _previous: OutcomeState,
   formData: FormData,
 ): Promise<OutcomeState> {
+  // A server action is a POST endpoint whether or not a page ever
+  // rendered, so the guard belongs here and not only in the middleware.
+  await requireUser()
   const taskId = String(formData.get('taskId') ?? '')
   const outcome = String(formData.get('outcome') ?? '') as Outcome
   const notes = String(formData.get('notes') ?? '').trim()
@@ -124,6 +128,9 @@ export async function logOutcome(
 
 /** Pushes a task out without recording a contact attempt. */
 export async function snoozeTask(_previous: OutcomeState, formData: FormData): Promise<OutcomeState> {
+  // A server action is a POST endpoint whether or not a page ever
+  // rendered, so the guard belongs here and not only in the middleware.
+  await requireUser()
   const taskId = String(formData.get('taskId') ?? '')
   const days = Number(formData.get('days') ?? 7)
   if (!taskId) return { error: 'Missing task.' }

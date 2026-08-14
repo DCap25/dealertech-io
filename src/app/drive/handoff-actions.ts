@@ -5,6 +5,7 @@ import { buildHandOffPayload } from '@/lib/prep-sheet/command-center'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import { getDmsAdapter } from '@/lib/dms/registry'
 import { demoNow } from '@/lib/demo-day'
+import { requireUser } from '@/lib/auth/session'
 
 /**
  * Push the hand-off to whatever DMS is configured.
@@ -33,6 +34,10 @@ export async function pushHandOffForVisit(
   appointmentId: string,
   decisions: Record<string, OpportunityDecision>,
 ): Promise<HandOffPushState> {
+  // A server action is a POST endpoint whether or not a page ever rendered,
+  // so the guard belongs here rather than only on the surface that calls it.
+  await requireUser()
+
   const adapter = getDmsAdapter()
   const vendor = adapter.capabilities.vendor
 

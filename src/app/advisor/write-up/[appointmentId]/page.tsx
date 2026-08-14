@@ -6,6 +6,7 @@ import { loadDriveDay, getDefaultStore } from '@/lib/prep-sheet/load'
 import { money } from '../../../records-ui'
 import { WriteUpForm, type MenuItem } from './write-up-form'
 import { demoNow } from '@/lib/demo-day'
+import { requireUser } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,6 +19,10 @@ export default async function WriteUpPage({
 }: {
   params: Promise<{ appointmentId: string }>
 }) {
+  // Enforced here, not only in the middleware. The middleware is a separate
+  // deploy artifact on the host, and this page must not serve a dealership
+  // to an anonymous request even if it never runs.
+  await requireUser()
   const { appointmentId } = await params
   const store = await getDefaultStore()
   if (!store) notFound()

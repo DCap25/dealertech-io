@@ -6,6 +6,7 @@ import type { TermStatus } from '@/lib/warranty'
 import { money, Panel, shortDate } from '../../../records-ui'
 import { AddRecommendation, CloseRoButton, PendingLine } from './sell-call'
 import { demoNow } from '@/lib/demo-day'
+import { requireUser } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,6 +35,10 @@ export default async function RepairOrderPage({
 }: {
   params: Promise<{ roId: string }>
 }) {
+  // Enforced here, not only in the middleware. The middleware is a separate
+  // deploy artifact on the host, and this page must not serve a dealership
+  // to an anonymous request even if it never runs.
+  await requireUser()
   const { roId } = await params
   const store = await getDefaultStore()
   if (!store) notFound()

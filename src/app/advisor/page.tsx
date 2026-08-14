@@ -4,6 +4,7 @@ import { loadAdvisorWorkspace } from '@/lib/advisor/load'
 import { getDefaultStore } from '@/lib/prep-sheet/load'
 import { money } from '../records-ui'
 import { demoNow } from '@/lib/demo-day'
+import { requireUser } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +27,10 @@ function timeOf(d: Date): string {
 }
 
 export default async function AdvisorPage() {
+  // Enforced here, not only in the middleware. The middleware is a separate
+  // deploy artifact on the host, and this page must not serve a dealership
+  // to an anonymous request even if it never runs.
+  await requireUser()
   const store = await getDefaultStore()
   if (!store) {
     return (

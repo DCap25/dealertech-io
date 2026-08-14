@@ -3,6 +3,7 @@ import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { searchCustomers } from '@/lib/records/customer'
 import { getDefaultStore } from '@/lib/prep-sheet/load'
 import { formatPhone, money, monthYear } from '../records-ui'
+import { requireUser } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +16,10 @@ export default async function CustomersPage({
 }: {
   searchParams: Promise<{ q?: string }>
 }) {
+  // Enforced here, not only in the middleware. The middleware is a separate
+  // deploy artifact on the host, and this page must not serve a dealership
+  // to an anonymous request even if it never runs.
+  await requireUser()
   const { q } = await searchParams
   const store = await getDefaultStore()
 

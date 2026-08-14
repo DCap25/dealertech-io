@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { and, eq, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { nextRoNumber } from '@/lib/advisor/load'
+import { requireUser } from '@/lib/auth/session'
 
 export interface ActionState {
   ok?: boolean
@@ -27,6 +28,9 @@ export async function openRepairOrder(
   _previous: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  // A server action is a POST endpoint whether or not a page ever
+  // rendered, so the guard belongs here and not only in the middleware.
+  await requireUser()
   const appointmentId = String(formData.get('appointmentId') ?? '')
   const mileage = num(formData.get('mileage'))
   const concerns = String(formData.get('concerns') ?? '').trim()
@@ -125,6 +129,9 @@ export async function addRecommendation(
   _previous: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  // A server action is a POST endpoint whether or not a page ever
+  // rendered, so the guard belongs here and not only in the middleware.
+  await requireUser()
   const repairOrderId = String(formData.get('repairOrderId') ?? '')
   const opCodeId = String(formData.get('opCodeId') ?? '')
   if (!repairOrderId || !opCodeId) return { error: 'Pick an operation.' }
@@ -175,6 +182,9 @@ export async function recordLineDecision(
   _previous: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  // A server action is a POST endpoint whether or not a page ever
+  // rendered, so the guard belongs here and not only in the middleware.
+  await requireUser()
   const lineId = String(formData.get('lineId') ?? '')
   const decision = String(formData.get('decision') ?? '')
   const reason = String(formData.get('reason') ?? '').trim()
@@ -235,6 +245,9 @@ export async function closeRepairOrder(
   _previous: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  // A server action is a POST endpoint whether or not a page ever
+  // rendered, so the guard belongs here and not only in the middleware.
+  await requireUser()
   const repairOrderId = String(formData.get('repairOrderId') ?? '')
   if (!repairOrderId) return { error: 'Missing repair order.' }
 

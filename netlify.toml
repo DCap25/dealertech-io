@@ -1,0 +1,65 @@
+# Netlify build configuration.
+#
+# The Next.js runtime itself is not configured here on purpose: Netlify
+# installs and updates the adapter on every build, and pinning it means
+# inheriting whichever version was current the day someone pinned it.
+#
+# See DEPLOYING.md for the environment variables this needs and for the
+# things that are deliberately *not* automated.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  # Match the local toolchain. Next 16 needs 20.9+; 22 is what this is
+  # developed and tested against.
+  NODE_VERSION = "22"
+
+# Deploy previews and branch builds would each need their own database and
+# their own Supabase redirect URLs to be worth anything. Until that exists,
+# only the production branch builds.
+[context.deploy-preview]
+  command = "echo 'Deploy previews are disabled — see DEPLOYING.md' && exit 1"
+
+[context.branch-deploy]
+  command = "echo 'Branch deploys are disabled — see DEPLOYING.md' && exit 1"
+
+# The workspace is behind a session; nothing in it should ever be indexed or
+# cached by an intermediary. The marketing site sets its own headers via the
+# framework and is unaffected.
+[[headers]]
+  for = "/drive/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/customers/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/vehicles/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/manager"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/advisor/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/follow-up"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"

@@ -13,13 +13,66 @@ import * as schema from './schema'
 
 let cached: ReturnType<typeof drizzle<typeof schema>> | undefined
 
+/**
+ * Supabase's transaction pooler (Supavisor), which is what a serverless
+ * deployment has to talk to.
+ *
+ * A direct connection holds a real Postgres backend for the life of the
+ * socket. That is fine for one long-lived `next start` process and fatal for
+ * functions, where every concurrent invocation is its own instance: the
+ * project's connection limit is reached long before its request limit is, and
+ * the symptom is intermittent "remaining connection slots are reserved"
+ * errors rather than anything that looks like a capacity problem.
+ */
+function isTransactionPooler(url: string): boolean {
+  return url.includes('pooler.supabase.com') || url.includes(':6543')
+}
+
+/** Netlify, Vercel, Lambda — anywhere the process does not outlive the request. */
+function isServerless(): boolean {
+  return Boolean(
+    process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL,
+  )
+}
+
 export function getDb(connectionString?: string) {
   const url = connectionString ?? process.env.DATABASE_URL
   if (!url) {
     throw new Error('DATABASE_URL is not set. Copy .env.example to .env.local and fill it in.')
   }
+
   if (!cached || connectionString) {
-    const client = postgres(url, { max: 5, onnotice: () => {} })
+    const pooled = isTransactionPooler(url)
+
+    if (isServerless() && !pooled && !connectionString) {
+      // Loud, once, at startup — not an exception. A deploy that refuses to
+      // serve is worse than one that serves and warns, and the failure this
+      // predicts is intermittent enough to be hard to attribute later.
+      console.warn(
+        '[db] DATABASE_URL is a direct Postgres connection but this is a serverless runtime. ' +
+          'Use the Supabase transaction pooler (port 6543) or expect connection-slot exhaustion.',
+      )
+    }
+
+    const client = postgres(url, {
+      /**
+       * One connection per instance when pooling happens upstream. Anything
+       * higher multiplies by the number of concurrent function instances,
+       * which is exactly what the pooler exists to prevent.
+       */
+      max: pooled || isServerless() ? 1 : 5,
+      /**
+       * Transaction pooling hands a different backend to each statement, so a
+       * prepared statement created on one is not there for the next. postgres.js
+       * uses them by default; leaving that on produces "prepared statement
+       * already exists" under load and nothing at all when idle.
+       */
+      prepare: pooled ? false : undefined,
+      // Serverless invocations are short; do not let a socket outlive the
+      // instance holding it.
+      idle_timeout: isServerless() ? 20 : undefined,
+      onnotice: () => {},
+    })
     const db = drizzle(client, { schema })
     if (!connectionString) cached = db
     return db

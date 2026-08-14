@@ -3,6 +3,7 @@ import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { loadDriveDay, getDefaultStore } from '@/lib/prep-sheet/load'
 import { AlertList, CoverageChips, money, PayerBadge, timeOf, UrgencyBadge } from './ui'
 import { demoNow } from '@/lib/demo-day'
+import { requireUser } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +16,10 @@ export default async function DrivePage({
 }: {
   searchParams: Promise<{ date?: string }>
 }) {
+  // Enforced here, not only in the middleware. The middleware is a separate
+  // deploy artifact on the host, and this page must not serve a dealership
+  // to an anonymous request even if it never runs.
+  await requireUser()
   const params = await searchParams
   const store = await getDefaultStore()
 

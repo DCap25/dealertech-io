@@ -6,6 +6,7 @@ import {
 import type { CopilotIntent, CopilotRequest } from '@/lib/copilot'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import { demoNow } from '@/lib/demo-day'
+import { getCurrentUser } from '@/lib/auth/session'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -35,6 +36,19 @@ function str(v: unknown, max = MAX_INPUT_CHARS): string | undefined {
 }
 
 export async function POST(req: Request) {
+  /**
+   * 401 rather than a redirect — this is an API route, and a browser fetch
+   * that silently followed a redirect to the login page would surface as a
+   * confusing parse error in the panel rather than "you are signed out".
+   *
+   * Checked here and not only in the middleware: the middleware is a separate
+   * deploy artifact on the host, and this endpoint returns a customer's
+   * coverage detail and spends model tokens.
+   */
+  if (!(await getCurrentUser())) {
+    return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
+  }
+
   let body: Body
   try {
     body = (await req.json()) as Body

@@ -5,6 +5,7 @@ import { getDefaultStore } from '@/lib/prep-sheet/load'
 import {
   ConsentBadge, Empty, formatPhone, money, Panel, shortDate, Stat, VehicleLink,
 } from '../../records-ui'
+import { requireUser } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +26,10 @@ export default async function CustomerPage({
 }: {
   params: Promise<{ customerId: string }>
 }) {
+  // Enforced here, not only in the middleware. The middleware is a separate
+  // deploy artifact on the host, and this page must not serve a dealership
+  // to an anonymous request even if it never runs.
+  await requireUser()
   const { customerId } = await params
   const store = await getDefaultStore()
   if (!store) notFound()
