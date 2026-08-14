@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { Card, money } from '@/components/ui/primitives'
 import { buildHandoffLine, buildHandoffNote } from '@/lib/prep-sheet/command-center'
-import { pushHandOffForVisit, type HandOffPushState } from '@/app/drive/handoff-actions'
+import { handOffHistory, pushHandOffForVisit, type HandOffPushState } from '@/app/drive/handoff-actions'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
+import { describeReceipt, type DecisionSource, type HandOffReceipt } from '@/lib/dms/handoff-record'
 import type { PrepSheet } from '@/lib/prep-sheet'
 
 /**
@@ -18,15 +19,43 @@ import type { PrepSheet } from '@/lib/prep-sheet'
 export function HandoffPanel({
   sheet,
   decisions,
+  decisionSources = {},
+  presentedOn = null,
   onClose,
 }: {
   sheet: PrepSheet
   decisions: Record<string, OpportunityDecision>
+  /** Who chose each line — the advisor, or the customer on a tablet. */
+  decisionSources?: Record<string, DecisionSource>
+  /** The tablet it was presented on, when it was. */
+  presentedOn?: string | null
   onClose: () => void
 }) {
   const [copied, setCopied] = useState<string | null>(null)
   const [push, setPush] = useState<HandOffPushState | null>(null)
   const [sending, startSending] = useTransition()
+  /**
+   * Pushes already made for this visit. Read on open, so a page reload does
+   * not lose the record of whether the DMS was ever told.
+   */
+  const [history, setHistory] = useState<HandOffReceipt[]>([])
+
+  const [historyError, setHistoryError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!sheet.appointment) return
+    // Caught rather than voided. A silently rejected promise here means the
+    // panel claims nothing was ever sent, which is the most misleading thing
+    // this screen could say.
+    handOffHistory(sheet.appointment.id)
+      .then((rows) => {
+        setHistory(rows)
+        setHistoryError(null)
+      })
+      .catch((error: unknown) => {
+        setHistoryError(error instanceof Error ? error.message : 'Could not load previous sends.')
+      })
+  }, [sheet.appointment, push])
 
   const accepted = sheet.opportunities.filter((o) => decisions[o.id] === 'ACCEPTED')
   const note = buildHandoffNote(sheet, decisions)
@@ -76,7 +105,14 @@ export function HandoffPanel({
               disabled={sending}
               onClick={() =>
                 startSending(async () => {
-                  setPush(await pushHandOffForVisit(sheet.appointment!.id, decisions))
+                  setPush(
+                    await pushHandOffForVisit(
+                      sheet.appointment!.id,
+                      decisions,
+                      decisionSources,
+                      presentedOn,
+                    ),
+                  )
                 })
               }
               className="touch-target flex-1 rounded-xl bg-neutral-900 px-4 py-3.5 text-sm font-bold text-white transition active:scale-[0.98] disabled:opacity-60 dark:bg-white dark:text-neutral-900"
@@ -94,6 +130,52 @@ export function HandoffPanel({
         </div>
 
         {push && <PushResult result={push} />}
+
+        {/*
+          What was already sent, whether or not this session sent it. The
+          question an advisor asks when a customer rings about work that never
+          got done is "did this reach the DMS?", and before this it had no
+          answer after a page reload.
+        */}
+        {historyError && (
+          <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            Could not check what was already sent — {historyError}
+          </p>
+        )}
+
+        {history.length > 0 && (
+          <div className="mt-5">
+            <p className="text-xs font-bold uppercase tracking-[0.15em] text-neutral-500">
+              Sent for this visit
+            </p>
+            <ul className="mt-2 space-y-2">
+              {history.map((receipt) => (
+                <li key={receipt.id}>
+                  <Card
+                    className={`px-4 py-3 ${
+                      receipt.status === 'FAILED'
+                        ? 'border-rose-300 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/50'
+                        : ''
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <p className="text-sm font-semibold">{describeReceipt(receipt)}</p>
+                      <p className="text-xs text-neutral-500">
+                        {receipt.acceptedCount} line{receipt.acceptedCount === 1 ? '' : 's'}
+                        {receipt.attempts > 1 && ` · ${receipt.attempts} attempts`}
+                      </p>
+                    </div>
+                    {receipt.status === 'FAILED' && (
+                      <p className="mt-1 text-xs text-rose-800 dark:text-rose-300">
+                        {receipt.message}
+                      </p>
+                    )}
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {accepted.length > 0 && (
           <>

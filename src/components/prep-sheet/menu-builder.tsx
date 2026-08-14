@@ -38,6 +38,7 @@ export function MenuBuilder({
   onPrint,
   onCancel,
   onCustomerDecision,
+  onPresented,
 }: {
   sheet: PrepSheet
   selection: MenuSelection
@@ -47,6 +48,7 @@ export function MenuBuilder({
   onCancel: () => void
   /** Mirrors a customer's taps from a paired tablet onto this screen. */
   onCustomerDecision: (id: string, decision: OpportunityDecision) => void
+  onPresented?: (deviceName: string | null) => void
 }) {
   const all = useMemo(() => presentableItems(sheet.opportunities), [sheet.opportunities])
   const menu = useMemo(() => buildMenu(sheet.opportunities, selection), [sheet.opportunities, selection])
@@ -201,6 +203,7 @@ export function MenuBuilder({
             appointmentId={sheet.appointment?.id ?? null}
             includedIds={selection.includedIds}
             onCustomerDecision={onCustomerDecision}
+            onPresented={onPresented}
           />
         </div>
 

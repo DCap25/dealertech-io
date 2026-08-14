@@ -26,10 +26,13 @@ export function SendToTablet({
   appointmentId,
   includedIds,
   onCustomerDecision,
+  onPresented,
 }: {
   appointmentId: string | null
   includedIds: string[]
   onCustomerDecision: (id: string, decision: OpportunityDecision) => void
+  /** Names the tablet a menu went to, so the DMS note can say where. */
+  onPresented?: (deviceName: string | null) => void
 }) {
   const [devices, setDevices] = useState<Device[] | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -115,7 +118,9 @@ export function SendToTablet({
             setBusy(false)
             if (result.status === 'SENT' && result.sessionId) {
               setSessionId(result.sessionId)
-              setSentTo(result.deviceName ?? device.name ?? 'the tablet')
+              const where = result.deviceName ?? device.name ?? 'the tablet'
+              setSentTo(where)
+              onPresented?.(where)
             } else {
               setError(result.message ?? 'Could not send it.')
             }

@@ -23,6 +23,7 @@ import { OpportunityCard } from './opportunity-card'
 import { PresentMenu } from './present-menu'
 import { MenuBuilder } from './menu-builder'
 import { defaultSelection, type MenuSelection } from '@/lib/menu/selection'
+import type { DecisionSource } from '@/lib/dms/handoff-record'
 import { VisitSummaryCard } from './visit-summary-card'
 
 /** How long the exit animation gets before the card leaves the list. */
@@ -112,6 +113,13 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
   const [exiting, setExiting] = useState<Record<string, OpportunityDecision>>({})
   const [pulseKey, setPulseKey] = useState(0)
   /**
+   * Who chose each line. The advisor working the stack, or the customer
+   * tapping on a paired tablet — a distinction that only became real once
+   * tablets existed, and one that belongs in the DMS note.
+   */
+  const [decisionSources, setDecisionSources] = useState<Record<string, DecisionSource>>({})
+  const [presentedOn, setPresentedOn] = useState<string | null>(null)
+  /**
    * Presenting is now two steps: build the menu, then hand it over.
    *
    * 'BUILDING' is the advisor's last look on their own screen; 'PRESENTING' is
@@ -141,6 +149,7 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
     setExiting((prev) => ({ ...prev, [id]: decision }))
     // Totals move immediately; the card catches up when its animation ends.
     setDecisions((prev) => ({ ...prev, [id]: decision }))
+    setDecisionSources((prev) => ({ ...prev, [id]: 'ADVISOR' }))
     setPulseKey((k) => k + 1)
     window.setTimeout(() => {
       setExiting((prev) => {
@@ -162,11 +171,13 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
    */
   function decideFromCustomer(id: string, decision: OpportunityDecision) {
     setDecisions((prev) => ({ ...prev, [id]: decision }))
+    setDecisionSources((prev) => ({ ...prev, [id]: 'CUSTOMER' }))
     setPulseKey((k) => k + 1)
   }
 
   function reset() {
     setDecisions({})
+    setDecisionSources({})
     setExiting({})
     setFinished(false)
     setPulseKey((k) => k + 1)
@@ -251,6 +262,7 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
         onPrint={() => window.print()}
         onCancel={() => setPresenting('NONE')}
         onCustomerDecision={decideFromCustomer}
+        onPresented={setPresentedOn}
       />
     )
   }
@@ -275,7 +287,13 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
    */
   if (handingOff) {
     return (
-      <HandoffPanel sheet={sheet} decisions={decisions} onClose={() => setHandingOff(false)} />
+      <HandoffPanel
+        sheet={sheet}
+        decisions={decisions}
+        decisionSources={decisionSources}
+        presentedOn={presentedOn}
+        onClose={() => setHandingOff(false)}
+      />
     )
   }
 
