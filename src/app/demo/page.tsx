@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { DemoForm } from './demo-form'
 
 export const metadata = {
@@ -7,10 +8,35 @@ export const metadata = {
 
 export default function DemoPage() {
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10">
+    <main className="mkt mx-auto max-w-7xl px-5 py-6 sm:px-6 sm:py-10">
+      {/*
+        A visitor who arrives here from the marketing page used to hit a dead
+        end — no way back, and no way to ask for a walkthrough from the one
+        screen most likely to convince them.
+      */}
+      <nav className="mb-8 flex items-center justify-between gap-4 border-b border-[var(--rule)] pb-4">
+        <Link href="/" className="text-[15px] font-bold tracking-tight">
+          DealerTech<span className="text-[var(--signal)]">.io</span>
+        </Link>
+        <div className="flex items-center gap-4 text-sm">
+          <Link
+            href="/"
+            className="text-[var(--ink-soft)] transition hover:text-[var(--ink)]"
+          >
+            ← Back to the site
+          </Link>
+          <Link
+            href="/#demo"
+            className="touch-target inline-flex items-center rounded-xl bg-[var(--ink)] px-4 py-2 text-sm font-semibold text-[var(--paper)] transition hover:opacity-85"
+          >
+            Book a walkthrough
+          </Link>
+        </div>
+      </nav>
+
       <header className="mb-8 max-w-3xl">
-        <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
-          DealerTech.io · Coverage Arbitration Engine
+        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--signal)]">
+          Coverage arbitration engine
         </p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
           Know who pays before you write the RO.

@@ -106,3 +106,75 @@ body {
 /* Touch targets on the drive. An advisor is standing, holding a tablet, often
    wearing gloves — 44px is the floor, not the goal. */
 .touch-target { min-height: 44px; min-width: 44px; }
+
+/* ---------------------------------------------------------------------------
+   Marketing site.
+
+   Kept out of the workspace styles above on purpose. The drive is a tool
+   someone stares at for nine hours and it should recede; the marketing site
+   has four seconds to say what this is. They want opposite things from
+   contrast, motion and colour.
+   --------------------------------------------------------------------------- */
+
+.mkt {
+  /* Ink is near-black rather than black: at display sizes pure #000 on white
+     vibrates, and the whole page is display sizes. */
+  --ink: #0b0f0e;
+  --ink-soft: #4b5563;
+  --paper: #ffffff;
+  --paper-tint: #f6f7f6;
+  --rule: #e3e6e4;
+  /* One accent, used only for money the customer did not pay — the same
+     meaning it carries everywhere in the product. Borrowing it for decoration
+     would teach visitors the wrong thing before they ever sign in. */
+  --signal: #047857;
+  --signal-soft: #ecfdf5;
+  /* Its opposite, for the half of a comparison that costs the store money. */
+  --danger: #b91c1c;
+  --danger-soft: #fef2f2;
+}
+
+@media (prefers-color-scheme: dark) {
+  .mkt {
+    --ink: #f4f6f5;
+    --ink-soft: #9ca3af;
+    --paper: #080b0a;
+    --paper-tint: #0e1211;
+    --rule: #1f2523;
+    --signal: #34d399;
+    --signal-soft: #052e21;
+    --danger: #fb7185;
+    --danger-soft: #2b0b10;
+  }
+}
+
+.mkt-hero-grid {
+  /* A blueprint grid, faded out toward the bottom so it never competes with
+     the headline sitting on top of it. */
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--rule) 70%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--rule) 70%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 30%, transparent 100%);
+}
+
+/* Reveal on scroll, with no JavaScript.
+
+   `animation-timeline` is not everywhere yet, so the default state is fully
+   visible and the animation is added only where the browser can actually
+   drive it. A visitor on an older browser sees a static page rather than a
+   blank one — the failure mode of the reverse is a site with no content. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .mkt-reveal {
+      animation: mkt-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 5% cover 22%;
+    }
+  }
+}
+
+@keyframes mkt-rise {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: none; }
+}
