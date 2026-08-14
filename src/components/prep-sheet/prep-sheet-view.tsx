@@ -141,6 +141,20 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
     }, EXIT_MS)
   }
 
+  /**
+   * The customer's own taps on the menu.
+   *
+   * Separate from `decide` on purpose. That one is the advisor working the
+   * stack: it fires the card's exit animation and refuses to re-decide an
+   * item, because an advisor moves forward through a list. A customer is
+   * reading and changing their mind, so this one is reversible and moves
+   * nothing on screen behind them.
+   */
+  function decideFromCustomer(id: string, decision: OpportunityDecision) {
+    setDecisions((prev) => ({ ...prev, [id]: decision }))
+    setPulseKey((k) => k + 1)
+  }
+
   function reset() {
     setDecisions({})
     setExiting({})
@@ -200,7 +214,14 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
   const sampleDetermination = undefined // determinations are per-line; see the demo surface
 
   if (presenting) {
-    return <PresentMenu sheet={sheet} decisions={decisions} onClose={() => setPresenting(false)} />
+    return (
+      <PresentMenu
+        sheet={sheet}
+        decisions={decisions}
+        onCustomerDecision={decideFromCustomer}
+        onClose={() => setPresenting(false)}
+      />
+    )
   }
 
   /**
