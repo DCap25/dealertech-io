@@ -1,6 +1,8 @@
 import Link from 'next/link'
+import { UserBadge } from '@/components/auth/user-badge'
 import { loadDriveDay, getDefaultStore } from '@/lib/prep-sheet/load'
 import { AlertList, CoverageChips, money, PayerBadge, timeOf, UrgencyBadge } from './ui'
+import { demoNow } from '@/lib/demo-day'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +31,7 @@ export default async function DrivePage({
   }
 
   // The seeded dealership lives on a fixed date so the demo is stable.
-  const day = params.date ? new Date(`${params.date}T12:00:00`) : new Date('2026-08-12T12:00:00')
+  const day = params.date ? new Date(`${params.date}T12:00:00`) : demoNow()
   const sheets = await loadDriveDay(store.id, day, day)
 
   const totalOpportunity = sheets.reduce((s, x) => s + x.totals.opportunityValue, 0)
@@ -51,6 +53,7 @@ export default async function DrivePage({
             <Link href="/advisor/scorecard" className="font-semibold hover:underline">
               My scorecard
             </Link>
+            <UserBadge />
           </nav>
         </div>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">Today&rsquo;s drive</h1>

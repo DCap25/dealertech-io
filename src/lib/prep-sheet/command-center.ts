@@ -1,3 +1,4 @@
+import type { HandOffLine, HandOffPayload } from '@/lib/dms'
 import type { Opportunity, PrepSheet } from './types'
 import { easyYesReasons, type OpportunityDecision } from './presentation'
 
@@ -6,7 +7,7 @@ import { easyYesReasons, type OpportunityDecision } from './presentation'
  *
  * Pure and I/O-free. Deliberately narrow — DealerTech sits beside the DMS and
  * answers two questions ("who pays" and "what next"), so nothing here writes an
- * RO, dispatches, or prices parts. The hand-off is text an advisor pastes.
+ * RO, dispatches, or prices parts.
  */
 
 // ===========================================================================
@@ -144,9 +145,13 @@ function reasonFor(o: Opportunity): string {
 // ===========================================================================
 // DMS hand-off
 //
-// We do not write to the DMS. The advisor is already logged into it, and the
-// fastest honest path is a clean block they paste into the line they are
-// keying anyway.
+// Two forms of the same facts: a plain-text block the advisor can paste, and a
+// structured payload an adapter can push. Both are always produced, because an
+// integration that can write is a bonus and the paste path is the floor —
+// every store has a DMS the advisor is already logged into.
+//
+// We still never create repair orders, price parts, or dispatch. The DMS owns
+// those, and the hand-off attaches to a record it already controls.
 
 const PAY_TYPE_BY_PAYER: Record<string, string> = {
   OEM_RECALL: 'W (recall campaign)',
@@ -245,6 +250,66 @@ export function buildHandoffNote(
   )
 
   return out.join('\n')
+}
+
+/**
+ * Plain-English note explaining who pays and why.
+ *
+ * Written for a DMS comment field that will outlive this screen, so it always
+ * carries the "advisory until confirmed" caveat. Coverage that reads as
+ * promised in a permanent record is how a comeback starts.
+ */
+function coverageNoteFor(o: Opportunity): string | null {
+  const covered = Math.max(0, o.estimatedAmount - o.customerOutOfPocket)
+  if (covered <= 0) return null
+  return `${money(covered)} expected to be carried by ${o.likelyPayer.replace(/_/g, ' ').toLowerCase()}; advisory until confirmed with the administrator or manufacturer.`
+}
+
+function toHandOffLine(o: Opportunity): HandOffLine {
+  return {
+    title: o.title,
+    concern: o.detail,
+    componentGroupKey: o.componentGroupKey ?? null,
+    recommendedPayType: PAY_TYPE_BY_PAYER[o.likelyPayer] ?? o.likelyPayer,
+    estimatedAmount: o.estimatedAmount,
+    customerOutOfPocket: o.customerOutOfPocket,
+    coveredAmount: Math.max(0, o.estimatedAmount - o.customerOutOfPocket),
+    coverageNote: coverageNoteFor(o),
+  }
+}
+
+/**
+ * The structured payload an adapter pushes.
+ *
+ * Carries the same facts as the text block rather than a different set — an
+ * advisor who pastes the text and an integration that writes the payload must
+ * never produce two different stories about the same visit.
+ *
+ * Declined lines travel too. A DMS record showing the work was offered and
+ * turned down protects the store, and it is the thing most stores cannot
+ * produce when a customer says "nobody ever told me".
+ */
+export function buildHandOffPayload(
+  sheet: PrepSheet,
+  decisions: Record<string, OpportunityDecision>,
+  asOf: Date = new Date(),
+): HandOffPayload {
+  return {
+    appointmentId: sheet.appointment?.id ?? null,
+    // We never create repair orders; the DMS owns that number.
+    repairOrderId: null,
+    customerId: sheet.customer.id,
+    vehicleId: sheet.vehicle.id,
+    mileage: sheet.projectedMileage,
+    accepted: sheet.opportunities
+      .filter((o) => decisions[o.id] === 'ACCEPTED')
+      .map(toHandOffLine),
+    declined: sheet.opportunities
+      .filter((o) => decisions[o.id] === 'DECLINED')
+      .map(toHandOffLine),
+    note: buildHandoffNote(sheet, decisions, asOf),
+    createdAt: asOf,
+  }
 }
 
 /** Count of items an advisor has a hand-off for. */

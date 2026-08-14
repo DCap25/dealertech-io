@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { UserBadge } from '@/components/auth/user-badge'
 import { Card } from '@/components/ui/primitives'
 import { loadWorklist } from '@/lib/cadence/worklist'
 import { getDefaultStore } from '@/lib/prep-sheet/load'
@@ -7,13 +8,15 @@ import {
   type FollowUpItem, type FollowUpOwner,
 } from '@/lib/follow-up/view'
 import type { CadenceTrigger } from '@/lib/cadence'
+import { requireUser } from '@/lib/auth/session'
 import { FollowUpCard } from './follow-up-card'
+import { demoDayEnd } from '@/lib/demo-day'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Follow-ups' }
 
 /** The seeded dealership lives on a fixed date so the demo is stable. */
-const ASOF = new Date('2026-08-12T23:59:00Z')
+const ASOF = () => demoDayEnd()
 /** A day's worklist plus the next few days, so nothing arrives as a surprise. */
 const LOOKAHEAD_DAYS = 3
 
@@ -21,11 +24,22 @@ function money(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 }
 
-const OWNER_TABS: { key: FollowUpOwner | 'ALL'; label: string }[] = [
-  { key: 'ADVISOR', label: 'My follow-ups' },
-  { key: 'BDC', label: 'BDC' },
-  { key: 'ALL', label: 'Everything' },
-]
+/**
+ * Tabs depend on who is looking.
+ *
+ * An advisor's "mine" is the advisor queue; a BDC rep's "mine" is the BDC
+ * queue. Showing everyone the same three tabs was fine when nobody was
+ * identified — now that they are, the first tab should be their own work.
+ */
+function ownerTabsFor(role: string): { key: FollowUpOwner | 'ALL'; label: string }[] {
+  const mine: FollowUpOwner = role === 'BDC' ? 'BDC' : 'ADVISOR'
+  const other: FollowUpOwner = mine === 'BDC' ? 'ADVISOR' : 'BDC'
+  return [
+    { key: mine, label: 'My follow-ups' },
+    { key: other, label: other === 'BDC' ? 'BDC' : 'Advisors' },
+    { key: 'ALL', label: 'Everything' },
+  ]
+}
 
 function Chip({
   href,
@@ -56,6 +70,8 @@ export default async function FollowUpPage({
   searchParams: Promise<{ owner?: string; trigger?: string; focus?: string }>
 }) {
   const params = await searchParams
+  const user = await requireUser()
+  const ownerTabs = ownerTabsFor(user.role)
   const store = await getDefaultStore()
 
   if (!store) {
@@ -70,13 +86,13 @@ export default async function FollowUpPage({
     )
   }
 
-  const owner = (OWNER_TABS.find((t) => t.key === params.owner)?.key ?? 'ALL') as
-    | FollowUpOwner
-    | 'ALL'
+  // Default to their own queue rather than the whole store.
+  const owner = (ownerTabs.find((t) => t.key === params.owner)?.key ??
+    ownerTabs[0]!.key) as FollowUpOwner | 'ALL'
   const trigger = params.trigger
   const highValueOnly = params.focus === 'money'
 
-  const worklist = await loadWorklist(store.id, ASOF, undefined, LOOKAHEAD_DAYS)
+  const worklist = await loadWorklist(store.id, ASOF(), undefined, LOOKAHEAD_DAYS)
 
   /**
    * The cadence engine ranked these; we only attach the owner it already
@@ -88,10 +104,10 @@ export default async function FollowUpPage({
     smsConsent: i.smsConsent,
   }))
 
-  const all = summarize(items, ASOF)
+  const all = summarize(items, ASOF())
   const visible = filterItems(items, { owner, trigger, highValueOnly })
-  const sections = groupByUrgency(visible, ASOF)
-  const shown = summarize(visible, ASOF)
+  const sections = groupByUrgency(visible, ASOF())
+  const shown = summarize(visible, ASOF())
 
   const queryFor = (patch: Record<string, string | undefined>) => {
     const q = new URLSearchParams()
@@ -107,7 +123,7 @@ export default async function FollowUpPage({
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
-              {store.name}
+              {store.name} · {user.name}
             </p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Follow-ups</h1>
           </div>
@@ -115,6 +131,7 @@ export default async function FollowUpPage({
             <Link href="/drive" className="hover:underline">Today&rsquo;s drive</Link>
             <Link href="/customers" className="hover:underline">Customers</Link>
             <Link href="/advisor/scorecard" className="hover:underline">My scorecard</Link>
+            <UserBadge />
           </nav>
         </div>
         <p className="mt-1 text-neutral-600 dark:text-neutral-400">
@@ -149,7 +166,7 @@ export default async function FollowUpPage({
 
       {/* Owner first — a rep should land on their own list, not the store's. */}
       <div className="mt-5 flex flex-wrap gap-2">
-        {OWNER_TABS.map((tab) => {
+        {ownerTabs.map((tab) => {
           const count =
             tab.key === 'ALL'
               ? all.count
@@ -222,7 +239,7 @@ export default async function FollowUpPage({
                     key={item.id}
                     item={item}
                     storeName={store.name}
-                    asOf={ASOF.toISOString()}
+                    asOf={ASOF().toISOString()}
                   />
                 ))}
               </ul>

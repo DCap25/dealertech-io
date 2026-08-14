@@ -5,13 +5,15 @@ import {
   buildScorecard, latestActivity, monthPeriod, periodIsEmpty, weekPeriod,
   type Insight, type Metric, type Streak,
 } from '@/lib/performance'
-import { getDefaultAdvisor, loadOutcomes, loadSoldLines } from '@/lib/performance/load'
+import { loadOutcomes, loadSoldLines } from '@/lib/performance/load'
+import { requireUser } from '@/lib/auth/session'
+import { demoNow } from '@/lib/demo-day'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'My Scorecard' }
 
 /** Matches the rest of the demo surfaces — the seeded day. */
-const DAY = new Date('2026-08-12T12:00:00')
+const DAY = () => demoNow()
 /** Far enough back for streaks and month-over-month to have something to say. */
 const HISTORY_START = new Date('2026-01-01T00:00:00')
 
@@ -94,6 +96,8 @@ function StreakRow({ streak }: { streak: Streak }) {
 }
 
 export default async function ScorecardPage() {
+  // The signed-in advisor, not whichever row the database returned first.
+  const user = await requireUser()
   const store = await getDefaultStore()
   if (!store) {
     return (
@@ -106,21 +110,9 @@ export default async function ScorecardPage() {
     )
   }
 
-  const advisor = await getDefaultAdvisor(store.id)
-  if (!advisor) {
-    return (
-      <main className="mx-auto max-w-2xl px-6 py-16 text-center">
-        <h1 className="text-xl font-bold">No advisor on file</h1>
-        <p className="mt-2 text-neutral-600 dark:text-neutral-400">
-          Seed the store with at least one advisor to see a scorecard.
-        </p>
-      </main>
-    )
-  }
-
   const [outcomes, soldLines] = await Promise.all([
-    loadOutcomes(store.id, advisor.id, HISTORY_START),
-    loadSoldLines(store.id, advisor.id, HISTORY_START),
+    loadOutcomes(user.storeId, user.id, HISTORY_START),
+    loadSoldLines(user.storeId, user.id, HISTORY_START),
   ])
 
   /**
@@ -128,10 +120,13 @@ export default async function ScorecardPage() {
    * zeros. "0% capture" and "you weren't working" are different facts, and
    * conflating them teaches an advisor to ignore the page.
    */
+  // One instance: `anchor !== DAY()` would compare two fresh Date objects and
+  // always be true, pinning the "last active week" banner on permanently.
+  const today = DAY()
   const lastActive = latestActivity(outcomes, soldLines)
-  const currentWeekEmpty = periodIsEmpty(outcomes, soldLines, weekPeriod(DAY))
-  const anchor = currentWeekEmpty && lastActive ? lastActive : DAY
-  const showingHistory = anchor !== DAY
+  const currentWeekEmpty = periodIsEmpty(outcomes, soldLines, weekPeriod(today))
+  const anchor = currentWeekEmpty && lastActive ? lastActive : today
+  const showingHistory = anchor !== today
 
   const week = buildScorecard({
     outcomes,
@@ -169,7 +164,7 @@ export default async function ScorecardPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">My scorecard</h1>
             <p className="mt-1 text-neutral-600 dark:text-neutral-400">
-              {advisor.name} · {week.period.label}
+              {user.name} · {week.period.label}
             </p>
           </div>
           {/*

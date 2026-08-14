@@ -5,10 +5,11 @@ import { getDb, schema } from '@/db/client'
 import { loadDriveDay, getDefaultStore } from '@/lib/prep-sheet/load'
 import { money } from '../../../records-ui'
 import { WriteUpForm, type MenuItem } from './write-up-form'
+import { demoNow } from '@/lib/demo-day'
 
 export const dynamic = 'force-dynamic'
 
-const DAY = new Date('2026-08-12T12:00:00')
+const DAY = () => demoNow()
 
 export const metadata = { title: 'Write-up' }
 
@@ -22,7 +23,7 @@ export default async function WriteUpPage({
   if (!store) notFound()
 
   const db = getDb()
-  const sheets = await loadDriveDay(store.id, DAY, DAY)
+  const sheets = await loadDriveDay(store.id, DAY(), DAY())
   const sheet = sheets.find((s) => s.appointment?.id === appointmentId)
   if (!sheet) notFound()
 

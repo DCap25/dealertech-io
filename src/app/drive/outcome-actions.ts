@@ -3,6 +3,7 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { getDefaultStore } from '@/lib/prep-sheet/load'
+import { getCurrentUser } from '@/lib/auth/session'
 import type { OpportunityOutcome } from '@/lib/performance'
 
 /**
@@ -41,6 +42,9 @@ export async function recordVisitOutcomes(
   }
 
   try {
+    const user = await getCurrentUser()
+    if (!user) return { ok: false, error: 'Sign in to record outcomes.' }
+
     const store = await getDefaultStore()
     if (!store) return { ok: false, error: 'No store configured.' }
 
@@ -81,7 +85,13 @@ export async function recordVisitOutcomes(
       .map((p) => ({
         storeId: store.id,
         appointmentId: appointment.id,
-        advisorId: appointment.advisorId,
+        /**
+         * The advisor who actually worked the sheet, not whoever the
+         * appointment was booked under. Advisors cover for each other all
+         * day; crediting the booking would put one person's work on another
+         * person's scorecard.
+         */
+        advisorId: user.id,
         customerId,
         vehicleId,
         opportunityKey: p.opportunityKey,

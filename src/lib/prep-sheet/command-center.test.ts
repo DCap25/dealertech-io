@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildHandoffLine, buildHandoffNote, categorize, handoffCount, recommendNext,
-  stripConcernPrefix,
+  buildHandOffPayload, buildHandoffLine, buildHandoffNote, categorize, handoffCount,
+  recommendNext, stripConcernPrefix,
 } from './command-center'
 import type { Opportunity, PrepSheet } from './types'
 import type { TermStatus } from '@/lib/warranty'
@@ -234,6 +234,78 @@ describe('stripConcernPrefix', () => {
 
   it('keeps the original when stripping would leave nothing', () => {
     expect(stripConcernPrefix('Customer states')).toBe('Customer states')
+  })
+})
+
+describe('buildHandOffPayload', () => {
+  const asOf = new Date('2026-08-12T12:00:00Z')
+
+  it('identifies the visit by the ids the DMS owns', () => {
+    const payload = buildHandOffPayload(sheet(), { o1: 'ACCEPTED' }, asOf)
+    expect(payload.customerId).toBe('c1')
+    expect(payload.vehicleId).toBe('v1')
+    expect(payload.appointmentId).toBe('a1')
+    expect(payload.mileage).toBe(51140)
+  })
+
+  it('never claims a repair order number', () => {
+    // The DMS owns that number. Inventing one would collide with a real RO.
+    expect(buildHandOffPayload(sheet(), {}, asOf).repairOrderId).toBeNull()
+  })
+
+  it('splits accepted from declined', () => {
+    const s = sheet({
+      opportunities: [
+        opportunity({ id: 'o1' }),
+        opportunity({ id: 'o2', title: 'Alignment' }),
+        opportunity({ id: 'o3', title: 'Rotation' }),
+      ],
+    })
+    const payload = buildHandOffPayload(s, { o1: 'ACCEPTED', o2: 'DECLINED' }, asOf)
+    expect(payload.accepted.map((l) => l.title)).toEqual(['Tires approaching replacement'])
+    expect(payload.declined.map((l) => l.title)).toEqual(['Alignment'])
+  })
+
+  it('carries declined lines so the record shows the offer was made', () => {
+    // "Nobody ever told me" is unanswerable without this.
+    const payload = buildHandOffPayload(sheet(), { o1: 'DECLINED' }, asOf)
+    expect(payload.declined).toHaveLength(1)
+  })
+
+  it('maps the payer onto a DMS pay type, same as the text block', () => {
+    const s = sheet({ opportunities: [opportunity({ likelyPayer: 'OEM_WARRANTY' })] })
+    const payload = buildHandOffPayload(s, { o1: 'ACCEPTED' }, asOf)
+    expect(payload.accepted[0]?.recommendedPayType).toContain('W')
+  })
+
+  it('states the covered amount as advisory, never as promised', () => {
+    const s = sheet({
+      opportunities: [
+        opportunity({ likelyPayer: 'VSC', estimatedAmount: 1000, customerOutOfPocket: 100 }),
+      ],
+    })
+    const line = buildHandOffPayload(s, { o1: 'ACCEPTED' }, asOf).accepted[0]!
+    expect(line.coveredAmount).toBe(900)
+    expect(line.coverageNote).toContain('advisory')
+  })
+
+  it('omits a coverage note when the customer pays it all', () => {
+    const line = buildHandOffPayload(sheet(), { o1: 'ACCEPTED' }, asOf).accepted[0]!
+    expect(line.coveredAmount).toBe(0)
+    expect(line.coverageNote).toBeNull()
+  })
+
+  it('embeds the same text block the advisor can paste', () => {
+    // One story about the visit, whichever path it travels.
+    const payload = buildHandOffPayload(sheet(), { o1: 'ACCEPTED' }, asOf)
+    expect(payload.note).toBe(buildHandoffNote(sheet(), { o1: 'ACCEPTED' }, asOf))
+  })
+
+  it('produces an empty but valid payload when nothing was worked', () => {
+    const payload = buildHandOffPayload(sheet(), {}, asOf)
+    expect(payload.accepted).toEqual([])
+    expect(payload.declined).toEqual([])
+    expect(payload.note.length).toBeGreaterThan(0)
   })
 })
 

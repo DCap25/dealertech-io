@@ -54,6 +54,7 @@ export function OpportunityCard({
   onDecide,
   onAskCopilot,
   onShowWear,
+  ownershipHint,
 }: {
   opportunity: Opportunity
   decision: OpportunityDecision
@@ -61,6 +62,8 @@ export function OpportunityCard({
   onDecide: (id: string, decision: OpportunityDecision) => void
   onAskCopilot?: (opportunity: Opportunity) => void
   onShowWear?: (opportunity: Opportunity) => void
+  /** Set when the customer owns something relevant that does NOT cover this. */
+  ownershipHint?: string | null
 }) {
   const o = opportunity
   const reasons = easyYesReasons(o).slice(0, 3)
@@ -130,6 +133,15 @@ export function OpportunityCard({
             </p>
           </div>
         </div>
+
+        {/* Fires where they own something adjacent that will NOT pay for this.
+            Naming it first is the difference between a sale and an argument at
+            the cashier. */}
+        {ownershipHint && (
+          <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+            {ownershipHint}
+          </p>
+        )}
 
         {o.talkTrack && (
           <p className="mt-3 rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-sm italic leading-relaxed">

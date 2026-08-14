@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { eq, sql } from 'drizzle-orm'
 import { getDb, schema } from '../client'
-import { chance, int, isoDate, makeVin, pick, reseed, rnd, sample, daysAgo, daysFrom } from './random'
+import { chance, int, isoDate, makeVin, pick, reseed, rnd, sample, stableId, daysAgo, daysFrom } from './random'
+import { demoNow } from '@/lib/demo-day'
 
 /**
  * Seeds one realistic dealership.
@@ -10,9 +11,16 @@ import { chance, int, isoDate, makeVin, pick, reseed, rnd, sample, daysAgo, days
  * customer: open declines, PPM about to expire, warranty about to lapse,
  * tread wearing toward the sell threshold, a first-owner Hyundai, a CARB-state
  * EV. Random data would leave most branches untested.
+ *
+ * See ./README.md for the demo-day convention and for which parts of this file
+ * are constructed rather than sampled — and why each of those exists.
  */
 
-const NOW = new Date('2026-08-12T14:00:00Z')
+/**
+ * Everything is generated relative to the shared demo day, so the seed and the
+ * app can never disagree about what "today" is. See src/lib/demo-day.ts.
+ */
+const NOW = demoNow()
 
 const FIRST_NAMES = [
   'James', 'Maria', 'Robert', 'Linda', 'Michael', 'Patricia', 'David', 'Jennifer',
@@ -91,6 +99,7 @@ export async function seed(connectionString?: string) {
     schema.cadenceTasks, schema.cadenceRules, schema.campaignTargets, schema.campaigns,
     schema.callLogs, schema.customerNotes, schema.messages, schema.conversations,
     schema.messageTemplates, schema.consentEvents,
+    schema.prepSheetOutcomes,
     schema.appointments, schema.mileageReadings, schema.customerVehicles,
     schema.vehicles, schema.customers, schema.opCodes,
     schema.externalRefs, schema.syncRuns, schema.importBatches, schema.dmsConnections,
@@ -119,7 +128,7 @@ export async function seed(connectionString?: string) {
     { name: 'Tom Kowalski', role: 'TECHNICIAN' as const, email: 'tom@lonestarford.test' },
     { name: 'Alicia Brooks', role: 'TECHNICIAN' as const, email: 'alicia@lonestarford.test' },
     { name: 'Ray Delgado', role: 'SERVICE_MANAGER' as const, email: 'ray@lonestarford.test' },
-  ].map((s) => ({ ...s, id: randomUUID() }))
+  ].map((s) => ({ ...s, id: stableId(`user:${s.email}`) }))
 
   await db.insert(schema.users).values(
     staff.map((s) => ({ id: s.id, email: s.email, fullName: s.name })),
@@ -259,6 +268,38 @@ export async function seed(connectionString?: string) {
   let roCounter = 48200
   const openDeclines: { customerId: string; vehicleId: string }[] = []
 
+  /**
+   * Days from the most recent Monday to the demo day.
+   *
+   * The scorecard's "this week" window starts on Monday, so this is how far
+   * back a visit can be dated and still land inside the current week.
+   */
+  const daysIntoWeek = (NOW.getDay() + 6) % 7
+
+  /** Round-robin over advisors for the guaranteed-recent visits, see below. */
+  let recentAdvisorCursor = 0
+
+  const yearsSinceInService = (v: (typeof vehicles)[number], at: Date) =>
+    (at.getTime() - v.inService.getTime()) / (365 * 24 * 60 * 60 * 1000)
+
+  /**
+   * Who was in *this* week, by construction.
+   *
+   * Leaving it to chance is how the store ended up with its newest repair order
+   * three days before the demo day and a truthful $0 on every "this week"
+   * revenue tile. A demo cannot depend on a dice roll landing.
+   *
+   * The first eight are deliberately young enough to still be under factory
+   * warranty, so the current week always contains covered work — otherwise
+   * "covered revenue unlocked", the number this product exists to move, reads
+   * $0 for whichever advisor drew a week of out-of-warranty cars. Every
+   * seventh vehicle joins them so the week is not made up entirely of new cars.
+   */
+  const thisWeekIds = new Set([
+    ...vehicles.filter((v) => yearsSinceInService(v, NOW) <= 5).slice(0, 8).map((v) => v.id),
+    ...vehicles.filter((_, i) => i % 7 === 0).map((v) => v.id),
+  ])
+
   for (const veh of vehicles) {
     const visits = int(1, 4)
     let mileageAtVisit = Math.round(veh.mileage * 0.45)
@@ -266,15 +307,38 @@ export async function seed(connectionString?: string) {
     // gives a predicted sell date.
     let tread = int(9, 11)
 
+    const isThisWeek = thisWeekIds.has(veh.id)
+
+    /**
+     * Otherwise: how long since this customer was last in.
+     *
+     * Most are on a normal four-to-seven-month rhythm, some were in within the
+     * last fortnight, and a deliberate tail is dormant for the win-back cadence
+     * to work on. The tail stops at eleven months — past that a follow-up task
+     * reads as broken software rather than as a lapsed customer.
+     */
+    const daysSinceLast = isThisWeek
+      ? int(0, daysIntoWeek)
+      : chance(0.15)
+        ? int(190, 330)
+        : chance(0.3)
+          ? int(2, 13)
+          : int(14, 160)
+
     for (let v = 0; v < visits; v++) {
-      const daysBack = (visits - v) * int(140, 220)
+      const isLastVisit = v === visits - 1
+      const daysBack = daysSinceLast + (visits - 1 - v) * int(140, 220)
       const visitDate = daysAgo(daysBack, NOW)
       if (visitDate > NOW) continue
       mileageAtVisit += int(4000, 9000)
       tread = Math.max(2, tread - int(1, 2))
 
       const roId = randomUUID()
-      const advisor = pick(advisors)
+      // This week's work is dealt round-robin so every advisor has current-week
+      // revenue to look at. Random assignment can leave one scorecard empty.
+      const advisor = isThisWeek && isLastVisit
+        ? (advisors[recentAdvisorCursor++ % advisors.length] ?? pick(advisors))
+        : pick(advisors)
       await db.insert(schema.repairOrders).values({
         id: roId, storeId, customerId: veh.customerId, vehicleId: veh.id,
         advisorId: advisor.id, roNumber: String(roCounter++),
@@ -303,11 +367,42 @@ export async function seed(connectionString?: string) {
           customerAmount: String(amount), completedAt: visitDate,
         })
       }
+
+      /**
+       * A warranty repair alongside the maintenance.
+       *
+       * Every seeded line used to be customer pay, which made "covered revenue
+       * unlocked" a structural $0 on every scorecard — the one number this
+       * product exists to move, reading zero out of twelve records. Real
+       * repair orders mix pay types, so young vehicles sometimes carry a line
+       * the customer never sees a bill for.
+       */
+      const ageAtVisitYears = yearsSinceInService(veh, visitDate)
+      let warrantyTotal = 0
+      // Guaranteed on this week's visits to young cars, so every advisor's
+      // current week has covered revenue on it; otherwise a third of the time.
+      if (ageAtVisitYears <= 5 && ((isThisWeek && isLastVisit) || chance(0.35))) {
+        const op = opByCode.get(pick(['ALT', 'BATT', 'AC-DIAG', 'DIAG']))
+        if (op) {
+          warrantyTotal = Number(op.laborAmount) + Number(op.partsAmount)
+          await db.insert(schema.roLines).values({
+            id: randomUUID(), storeId, repairOrderId: roId, opCodeId: op.id,
+            technicianId: pick(techs).id, lineNumber: lineNo++, description: op.description,
+            componentGroupKey: op.componentGroupKey, payType: 'WARRANTY', status: 'COMPLETE',
+            laborHours: op.laborHours, laborAmount: op.laborAmount, partsAmount: op.partsAmount,
+            // Zero to the customer — that difference is the covered revenue.
+            customerAmount: '0', completedAt: visitDate,
+          })
+        }
+      }
+
+      const roTotal = cpTotal + warrantyTotal
       await db.update(schema.repairOrders).set({
         customerPayTotal: cpTotal.toFixed(2),
-        laborGross: (cpTotal * 0.72).toFixed(2),
-        partsGross: (cpTotal * 0.4).toFixed(2),
-        hoursSold: (sold.length * 0.6).toFixed(2),
+        warrantyTotal: warrantyTotal.toFixed(2),
+        laborGross: (roTotal * 0.72).toFixed(2),
+        partsGross: (roTotal * 0.4).toFixed(2),
+        hoursSold: ((sold.length + (warrantyTotal > 0 ? 1 : 0)) * 0.6).toFixed(2),
       }).where(eq(schema.repairOrders.id, roId))
 
       // Inspection with real measurements.
@@ -335,23 +430,31 @@ export async function seed(connectionString?: string) {
         measurementValue: String(padMm), measurementUnit: 'MILLIMETERS',
       })
 
-      // Declined work on the most recent visit stays open.
-      const isLastVisit = v === visits - 1
+      /**
+       * Declined work.
+       *
+       * Only the most recent visit can leave one open, and only if that visit
+       * is recent enough to still be worth a phone call — an open decline from
+       * two visits ago produced follow-up tasks 600 days overdue, which reads
+       * as a broken worklist rather than as lost revenue. Past six months most
+       * customers have had the work done elsewhere; the few that stay open are
+       * the win-back tail the dormant bucket exists to demonstrate.
+       */
       if (chance(0.55)) {
         const code = pick(['BRK-FR', 'TIRE4', 'ALIGN', 'TRANS-SVC', 'BATT', 'PLUGS', 'COOL-FL'])
         const op = opByCode.get(code)
         if (op) {
           const amount = Number(op.laborAmount) + Number(op.partsAmount)
+          const staysOpen = isLastVisit && (daysBack <= 180 || chance(0.25))
           await db.insert(schema.declinedServices).values({
             storeId, repairOrderId: roId, customerId: veh.customerId, vehicleId: veh.id,
             description: op.description, componentGroupKey: op.componentGroupKey,
             quotedAmount: amount.toFixed(2), declinedAt: visitDate,
             mileageAtDecline: mileageAtVisit,
             declineReason: pick(['Not today', 'Will think about it', 'Doing it elsewhere', 'Cost']),
-            // Older declines are mostly resolved; the newest stay open to work.
-            resolvedAt: isLastVisit ? null : chance(0.6) ? visitDate : null,
+            resolvedAt: staysOpen ? null : visitDate,
           })
-          if (isLastVisit) openDeclines.push({ customerId: veh.customerId, vehicleId: veh.id })
+          if (staysOpen) openDeclines.push({ customerId: veh.customerId, vehicleId: veh.id })
         }
       }
     }
@@ -385,9 +488,16 @@ export async function seed(connectionString?: string) {
 
   // ---------------------------------------------------------- contracts
   const contracted = sample(vehicles, Math.round(vehicles.length * 0.45))
+
+  /** Which coverage story each vehicle carries, so the drive can showcase them. */
+  const withVsc: string[] = []
+  const withExpiringPpm: string[] = []
+  const withTireWheel: string[] = []
+
   for (const veh of contracted) {
     const kind = rnd()
     if (kind < 0.45) {
+      withVsc.push(veh.id)
       const admin = pick(['Zurich', 'JM&A', 'Ally', 'Fidelity', 'Endurance'])
       const exclusionary = chance(0.6)
       await db.insert(schema.contracts).values({
@@ -410,19 +520,21 @@ export async function seed(connectionString?: string) {
       })
       // Some expire soon with visits unused — the use-it-or-lose-it prompt.
       const expiring = chance(0.4)
+      if (expiring) withExpiringPpm.push(veh.id)
       await db.insert(schema.prepaidEntitlements).values([
         {
           storeId, contractId, vehicleId: veh.id, componentGroupKey: 'OIL_CHANGE',
-          label: 'Prepaid Oil Change', totalAllowed: 5, used: int(1, 4),
+          label: 'Oil Change', totalAllowed: 5, used: int(1, 4),
           expiresOn: isoDate(expiring ? daysFrom(int(15, 75), NOW) : daysFrom(int(200, 600), NOW)),
         },
         {
           storeId, contractId, vehicleId: veh.id, componentGroupKey: 'TIRE_ROTATION',
-          label: 'Prepaid Tire Rotation', totalAllowed: 5, used: int(1, 4),
+          label: 'Tire Rotation', totalAllowed: 5, used: int(1, 4),
           expiresOn: isoDate(expiring ? daysFrom(int(15, 75), NOW) : daysFrom(int(200, 600), NOW)),
         },
       ])
     } else {
+      withTireWheel.push(veh.id)
       await db.insert(schema.contracts).values({
         storeId, vehicleId: veh.id, customerId: veh.customerId, productType: 'TIRE_WHEEL',
         adminCompany: 'Safeguard', purchaseDate: isoDate(veh.inService),
@@ -434,7 +546,40 @@ export async function seed(connectionString?: string) {
 
   // ------------------------------------------------------- appointments
   // Today's drive, plus the next few days so the prep sheet has a horizon.
-  const bookable = sample(vehicles, 34)
+  //
+  // The first fourteen slots are today, so the cases the product is actually
+  // demonstrated on go in first, by construction. Leaving it to `sample` meant
+  // the second-owner Korean powertrain case — the sharpest coverage story we
+  // have — was on the drive or not depending on a dice roll, and any change
+  // upstream in the seed silently reshuffled which customers a demo would open.
+  const koreanMakes = new Set(['HYUNDAI', 'KIA', 'GENESIS'])
+  const contractedIds = new Set(contracted.map((v) => v.id))
+  const ageYears = (v: (typeof vehicles)[number]) => yearsSinceInService(v, NOW)
+  const first = (predicate: (v: (typeof vehicles)[number]) => boolean) =>
+    vehicles.find(predicate)?.id
+
+  const showcaseIds = [
+    // 10yr/100k powertrain is original-owner only, so these two look nothing
+    // alike on the prep sheet despite being the same car.
+    first((v) => koreanMakes.has(v.make) && !v.isOriginalOwner),
+    first((v) => koreanMakes.has(v.make) && v.isOriginalOwner),
+    withExpiringPpm[0],   // use-it-or-lose-it prepaid visits
+    withTireWheel[0],     // road hazard, with its own tread minimum
+    withVsc[0],           // an active service contract to arbitrate against
+    // Factory coverage running out with nothing behind it — the one moment a
+    // service contract is easy to justify.
+    first((v) => !contractedIds.has(v.id) && ageYears(v) >= 4.4 && ageYears(v) <= 5.4),
+  ].filter((id): id is string => Boolean(id))
+
+  const showcase = [...new Set(showcaseIds)]
+    .map((id) => vehicles.find((v) => v.id === id))
+    .filter((v): v is (typeof vehicles)[number] => Boolean(v))
+
+  const showcaseSet = new Set(showcase.map((v) => v.id))
+  const bookable = [
+    ...showcase,
+    ...sample(vehicles.filter((v) => !showcaseSet.has(v.id)), 34 - showcase.length),
+  ]
   let idx = 0
   for (const veh of bookable) {
     const dayOffset = idx < 14 ? 0 : idx < 24 ? 1 : int(2, 5)

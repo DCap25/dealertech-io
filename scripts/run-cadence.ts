@@ -7,6 +7,7 @@
  */
 import { runCadence } from '@/lib/cadence/run'
 import { getDb, schema } from '@/db/client'
+import { demoNow } from '@/lib/demo-day'
 
 async function main() {
   const db = getDb()
@@ -17,9 +18,7 @@ async function main() {
   }
 
   // The seeded dealership lives on a fixed date so results are reproducible.
-  const asOf = process.env.CADENCE_AS_OF
-    ? new Date(process.env.CADENCE_AS_OF)
-    : new Date('2026-08-12T12:00:00Z')
+  const asOf = process.env.CADENCE_AS_OF ? new Date(process.env.CADENCE_AS_OF) : demoNow()
 
   const result = await runCadence(store.id, asOf, 7)
   console.log(`Cadence run for ${store.name} as of ${asOf.toISOString().slice(0, 10)}`)

@@ -5,10 +5,11 @@ import { getDefaultStore } from '@/lib/prep-sheet/load'
 import type { TermStatus } from '@/lib/warranty'
 import { money, Panel, shortDate } from '../../../records-ui'
 import { AddRecommendation, CloseRoButton, PendingLine } from './sell-call'
+import { demoNow } from '@/lib/demo-day'
 
 export const dynamic = 'force-dynamic'
 
-const AS_OF = new Date('2026-08-12T12:00:00')
+const AS_OF = () => demoNow()
 
 const PAYER_LABEL: Record<string, string> = {
   OEM_RECALL: 'Recall — OEM pays',
@@ -24,7 +25,7 @@ export async function generateMetadata({ params }: { params: Promise<{ roId: str
   const { roId } = await params
   const store = await getDefaultStore()
   if (!store) return { title: 'Repair Order' }
-  const ro = await loadRepairOrder(store.id, roId, AS_OF)
+  const ro = await loadRepairOrder(store.id, roId, AS_OF())
   return { title: ro ? `RO ${ro.roNumber} — ${ro.customerName}` : 'Repair Order' }
 }
 
@@ -37,7 +38,7 @@ export default async function RepairOrderPage({
   const store = await getDefaultStore()
   if (!store) notFound()
 
-  const ro = await loadRepairOrder(store.id, roId, AS_OF)
+  const ro = await loadRepairOrder(store.id, roId, AS_OF())
   if (!ro) notFound()
 
   const pending = ro.lines.filter((l) => l.status === 'RECOMMENDED' || l.status === 'PENDING_APPROVAL')

@@ -64,7 +64,9 @@ export function CoverageStack({
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
         <h2 className="text-xs font-bold uppercase tracking-[0.15em] text-neutral-500">
-          What they already own
+          {/* Purchased products live in the ownership row above; this strip
+              is only what came with the car. */}
+          Factory warranty
         </h2>
         {sampleDetermination && (
           <span

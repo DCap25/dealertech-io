@@ -54,7 +54,11 @@ const TRIGGER_META: Record<string, TriggerMeta> = {
   DECLINED_SERVICE_FOLLOW_UP: {
     label: 'Declined work',
     glyph: '↩',
-    why: 'They said no to work we already quoted. The estimate is still fresh.',
+    // Not "the estimate is still fresh" — these tasks range from a week old to
+    // most of a year, and the card underneath states the exact decline date.
+    // A line that contradicts the date printed below it costs more trust than
+    // the urgency it buys, and the talk track already says to re-quote.
+    why: 'They said no to work we already quoted, and nobody has been back to them.',
     highValue: true,
   },
   PPM_EXPIRING: {

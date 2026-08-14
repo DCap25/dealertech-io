@@ -13,6 +13,8 @@ import { WearDetail } from '@/components/wear/wear-detail'
 import type { WearKind } from '@/lib/prep-sheet/wear-view'
 import { buildVisitSummary, toOutcomeRecords } from '@/lib/performance'
 import { handoffCount, recommendNext } from '@/lib/prep-sheet/command-center'
+import { ownershipHint, summarizeOwnership } from '@/lib/prep-sheet/ownership'
+import { OwnershipRow } from './ownership-row'
 import { NextActionCallout } from './next-action'
 import { HandoffPanel } from './handoff-panel'
 import { recordVisitOutcomes } from '@/app/drive/outcome-actions'
@@ -115,7 +117,10 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
   const [wearKind, setWearKind] = useState<WearKind | null>(null)
   const [handingOff, setHandingOff] = useState(false)
 
-  const segments = useMemo(() => buildCoverageSegments(sheet), [sheet])
+  // Factory warranty only — what they bought is one row up, and showing both
+  // in the same strip is why ownership gets missed.
+  const segments = useMemo(() => buildCoverageSegments(sheet, new Date(), ['WARRANTY']), [sheet])
+  const ownership = useMemo(() => summarizeOwnership(sheet), [sheet])
   const totals = useMemo(
     () => computeRunningTotals(sheet.opportunities, decisions),
     [sheet.opportunities, decisions],
@@ -229,6 +234,18 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
 
   return (
     <div className="space-y-4 pb-28">
+      <OwnershipRow
+        summary={ownership}
+        onAskCopilot={(product) => {
+          setCopilotTarget({
+            coverageLabel: `${product.label} — ${product.adminCompany}`,
+            autoIntent: 'EXPLAIN_COVERAGE',
+            nonce: Date.now(),
+          })
+          setCopilotOpen(true)
+        }}
+      />
+
       <CoverageStack
         segments={segments}
         sampleDetermination={sampleDetermination}
@@ -362,6 +379,7 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
                 })
                 setCopilotOpen(true)
               }}
+              ownershipHint={ownershipHint(o, ownership)}
               onShowWear={(opportunity) =>
                 setWearKind(
                   opportunity.componentGroupKey === 'BRAKE_PADS_SHOES' ? 'BRAKES' : 'TIRES',

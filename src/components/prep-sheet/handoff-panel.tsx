@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 import { Card, money } from '@/components/ui/primitives'
 import { buildHandoffLine, buildHandoffNote } from '@/lib/prep-sheet/command-center'
+import { pushHandOffForVisit, type HandOffPushState } from '@/app/drive/handoff-actions'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import type { PrepSheet } from '@/lib/prep-sheet'
 
@@ -24,6 +25,8 @@ export function HandoffPanel({
   onClose: () => void
 }) {
   const [copied, setCopied] = useState<string | null>(null)
+  const [push, setPush] = useState<HandOffPushState | null>(null)
+  const [sending, startSending] = useTransition()
 
   const accepted = sheet.opportunities.filter((o) => decisions[o.id] === 'ACCEPTED')
   const note = buildHandoffNote(sheet, decisions)
@@ -61,13 +64,36 @@ export function HandoffPanel({
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => copy(note, 'all')}
-          className="touch-target mt-4 w-full rounded-xl bg-neutral-900 px-4 py-3.5 text-sm font-bold text-white transition active:scale-[0.98] dark:bg-white dark:text-neutral-900"
-        >
-          {copied === 'all' ? 'Copied — paste into the RO' : 'Copy the whole hand-off'}
-        </button>
+        {/*
+          Send first, copy second — but copy is never hidden or disabled. The
+          paste path is the floor that works in every store; pushing is the
+          bonus that works where the integration allows it.
+        */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {sheet.appointment && (
+            <button
+              type="button"
+              disabled={sending}
+              onClick={() =>
+                startSending(async () => {
+                  setPush(await pushHandOffForVisit(sheet.appointment!.id, decisions))
+                })
+              }
+              className="touch-target flex-1 rounded-xl bg-neutral-900 px-4 py-3.5 text-sm font-bold text-white transition active:scale-[0.98] disabled:opacity-60 dark:bg-white dark:text-neutral-900"
+            >
+              {sending ? 'Sending…' : push?.status === 'SENT' ? 'Send again' : 'Send to DMS'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => copy(note, 'all')}
+            className="touch-target flex-1 rounded-xl border-2 border-neutral-900 px-4 py-3.5 text-sm font-bold transition active:scale-[0.98] dark:border-neutral-100"
+          >
+            {copied === 'all' ? 'Copied — paste into the RO' : 'Copy the whole hand-off'}
+          </button>
+        </div>
+
+        {push && <PushResult result={push} />}
 
         {accepted.length > 0 && (
           <>
@@ -108,6 +134,47 @@ export function HandoffPanel({
           {note}
         </pre>
       </div>
+    </div>
+  )
+}
+
+/**
+ * What actually happened.
+ *
+ * Three states, said plainly. The middle one — sent, but to an adapter that
+ * does not persist — is the one worth getting right: a demo that claims work
+ * reached a DMS becomes a false promise the first time someone checks.
+ */
+function PushResult({ result }: { result: HandOffPushState }) {
+  const tone =
+    result.status === 'FAILED'
+      ? 'border-rose-300 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/60'
+      : result.persisted
+        ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/60'
+        : 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60'
+
+  const headline =
+    result.status === 'FAILED'
+      ? `Not sent to ${result.vendor}`
+      : result.persisted
+        ? `Sent to ${result.vendor}`
+        : `Sent to the ${result.vendor} adapter — not a real DMS`
+
+  return (
+    <div className={`expand-in mt-3 rounded-2xl border p-4 ${tone}`}>
+      <p className="font-bold">{headline}</p>
+      <p className="mt-1 text-sm leading-relaxed">{result.message}</p>
+
+      {result.status === 'SENT' && !result.persisted && (
+        <p className="mt-2 text-sm leading-relaxed">
+          Nothing was written to your dealer management system. Use{' '}
+          <strong>Copy the whole hand-off</strong> and paste it into the RO as normal.
+        </p>
+      )}
+
+      {result.externalRef && (
+        <p className="mt-2 font-mono text-xs opacity-70">Reference {result.externalRef}</p>
+      )}
     </div>
   )
 }

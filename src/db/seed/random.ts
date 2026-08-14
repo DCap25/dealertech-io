@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { computeCheckDigit } from '@/lib/vin'
 
 /**
@@ -92,4 +93,26 @@ export function daysFrom(days: number, from: Date): Date {
 /** Postgres `date` columns want YYYY-MM-DD. */
 export function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
+}
+
+/**
+ * A deterministic UUID for a stable key.
+ *
+ * Staff rows need ids that survive a re-seed: Supabase auth users are created
+ * with the same uuid as the application row, and every RLS policy resolves a
+ * tenant through `user_store_roles.user_id = auth.uid()`. A random id would
+ * sign every advisor in to an empty dealership after each seed.
+ *
+ * Shaped as a v5-style UUID — derived from a hash, not from randomness.
+ */
+export function stableId(key: string): string {
+  const h = createHash('sha1').update(`dealertech:${key}`).digest('hex')
+  const variant = ((parseInt(h.slice(16, 18), 16) & 0x3f) | 0x80).toString(16)
+  return [
+    h.slice(0, 8),
+    h.slice(8, 12),
+    `5${h.slice(13, 16)}`,
+    `${variant}${h.slice(18, 20)}`,
+    h.slice(20, 32),
+  ].join('-')
 }

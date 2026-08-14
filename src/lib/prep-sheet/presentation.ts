@@ -114,7 +114,17 @@ const PRODUCT_LABEL: Record<string, string> = {
  * The coverage stack, ordered so the most consequential ring reads first:
  * factory warranty, then purchased products, then prepaid visits.
  */
-export function buildCoverageSegments(sheet: PrepSheet, asOf: Date = new Date()): CoverageSegment[] {
+export function buildCoverageSegments(
+  sheet: PrepSheet,
+  asOf: Date = new Date(),
+  /**
+   * Which kinds to include. Defaults to everything so existing callers — the
+   * Co-Pilot grounding in particular — keep seeing the whole picture; the prep
+   * sheet narrows it to factory warranty because purchased products get their
+   * own row above the rings.
+   */
+  kinds?: CoverageKind[],
+): CoverageSegment[] {
   const segments: CoverageSegment[] = []
   const mileage = sheet.projectedMileage
 
@@ -214,7 +224,7 @@ export function buildCoverageSegments(sheet: PrepSheet, asOf: Date = new Date())
     })
   }
 
-  return segments
+  return kinds ? segments.filter((s) => kinds.includes(s.kind)) : segments
 }
 
 // ===========================================================================

@@ -5,12 +5,13 @@ import {
 } from '@/lib/copilot'
 import type { CopilotIntent, CopilotRequest } from '@/lib/copilot'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
+import { demoNow } from '@/lib/demo-day'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /** Must match the drive page — the prep sheet is derived as of the visit. */
-const DAY = new Date('2026-08-12T12:00:00')
+const DAY = () => demoNow()
 
 const INTENTS: CopilotIntent[] = [
   'EXPLAIN_COVERAGE', 'NEXT_STEP', 'TALK_TRACK', 'OBJECTION', 'FREEFORM',
@@ -60,7 +61,7 @@ export async function POST(req: Request) {
    * sends which visit it is asking about, never what is true about it — so a
    * tampered payload cannot put words in the model's mouth about coverage.
    */
-  const sheets = await loadDriveDay(store.id, DAY, DAY)
+  const sheets = await loadDriveDay(store.id, DAY(), DAY())
   const sheet = sheets.find((s) => s.appointment?.id === appointmentId)
   if (!sheet) {
     return NextResponse.json({ error: 'Appointment not found.' }, { status: 404 })
@@ -85,7 +86,7 @@ export async function POST(req: Request) {
     question: str(body.question),
   }
 
-  const context = buildCopilotContext(sheet, decisions, DAY)
+  const context = buildCopilotContext(sheet, decisions, DAY())
   const provider = await getProvider()
 
   const encoder = new TextEncoder()

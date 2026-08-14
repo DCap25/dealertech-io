@@ -1,13 +1,15 @@
 import Link from 'next/link'
+import { UserBadge } from '@/components/auth/user-badge'
 import { loadAdvisorWorkspace } from '@/lib/advisor/load'
 import { getDefaultStore } from '@/lib/prep-sheet/load'
 import { money } from '../records-ui'
+import { demoNow } from '@/lib/demo-day'
 
 export const dynamic = 'force-dynamic'
 
 export const metadata = { title: 'My Day' }
 
-const DAY = new Date('2026-08-12T12:00:00')
+const DAY = () => demoNow()
 
 const RO_STATUS_STYLE: Record<string, string> = {
   OPEN: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200',
@@ -36,7 +38,7 @@ export default async function AdvisorPage() {
     )
   }
 
-  const ws = await loadAdvisorWorkspace(store.id, DAY)
+  const ws = await loadAdvisorWorkspace(store.id, DAY())
   const awaiting = ws.appointments.filter(
     (a) => !a.repairOrderId && a.status !== 'CANCELLED' && a.status !== 'NO_SHOW',
   )
@@ -55,6 +57,7 @@ export default async function AdvisorPage() {
             <Link href="/advisor/scorecard" className="font-semibold hover:underline">
               My scorecard
             </Link>
+            <UserBadge />
           </nav>
         </div>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">My day</h1>

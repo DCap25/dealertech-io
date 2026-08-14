@@ -6,11 +6,12 @@ import { getDefaultStore } from '@/lib/prep-sheet/load'
 import type { TermStatus } from '@/lib/warranty'
 import type { WearPrediction } from '@/lib/prep-sheet'
 import { Empty, money, Panel, shortDate, Stat } from '../../records-ui'
+import { demoNow } from '@/lib/demo-day'
 
 export const dynamic = 'force-dynamic'
 
 /** The seeded dealership lives on a fixed date so the demo is stable. */
-const AS_OF = new Date('2026-08-12T12:00:00')
+const AS_OF = () => demoNow()
 
 export async function generateMetadata({
   params,
@@ -20,7 +21,7 @@ export async function generateMetadata({
   const { vehicleId } = await params
   const store = await getDefaultStore()
   if (!store) return { title: 'Vehicle' }
-  const record = await loadVehicleRecord(store.id, vehicleId, AS_OF)
+  const record = await loadVehicleRecord(store.id, vehicleId, AS_OF())
   return { title: record ? `${record.label}` : 'Vehicle' }
 }
 
@@ -118,7 +119,7 @@ export default async function VehiclePage({
   const store = await getDefaultStore()
   if (!store) notFound()
 
-  const v = await loadVehicleRecord(store.id, vehicleId, AS_OF)
+  const v = await loadVehicleRecord(store.id, vehicleId, AS_OF())
   if (!v) notFound()
 
   const terms = [v.warranty.basic, v.warranty.powertrain, v.warranty.emissionsLong,
@@ -204,7 +205,7 @@ export default async function VehiclePage({
               avgMilesPerDay={v.avgMilesPerDay}
               vehicleLabel={v.label}
               customerName={v.owner?.name}
-              asOf={AS_OF}
+              asOf={AS_OF()}
             />
             {v.wear.treadSeries.length > 1 && (
               <div className="mt-4 overflow-x-auto">
