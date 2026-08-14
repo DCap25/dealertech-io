@@ -8,6 +8,8 @@ import {
   type OpportunityDecision,
 } from '@/lib/prep-sheet/presentation'
 import { explainerFor, worstReadingFor } from '@/lib/explainer'
+import { buildMenu, TIER_COPY, type MenuSelection } from '@/lib/menu/selection'
+import { PrintableMenu } from './printable-menu'
 import type { Opportunity, PrepSheet } from '@/lib/prep-sheet'
 
 /**
@@ -29,33 +31,7 @@ import type { Opportunity, PrepSheet } from '@/lib/prep-sheet'
  * that does not try.
  */
 
-type Tier = 'NOW' | 'SOON' | 'PLANNED'
-
-const TIERS: { key: Tier; title: string; blurb: string }[] = [
-  {
-    key: 'NOW',
-    title: 'Needs attention now',
-    blurb: 'Measured at or past the point the manufacturer sets.',
-  },
-  {
-    key: 'SOON',
-    title: 'Coming up soon',
-    blurb: 'Still serviceable. Worth planning rather than reacting to.',
-  },
-  {
-    key: 'PLANNED',
-    title: 'Scheduled maintenance',
-    blurb: 'On the maker’s schedule for your mileage.',
-  },
-]
-
-function tierOf(o: Opportunity): Tier {
-  if (o.urgency === 'SAFETY') return 'NOW'
-  if (o.urgency === 'HIGH') return 'SOON'
-  return 'PLANNED'
-}
-
-const TIER_ACCENT: Record<Tier, string> = {
+const TIER_ACCENT: Record<string, string> = {
   NOW: 'border-l-rose-500',
   SOON: 'border-l-amber-500',
   PLANNED: 'border-l-neutral-300 dark:border-l-neutral-600',
@@ -63,30 +39,36 @@ const TIER_ACCENT: Record<Tier, string> = {
 
 export function PresentMenu({
   sheet,
+  selection,
   decisions,
   onCustomerDecision,
+  onPrint,
   onClose,
 }: {
   sheet: PrepSheet
+  /** What the advisor chose to show. Built one screen earlier. */
+  selection: MenuSelection
   decisions: Record<string, OpportunityDecision>
   /** Records a preference. See the note above — this is not authorization. */
   onCustomerDecision?: (opportunityId: string, decision: OpportunityDecision) => void
+  onPrint?: () => void
   onClose: () => void
 }) {
   const [explaining, setExplaining] = useState<Opportunity | null>(null)
 
-  const shown = useMemo(
-    () => sheet.opportunities.filter((o) => decisions[o.id] !== 'SKIPPED' && isCustomerFacing(o)),
-    [sheet.opportunities, decisions],
+  // The advisor built this one screen earlier. Nothing is filtered here — a
+  // customer menu that quietly disagreed with the menu the advisor approved
+  // would defeat the point of approving it.
+  const menu = useMemo(
+    () => buildMenu(sheet.opportunities, selection),
+    [sheet.opportunities, selection],
   )
 
+  const shown = menu.items.map((i) => i.opportunity)
   const accepted = shown.filter((o) => decisions[o.id] === 'ACCEPTED')
-  const customerTotal = shown.reduce((s, o) => s + o.customerOutOfPocket, 0)
   const acceptedTotal = accepted.reduce((s, o) => s + o.customerOutOfPocket, 0)
-  const coveredTotal = shown.reduce(
-    (s, o) => s + Math.max(0, o.estimatedAmount - o.customerOutOfPocket),
-    0,
-  )
+  const customerTotal = menu.customerTotal
+  const coveredTotal = menu.coveredTotal
 
   // worstReadingFor picks the newest inspection itself — the history has no
   // guaranteed order and assuming one showed a customer the wrong number.
@@ -123,17 +105,15 @@ export function PresentMenu({
           </div>
         )}
 
-        {TIERS.map((tier) => {
-          const items = shown.filter((o) => tierOf(o) === tier.key)
-          if (items.length === 0) return null
-
+        {menu.tiers.map((group) => {
+          const tier = group.tier
           return (
-            <section key={tier.key} className="mt-8">
-              <h2 className="text-xl font-bold tracking-tight">{tier.title}</h2>
-              <p className="mt-0.5 text-sm text-neutral-500">{tier.blurb}</p>
+            <section key={tier} className="mt-8">
+              <h2 className="text-xl font-bold tracking-tight">{TIER_COPY[tier].title}</h2>
+              <p className="mt-0.5 text-sm text-neutral-500">{TIER_COPY[tier].blurb}</p>
 
               <ul className="mt-3 space-y-3">
-                {items.map((o) => {
+                {group.items.map(({ opportunity: o }) => {
                   const explainer = explainerFor(o.componentGroupKey)
                   const reasons = easyYesReasons(o).filter(
                     (r) => r.tone === 'COVERED' || r.tone === 'SAFETY',
@@ -144,7 +124,7 @@ export function PresentMenu({
                   return (
                     <li
                       key={o.id}
-                      className={`rounded-2xl border border-l-4 p-5 ${TIER_ACCENT[tier.key]} ${
+                      className={`rounded-2xl border border-l-4 p-5 ${TIER_ACCENT[tier]} ${
                         decision === 'ACCEPTED'
                           ? 'border-emerald-400 bg-emerald-50/60 dark:border-emerald-700 dark:bg-emerald-950/40'
                           : decision === 'DECLINED'
@@ -269,16 +249,32 @@ export function PresentMenu({
       </div>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-[var(--border)] bg-[var(--background)]/95 px-5 py-3 backdrop-blur sm:px-6">
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto flex max-w-3xl gap-2">
+          {onPrint && (
+            <button
+              type="button"
+              onClick={onPrint}
+              className="touch-target rounded-xl border border-[var(--border)] px-4 py-3 text-sm font-bold"
+            >
+              Print
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
-            className="touch-target w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-bold text-white transition active:scale-[0.98] dark:bg-white dark:text-neutral-900"
+            className="touch-target flex-1 rounded-xl bg-neutral-900 px-4 py-3 text-sm font-bold text-white transition active:scale-[0.98] dark:bg-white dark:text-neutral-900"
           >
             Back to advisor view
           </button>
         </div>
       </div>
+
+      {/*
+        Hidden on screen, and the whole document when printed. Built from the
+        same selection as everything above, so the paper fallback is the same
+        menu rather than a second thing to keep in step with it.
+      */}
+      <PrintableMenu sheet={sheet} menu={menu} printedAt={sheet.appointment?.scheduledAt ?? new Date()} />
 
       {explaining && explainerFor(explaining.componentGroupKey) && (
         <ExplainerPlayer

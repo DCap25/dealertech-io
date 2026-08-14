@@ -21,6 +21,8 @@ import { recordVisitOutcomes } from '@/app/drive/outcome-actions'
 import { CoverageStack } from './coverage-stack'
 import { OpportunityCard } from './opportunity-card'
 import { PresentMenu } from './present-menu'
+import { MenuBuilder } from './menu-builder'
+import { defaultSelection, type MenuSelection } from '@/lib/menu/selection'
 import { VisitSummaryCard } from './visit-summary-card'
 
 /** How long the exit animation gets before the card leaves the list. */
@@ -109,7 +111,15 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
   /** Cards mid-animation — still rendered, no longer interactive. */
   const [exiting, setExiting] = useState<Record<string, OpportunityDecision>>({})
   const [pulseKey, setPulseKey] = useState(0)
-  const [presenting, setPresenting] = useState(false)
+  /**
+   * Presenting is now two steps: build the menu, then hand it over.
+   *
+   * 'BUILDING' is the advisor's last look on their own screen; 'PRESENTING' is
+   * the customer's. Separate states rather than a boolean because the print
+   * fallback needs the built menu without ever entering the customer view.
+   */
+  const [presenting, setPresenting] = useState<'NONE' | 'BUILDING' | 'PRESENTING'>('NONE')
+  const [menuSelection, setMenuSelection] = useState<MenuSelection | null>(null)
   const [copilotOpen, setCopilotOpen] = useState(false)
   const [copilotTarget, setCopilotTarget] = useState<CopilotTarget>({})
   const [finished, setFinished] = useState(false)
@@ -213,13 +223,46 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
   const readyToHandOff = handoffCount(sheet.opportunities, decisions)
   const sampleDetermination = undefined // determinations are per-line; see the demo surface
 
-  if (presenting) {
+  /**
+   * Opens with everything already selected, so an advisor in a hurry taps
+   * through to the same menu the product produced before this step existed.
+   */
+  function openBuilder() {
+    setMenuSelection(
+      defaultSelection(
+        sheet.opportunities,
+        Object.entries(decisions)
+          .filter(([, d]) => d === 'SKIPPED')
+          .map(([id]) => id),
+      ),
+    )
+    setPresenting('BUILDING')
+  }
+
+  const activeSelection = menuSelection ?? defaultSelection(sheet.opportunities)
+
+  if (presenting === 'BUILDING') {
+    return (
+      <MenuBuilder
+        sheet={sheet}
+        selection={activeSelection}
+        onChange={setMenuSelection}
+        onPresent={() => setPresenting('PRESENTING')}
+        onPrint={() => window.print()}
+        onCancel={() => setPresenting('NONE')}
+      />
+    )
+  }
+
+  if (presenting === 'PRESENTING') {
     return (
       <PresentMenu
         sheet={sheet}
+        selection={activeSelection}
         decisions={decisions}
         onCustomerDecision={decideFromCustomer}
-        onClose={() => setPresenting(false)}
+        onPrint={() => window.print()}
+        onClose={() => setPresenting('BUILDING')}
       />
     )
   }
@@ -358,7 +401,7 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               <button
                 type="button"
-                onClick={() => setPresenting(true)}
+                onClick={openBuilder}
                 className="touch-target rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold transition active:scale-[0.98] hover:border-neutral-900 dark:hover:border-neutral-300"
               >
                 Show coverage to the customer
@@ -449,7 +492,7 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
           ) : (
             <button
               type="button"
-              onClick={() => setPresenting(true)}
+              onClick={openBuilder}
               className="touch-target flex-1 rounded-xl border border-[var(--border)] px-4 py-3 text-sm font-bold transition active:scale-[0.98] hover:border-neutral-900 dark:hover:border-neutral-300"
             >
               Present full menu

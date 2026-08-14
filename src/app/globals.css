@@ -178,3 +178,68 @@ body {
   from { opacity: 0; transform: translateY(24px); }
   to   { opacity: 1; transform: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Printing a menu.
+
+   The fallback for a drive with a dead tablet. The customer menu lives in a
+   fixed, full-screen overlay, which prints as one clipped page — so printing
+   takes everything out of flow, drops the overlay's positioning, and lets the
+   print-only sheet be the whole document.
+   --------------------------------------------------------------------------- */
+@media print {
+  /* Colour-managed backgrounds cost ink and read worse on paper. */
+  :root {
+    --background: #ffffff;
+    --foreground: #000000;
+    --surface: #ffffff;
+    --surface-muted: #ffffff;
+    --border: #000000;
+  }
+
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /*
+    Hide by visibility rather than display, and put the sheet back.
+
+    `display: none` on ancestors cannot be undone by a descendant, and the
+    printable menu is nested several layers inside a fixed overlay. Visibility
+    inherits but is overridable, so this works at any depth without the
+    component having to be portalled to the top of the document.
+
+    Hidden elements still reserve layout space, which is why the sheet is
+    positioned absolutely at the origin — otherwise it prints after a page or
+    two of blank space where the screen UI used to be.
+  */
+  body {
+    visibility: hidden;
+  }
+
+  .print-sheet,
+  .print-sheet * {
+    visibility: visible;
+  }
+
+  .print-sheet {
+    display: block !important;
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    width: 100%;
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    color: #000;
+  }
+
+  /* A menu item split across a page break is a menu item somebody misses. */
+  .break-inside-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  @page {
+    margin: 14mm;
+  }
+}
