@@ -7,8 +7,9 @@ import {
   TIER_COPY, TIER_ORDER, toggle,
   type MenuSelection, type MenuTier,
 } from '@/lib/menu/selection'
-import { customerDetail } from '@/lib/prep-sheet/presentation'
+import { customerDetail, type OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import { PrintableMenu } from './printable-menu'
+import { SendToTablet } from './send-to-tablet'
 import type { PrepSheet } from '@/lib/prep-sheet'
 
 /**
@@ -36,6 +37,7 @@ export function MenuBuilder({
   onPresent,
   onPrint,
   onCancel,
+  onCustomerDecision,
 }: {
   sheet: PrepSheet
   selection: MenuSelection
@@ -43,6 +45,8 @@ export function MenuBuilder({
   onPresent: () => void
   onPrint: () => void
   onCancel: () => void
+  /** Mirrors a customer's taps from a paired tablet onto this screen. */
+  onCustomerDecision: (id: string, decision: OpportunityDecision) => void
 }) {
   const all = useMemo(() => presentableItems(sheet.opportunities), [sheet.opportunities])
   const menu = useMemo(() => buildMenu(sheet.opportunities, selection), [sheet.opportunities, selection])
@@ -190,6 +194,14 @@ export function MenuBuilder({
               </span>
             </div>
           )}
+        </div>
+
+        <div className="mt-4">
+          <SendToTablet
+            appointmentId={sheet.appointment?.id ?? null}
+            includedIds={selection.includedIds}
+            onCustomerDecision={onCustomerDecision}
+          />
         </div>
 
         <p className="mt-3 text-xs leading-relaxed text-neutral-500">

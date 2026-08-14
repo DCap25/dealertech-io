@@ -250,6 +250,7 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
         onPresent={() => setPresenting('PRESENTING')}
         onPrint={() => window.print()}
         onCancel={() => setPresenting('NONE')}
+        onCustomerDecision={decideFromCustomer}
       />
     )
   }

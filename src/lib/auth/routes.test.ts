@@ -42,6 +42,19 @@ describe('isPublicPath', () => {
   it('allows real sub-paths of a public prefix', () => {
     expect(isPublicPath('/auth/callback')).toBe(true)
   })
+
+  it('lets the customer tablet through without a staff session', () => {
+    // A tablet is not a person and carries no session cookie. Gating it would
+    // send a device in a customer's hands to a dealership sign-in page. Both
+    // surfaces authenticate the device by its own bearer token instead.
+    expect(isPublicPath('/present')).toBe(true)
+    expect(isPublicPath('/api/device')).toBe(true)
+  })
+
+  it('does not open the rest of the API alongside it', () => {
+    expect(isPublicPath('/api/copilot')).toBe(false)
+    expect(isPublicPath('/api/devices')).toBe(false)
+  })
 })
 
 describe('safeRedirect', () => {

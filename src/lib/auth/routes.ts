@@ -12,6 +12,17 @@ const PUBLIC_PREFIXES = [
   '/login',
   '/auth', // callback + sign-out handlers
   '/demo', // the marketing demo surface
+  /**
+   * The customer tablet. Not public in the sense of open — every action on
+   * /api/device is authenticated by the device's own bearer token, and /present
+   * shows nothing at all until a tablet has been claimed by an advisor.
+   *
+   * It is here because a tablet is not a person and has no session cookie to
+   * carry. Gating it behind the staff redirect would send a device in a
+   * customer's hands to a dealership sign-in page.
+   */
+  '/present',
+  '/api/device',
 ]
 
 /** Never gated: static assets, framework internals, health checks. */
