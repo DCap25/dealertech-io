@@ -35,11 +35,45 @@ function isServerless(): boolean {
   )
 }
 
+/**
+ * Fail on a malformed URL before anything else touches it.
+ *
+ * Node's URL parser puts the string it could not parse into the error, and
+ * postgres.js lets that propagate — so one mistyped connection string wrote a
+ * live database password into a hosting provider's log, where it sits for as
+ * long as logs are retained. That happened here with an unedited
+ * `aws-0-<region>` placeholder from Supabase's Connect panel.
+ *
+ * This checks the shape first and throws a message that names the problem
+ * without ever quoting the value.
+ */
+function assertUsableUrl(url: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    const placeholder = /<[^>]+>/.test(url)
+    throw new Error(
+      placeholder
+        ? 'DATABASE_URL still contains a <placeholder> from the connection-string template. ' +
+          'Replace it with the real value — Supabase shows aws-0-<region>, which needs your ' +
+          'project region substituted in.'
+        : 'DATABASE_URL is not a valid URL. If the password contains @ : / ? # or [ ], each ' +
+          'must be percent-encoded.',
+    )
+  }
+
+  if (!parsed.hostname || parsed.hostname.includes('<')) {
+    throw new Error('DATABASE_URL has no usable hostname — check for an unreplaced placeholder.')
+  }
+}
+
 export function getDb(connectionString?: string) {
   const url = connectionString ?? process.env.DATABASE_URL
   if (!url) {
     throw new Error('DATABASE_URL is not set. Copy .env.example to .env.local and fill it in.')
   }
+  assertUsableUrl(url)
 
   if (!cached || connectionString) {
     const pooled = isTransactionPooler(url)
