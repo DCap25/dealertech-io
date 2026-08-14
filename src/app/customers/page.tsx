@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { searchCustomers } from '@/lib/records/customer'
 import { getDefaultStore } from '@/lib/prep-sheet/load'
 import { formatPhone, money, monthYear } from '../records-ui'
@@ -41,10 +42,7 @@ export default async function CustomersPage({
             </p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight">Customers</h1>
           </div>
-          <nav className="flex gap-3 text-sm text-neutral-500">
-            <Link href="/drive" className="hover:underline">Today&rsquo;s drive</Link>
-            <Link href="/follow-up" className="hover:underline">Follow-ups</Link>
-          </nav>
+          <WorkspaceNav current="customers" />
         </div>
       </header>
 

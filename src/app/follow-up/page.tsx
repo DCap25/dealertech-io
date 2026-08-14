@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { UserBadge } from '@/components/auth/user-badge'
+import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { Card } from '@/components/ui/primitives'
 import { loadWorklist } from '@/lib/cadence/worklist'
 import { getDefaultStore } from '@/lib/prep-sheet/load'
@@ -127,12 +127,7 @@ export default async function FollowUpPage({
             </p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Follow-ups</h1>
           </div>
-          <nav className="flex flex-wrap gap-3 text-sm text-neutral-500">
-            <Link href="/drive" className="hover:underline">Today&rsquo;s drive</Link>
-            <Link href="/customers" className="hover:underline">Customers</Link>
-            <Link href="/advisor/scorecard" className="hover:underline">My scorecard</Link>
-            <UserBadge />
-          </nav>
+          <WorkspaceNav current="follow-up" />
         </div>
         <p className="mt-1 text-neutral-600 dark:text-neutral-400">
           Money that leaks after the visit. Work top to bottom — it is already ranked.

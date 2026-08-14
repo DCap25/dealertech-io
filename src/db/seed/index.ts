@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { eq, sql } from 'drizzle-orm'
+import type { PgTable } from 'drizzle-orm/pg-core'
 import { getDb, schema } from '../client'
 import { chance, int, isoDate, makeVin, pick, reseed, rnd, sample, stableId, daysAgo, daysFrom } from './random'
 import { demoNow } from '@/lib/demo-day'
@@ -149,17 +150,50 @@ export async function seed(connectionString?: string) {
   const opByCode = new Map(opCodeRows.map((o) => [o.code, o]))
 
   // -------------------------------------------------- customers & vehicles
-  const customerCount = 32
+  /**
+   * Big enough for the windows to have denominators.
+   *
+   * Each vehicle contributes exactly one *recent* visit, so with a fleet of
+   * forty the cohorts below could not fill this week, last week and last month
+   * at comparable volumes — every trend arrow in the product ended up dividing
+   * a normal window by almost nothing. It also makes the customer list and
+   * search look like a dealership rather than a fixture.
+   */
+  const customerCount = 64
   const customers: { id: string; name: string }[] = []
   const vehicles: {
     id: string; customerId: string; make: string; model: string; modelYear: number
     mileage: number; inService: Date; isOriginalOwner: boolean; isEv: boolean
   }[] = []
 
+  /**
+   * Names are unique across the store.
+   *
+   * Thirty first names against thirty last names collide often enough at this
+   * fleet size that two different customers would share one, and a demo that
+   * shows "Maria Perez" twice on the same drive reads as a duplicate-record
+   * bug rather than as two households.
+   */
+  const usedNames = new Set<string>()
+  function uniqueName(): { first: string; last: string } {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const first = pick(FIRST_NAMES)
+      const last = pick(LAST_NAMES)
+      if (!usedNames.has(`${first} ${last}`)) {
+        usedNames.add(`${first} ${last}`)
+        return { first, last }
+      }
+    }
+    // Exhausted the pool — fall back rather than loop forever.
+    const first = pick(FIRST_NAMES)
+    const last = `${pick(LAST_NAMES)}-${pick(LAST_NAMES)}`
+    usedNames.add(`${first} ${last}`)
+    return { first, last }
+  }
+
   for (let i = 0; i < customerCount; i++) {
     const id = randomUUID()
-    const first = pick(FIRST_NAMES)
-    const last = pick(LAST_NAMES)
+    const { first, last } = uniqueName()
     customers.push({ id, name: `${first} ${last}` })
 
     const mobilePhone = `512555${String(1000 + i).padStart(4, '0')}`
@@ -268,6 +302,34 @@ export async function seed(connectionString?: string) {
   let roCounter = 48200
   const openDeclines: { customerId: string; vehicleId: string }[] = []
 
+  // Buffered and written in bulk once the whole fleet is generated. See the
+  // insertAll calls at the end of this section.
+  type Rows<T extends PgTable> = T['$inferInsert'][]
+  const roRows: Rows<typeof schema.repairOrders> = []
+  const lineRows: Rows<typeof schema.roLines> = []
+  const mileageRows: Rows<typeof schema.mileageReadings> = []
+  const inspectionRows: Rows<typeof schema.inspections> = []
+  const inspectionItemRows: Rows<typeof schema.inspectionItems> = []
+  const declineRows: Rows<typeof schema.declinedServices> = []
+
+  /**
+   * Insert many rows in chunks.
+   *
+   * Postgres caps a statement at 65535 bind parameters, so one giant VALUES
+   * list fails silently-late on a bigger fleet. Chunking keeps that ceiling
+   * out of reach no matter how many customers the seed is asked for.
+   */
+  async function insertAll<T extends PgTable>(
+    table: T,
+    rows: T['$inferInsert'][],
+    chunkSize = 500,
+  ) {
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize)
+      if (chunk.length > 0) await db.insert(table).values(chunk)
+    }
+  }
+
   /**
    * Days from the most recent Monday to the demo day.
    *
@@ -276,29 +338,78 @@ export async function seed(connectionString?: string) {
    */
   const daysIntoWeek = (NOW.getDay() + 6) % 7
 
-  /** Round-robin over advisors for the guaranteed-recent visits, see below. */
+  /** Round-robin over advisors for the recent cohorts, see below. */
   let recentAdvisorCursor = 0
 
   const yearsSinceInService = (v: (typeof vehicles)[number], at: Date) =>
     (at.getTime() - v.inService.getTime()) / (365 * 24 * 60 * 60 * 1000)
 
+  /** Whole days from a past date to the demo day. */
+  const demoDayStart = new Date(NOW)
+  demoDayStart.setHours(0, 0, 0, 0)
+  const daysBackTo = (d: Date) =>
+    Math.round((demoDayStart.getTime() - d.getTime()) / (24 * 60 * 60 * 1000))
+
   /**
-   * Who was in *this* week, by construction.
+   * The same slice of the previous month that has elapsed of this one.
    *
-   * Leaving it to chance is how the store ended up with its newest repair order
-   * three days before the demo day and a truthful $0 on every "this week"
-   * revenue tile. A demo cannot depend on a dice roll landing.
-   *
-   * The first eight are deliberately young enough to still be under factory
-   * warranty, so the current week always contains covered work — otherwise
-   * "covered revenue unlocked", the number this product exists to move, reads
-   * $0 for whichever advisor drew a week of out-of-warranty cars. Every
-   * seventh vehicle joins them so the week is not made up entirely of new cars.
+   * The board compares month-to-date against month-to-date, so the previous
+   * month's traffic has to sit in the matching days — filling the whole of
+   * July would put two thirds of it outside the window it is measured in.
    */
-  const thisWeekIds = new Set([
-    ...vehicles.filter((v) => yearsSinceInService(v, NOW) <= 5).slice(0, 8).map((v) => v.id),
-    ...vehicles.filter((_, i) => i % 7 === 0).map((v) => v.id),
-  ])
+  const previousMonthStart = new Date(NOW.getFullYear(), NOW.getMonth() - 1, 1)
+  const previousMonthToDate = new Date(
+    NOW.getFullYear(),
+    NOW.getMonth() - 1,
+    Math.min(NOW.getDate(), new Date(NOW.getFullYear(), NOW.getMonth(), 0).getDate()),
+  )
+
+  /**
+   * ---------------------------------------------------------------------
+   * WHEN EACH CUSTOMER WAS LAST IN
+   * ---------------------------------------------------------------------
+   * Assigned to explicit cohorts rather than rolled at random.
+   *
+   * Every comparison in the product is a ratio — this week against last week,
+   * this month against last month — and a ratio needs a denominator. Left to
+   * chance, the constructed recent visits piled into August while July got
+   * whatever fell through, and the manager's board reported a truthful,
+   * useless "↑983% on the month before".
+   *
+   * Each vehicle contributes exactly one *recent* visit (its earlier ones sit
+   * five to seven months apart, which is what makes the tread regression
+   * meaningful), so recent density is capped by the fleet size and has to be
+   * spent deliberately.
+   */
+  type Cohort = 'THIS_WEEK' | 'LAST_WEEK' | 'LAST_MONTH' | 'DORMANT' | 'RHYTHM'
+
+  const cohortOf = new Map<string, Cohort>()
+  const isUnderWarranty = (v: (typeof vehicles)[number]) => yearsSinceInService(v, NOW) <= 5
+
+  function assignCohort(
+    count: number,
+    cohort: Cohort,
+    prefer?: (v: (typeof vehicles)[number]) => boolean,
+  ) {
+    const pool = vehicles.filter((v) => !cohortOf.has(v.id))
+    const ordered = prefer
+      ? [...pool.filter(prefer), ...pool.filter((v) => !prefer(v))]
+      : pool
+    for (const v of ordered.slice(0, count)) cohortOf.set(v.id, cohort)
+  }
+
+  // Young cars go into the two recent weeks first, so there is always factory
+  // warranty work in the current window — "covered revenue unlocked" is the
+  // number this product exists to move and it cannot read $0 on a demo.
+  assignCohort(12, 'THIS_WEEK', isUnderWarranty)
+  assignCohort(12, 'LAST_WEEK', isUnderWarranty)
+  // Sized to match this month's two weeks put together, so month-to-date has
+  // a denominator of roughly its own size.
+  assignCohort(24, 'LAST_MONTH', isUnderWarranty)
+  // The win-back tail. Stops at eleven months: past that a follow-up task
+  // reads as broken software rather than as a lapsed customer.
+  assignCohort(8, 'DORMANT')
+  // Everything left is on a normal four-to-seven-month rhythm.
 
   for (const veh of vehicles) {
     const visits = int(1, 4)
@@ -307,23 +418,25 @@ export async function seed(connectionString?: string) {
     // gives a predicted sell date.
     let tread = int(9, 11)
 
-    const isThisWeek = thisWeekIds.has(veh.id)
+    const cohort = cohortOf.get(veh.id) ?? 'RHYTHM'
+    const isThisWeek = cohort === 'THIS_WEEK'
+    const isRecent = isThisWeek || cohort === 'LAST_WEEK' || cohort === 'LAST_MONTH'
 
-    /**
-     * Otherwise: how long since this customer was last in.
-     *
-     * Most are on a normal four-to-seven-month rhythm, some were in within the
-     * last fortnight, and a deliberate tail is dormant for the win-back cadence
-     * to work on. The tail stops at eleven months — past that a follow-up task
-     * reads as broken software rather than as a lapsed customer.
-     */
-    const daysSinceLast = isThisWeek
-      ? int(0, daysIntoWeek)
-      : chance(0.15)
-        ? int(190, 330)
-        : chance(0.3)
-          ? int(2, 13)
-          : int(14, 160)
+    const daysSinceLast =
+      cohort === 'THIS_WEEK'
+        ? int(0, daysIntoWeek)
+        : cohort === 'LAST_WEEK'
+          ? daysIntoWeek + int(1, 7)
+          : cohort === 'LAST_MONTH'
+            ? int(
+                // Guarded so a demo day early in a month cannot let the
+                // "last month" cohort spill back into this week's window.
+                Math.max(daysIntoWeek + 8, daysBackTo(previousMonthToDate)),
+                Math.max(daysIntoWeek + 9, daysBackTo(previousMonthStart)),
+              )
+            : cohort === 'DORMANT'
+              ? int(190, 330)
+              : int(14, 200)
 
     for (let v = 0; v < visits; v++) {
       const isLastVisit = v === visits - 1
@@ -334,19 +447,14 @@ export async function seed(connectionString?: string) {
       tread = Math.max(2, tread - int(1, 2))
 
       const roId = randomUUID()
-      // This week's work is dealt round-robin so every advisor has current-week
-      // revenue to look at. Random assignment can leave one scorecard empty.
-      const advisor = isThisWeek && isLastVisit
+      // Recent work is dealt round-robin so every advisor has both a current
+      // window and something to compare it against. Random assignment can
+      // leave one scorecard empty, or one week without a denominator.
+      const advisor = isRecent && isLastVisit
         ? (advisors[recentAdvisorCursor++ % advisors.length] ?? pick(advisors))
         : pick(advisors)
-      await db.insert(schema.repairOrders).values({
-        id: roId, storeId, customerId: veh.customerId, vehicleId: veh.id,
-        advisorId: advisor.id, roNumber: String(roCounter++),
-        status: 'CLOSED', mileageIn: mileageAtVisit, mileageOut: mileageAtVisit + int(1, 8),
-        openedAt: visitDate, closedAt: visitDate,
-      })
 
-      await db.insert(schema.mileageReadings).values({
+      mileageRows.push({
         storeId, vehicleId: veh.id, mileage: mileageAtVisit, recordedAt: visitDate, source: 'RO',
       })
 
@@ -359,7 +467,7 @@ export async function seed(connectionString?: string) {
         if (!op) continue
         const amount = Number(op.laborAmount) + Number(op.partsAmount)
         cpTotal += amount
-        await db.insert(schema.roLines).values({
+        lineRows.push({
           id: randomUUID(), storeId, repairOrderId: roId, opCodeId: op.id,
           technicianId: pick(techs).id, lineNumber: lineNo++, description: op.description,
           componentGroupKey: op.componentGroupKey, payType: 'CUSTOMER_PAY', status: 'COMPLETE',
@@ -379,13 +487,14 @@ export async function seed(connectionString?: string) {
        */
       const ageAtVisitYears = yearsSinceInService(veh, visitDate)
       let warrantyTotal = 0
-      // Guaranteed on this week's visits to young cars, so every advisor's
-      // current week has covered revenue on it; otherwise a third of the time.
-      if (ageAtVisitYears <= 5 && ((isThisWeek && isLastVisit) || chance(0.35))) {
+      // Guaranteed on recent visits to young cars, so every advisor's current
+      // window has covered revenue and a prior one to move against; otherwise
+      // a third of the time.
+      if (ageAtVisitYears <= 5 && ((isRecent && isLastVisit) || chance(0.35))) {
         const op = opByCode.get(pick(['ALT', 'BATT', 'AC-DIAG', 'DIAG']))
         if (op) {
           warrantyTotal = Number(op.laborAmount) + Number(op.partsAmount)
-          await db.insert(schema.roLines).values({
+          lineRows.push({
             id: randomUUID(), storeId, repairOrderId: roId, opCodeId: op.id,
             technicianId: pick(techs).id, lineNumber: lineNo++, description: op.description,
             componentGroupKey: op.componentGroupKey, payType: 'WARRANTY', status: 'COMPLETE',
@@ -396,18 +505,24 @@ export async function seed(connectionString?: string) {
         }
       }
 
+      // Written once with its totals already known, rather than inserted and
+      // then updated — half as many round trips for the same row.
       const roTotal = cpTotal + warrantyTotal
-      await db.update(schema.repairOrders).set({
+      roRows.push({
+        id: roId, storeId, customerId: veh.customerId, vehicleId: veh.id,
+        advisorId: advisor.id, roNumber: String(roCounter++),
+        status: 'CLOSED', mileageIn: mileageAtVisit, mileageOut: mileageAtVisit + int(1, 8),
+        openedAt: visitDate, closedAt: visitDate,
         customerPayTotal: cpTotal.toFixed(2),
         warrantyTotal: warrantyTotal.toFixed(2),
         laborGross: (roTotal * 0.72).toFixed(2),
         partsGross: (roTotal * 0.4).toFixed(2),
         hoursSold: ((sold.length + (warrantyTotal > 0 ? 1 : 0)) * 0.6).toFixed(2),
-      }).where(eq(schema.repairOrders.id, roId))
+      })
 
       // Inspection with real measurements.
       const inspectionId = randomUUID()
-      await db.insert(schema.inspections).values({
+      inspectionRows.push({
         id: inspectionId, storeId, repairOrderId: roId, vehicleId: veh.id,
         technicianId: pick(techs).id, mileage: mileageAtVisit,
         startedAt: visitDate, completedAt: visitDate,
@@ -415,7 +530,7 @@ export async function seed(connectionString?: string) {
       })
       for (const pos of ['LF', 'RF', 'LR', 'RR'] as const) {
         const value = Math.max(2, tread + (pos.startsWith('L') ? 0 : -1) + int(-1, 1))
-        await db.insert(schema.inspectionItems).values({
+        inspectionItemRows.push({
           storeId, inspectionId, itemKey: `tire_tread_${pos.toLowerCase()}`,
           label: `Tire Tread ${pos}`, componentGroupKey: 'TIRES',
           status: value <= 3 ? 'RED' : value <= 5 ? 'YELLOW' : 'GREEN',
@@ -423,7 +538,7 @@ export async function seed(connectionString?: string) {
         })
       }
       const padMm = Math.max(2, 11 - v * int(2, 3))
-      await db.insert(schema.inspectionItems).values({
+      inspectionItemRows.push({
         storeId, inspectionId, itemKey: 'brake_pad_front', label: 'Front Brake Pads',
         componentGroupKey: 'BRAKE_PADS_SHOES',
         status: padMm <= 3 ? 'RED' : padMm <= 5 ? 'YELLOW' : 'GREEN',
@@ -446,7 +561,7 @@ export async function seed(connectionString?: string) {
         if (op) {
           const amount = Number(op.laborAmount) + Number(op.partsAmount)
           const staysOpen = isLastVisit && (daysBack <= 180 || chance(0.25))
-          await db.insert(schema.declinedServices).values({
+          declineRows.push({
             storeId, repairOrderId: roId, customerId: veh.customerId, vehicleId: veh.id,
             description: op.description, componentGroupKey: op.componentGroupKey,
             quotedAmount: amount.toFixed(2), declinedAt: visitDate,
@@ -459,10 +574,24 @@ export async function seed(connectionString?: string) {
       }
     }
 
-    await db.insert(schema.mileageReadings).values({
+    mileageRows.push({
       storeId, vehicleId: veh.id, mileage: veh.mileage, recordedAt: NOW, source: 'CURRENT',
     })
   }
+
+  /**
+   * Written in bulk, parents before children.
+   *
+   * One statement per table instead of one per row: the seed was making around
+   * four thousand round trips and taking well over a minute, on a file the
+   * README tells people to re-run after every change.
+   */
+  await insertAll(schema.repairOrders, roRows)
+  await insertAll(schema.roLines, lineRows)
+  await insertAll(schema.mileageReadings, mileageRows)
+  await insertAll(schema.inspections, inspectionRows)
+  await insertAll(schema.inspectionItems, inspectionItemRows)
+  await insertAll(schema.declinedServices, declineRows)
 
   // ------------------------------------------------- roll up customer totals
   // Without this the prep sheet shows every customer as a stranger with zero

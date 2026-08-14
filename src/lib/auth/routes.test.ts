@@ -20,6 +20,7 @@ describe('isPublicPath', () => {
       '/follow-up',
       '/advisor',
       '/advisor/scorecard',
+      '/manager',
       '/customers',
       '/vehicles/abc',
       '/api/copilot',

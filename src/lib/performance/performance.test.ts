@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   averagePerRepairOrder, buildInsights, buildScorecard, buildStreaks, buildVisitSummary,
   captureRate, changeVsPrevious, coveredRevenueUnlocked, easyYesCaptureRate, isEasyYes,
-  latestActivity, leftOnTable, periodIsEmpty, startOfWeek, toOutcome, toOutcomeRecords,
-  visitsWorked, weekPeriod,
+  latestActivity, leftOnTable, monthToDatePeriod, periodIsEmpty, startOfWeek, toOutcome,
+  toOutcomeRecords, visitsWorked, weekPeriod,
 } from './index'
 import type { OutcomeRecord, SoldLineRecord } from './types'
 import type { Opportunity } from '@/lib/prep-sheet'
@@ -403,5 +403,43 @@ describe('buildVisitSummary', () => {
 
   it('does not praise an empty sheet', () => {
     expect(buildVisitSummary([], {}).praise).toBeNull()
+  })
+})
+
+describe('monthToDatePeriod', () => {
+  const asOf = new Date(2026, 7, 12, 14, 0) // Wed 12 August 2026
+
+  it('runs from the first of the month through the end of today', () => {
+    const p = monthToDatePeriod(asOf)
+    expect(p.start).toEqual(new Date(2026, 7, 1))
+    expect(p.end).toEqual(new Date(2026, 7, 13))
+  })
+
+  it('compares against the same number of days of the previous month', () => {
+    // The whole point: twelve days of August against twelve days of July, not
+    // against all thirty-one. The unequal comparison reported a collapse for
+    // four weeks out of every five.
+    const p = monthToDatePeriod(asOf, 1)
+    expect(p.start).toEqual(new Date(2026, 6, 1))
+    expect(p.end).toEqual(new Date(2026, 6, 13))
+  })
+
+  it('never runs past the end of a shorter month', () => {
+    // 31 March compared against February, which has no 31st.
+    const p = monthToDatePeriod(new Date(2026, 2, 31, 9, 0), 1)
+    expect(p.start).toEqual(new Date(2026, 1, 1))
+    expect(p.end).toEqual(new Date(2026, 2, 1))
+  })
+
+  it('handles the first of the month as a single day', () => {
+    const p = monthToDatePeriod(new Date(2026, 7, 1, 9, 0))
+    expect(p.start).toEqual(new Date(2026, 7, 1))
+    expect(p.end).toEqual(new Date(2026, 7, 2))
+  })
+
+  it('crosses a year boundary', () => {
+    const p = monthToDatePeriod(new Date(2026, 0, 10, 9, 0), 1)
+    expect(p.start).toEqual(new Date(2025, 11, 1))
+    expect(p.end).toEqual(new Date(2025, 11, 11))
   })
 })

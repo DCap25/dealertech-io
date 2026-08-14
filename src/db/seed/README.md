@@ -36,10 +36,29 @@ landing. These are constructed, not sampled:
 | Guarantee | Why it exists |
 |---|---|
 | Staff ids are `stableId(...)`, not random | Supabase auth users carry the same uuid as the `users` row, and RLS resolves a tenant through `auth.uid()`. Random ids would sign every advisor into an empty dealership after each re-seed. |
-| Some vehicles were in **this calendar week** | The scorecard's week starts Monday. Left to chance, the newest RO in the store landed before it and every "this week" revenue tile read a truthful $0. |
-| Those visits are dealt round-robin across advisors | So both demo advisors have current-week numbers, not just whichever one got lucky. |
-| The first eight of them are under five years old, and always carry a **warranty-paid line** | "Covered revenue unlocked" is the number this product exists to move. Every seeded line used to be customer pay, so it was structurally $0 on every scorecard. |
+| Every customer has a **unique name** | The name pool collides often enough at this fleet size that a demo would show the same person twice on one drive, which reads as a duplicate-record bug. |
+| Each vehicle is assigned to a **visit cohort** | Every comparison in the product is a ratio, and a ratio needs a denominator. See the table below. |
+| Recent visits are dealt round-robin across advisors | So both demo advisors have current-window numbers, not just whichever one got lucky. |
+| Recent visits to cars under five years old always carry a **warranty-paid line** | "Covered revenue unlocked" is the number this product exists to move. Every seeded line used to be customer pay, so it was structurally $0 on every scorecard. |
 | Today's drive opens with a fixed **showcase set** | A second-owner and an original-owner Korean SUV (10yr/100k powertrain is original-owner only, so two near-identical cars look nothing alike), a prepaid plan about to expire, a tire & wheel contract, an active VSC, and a vehicle whose factory coverage is running out with nothing behind it. |
+
+### Visit cohorts
+
+Each vehicle contributes exactly **one recent visit** — its earlier ones sit five
+to seven months apart, which is what makes the tread regression meaningful — so
+recent traffic is capped by fleet size and has to be spent on purpose.
+
+| Cohort | Size | Last visit landed |
+|---|---|---|
+| `THIS_WEEK` | 12 | Since Monday. Prefers cars under five years old. |
+| `LAST_WEEK` | 12 | The week before. Prefers cars under five years old. |
+| `LAST_MONTH` | 24 | The same days of the previous month — sized to match the two weeks above, because the board compares month-to-date against month-to-date. |
+| `DORMANT` | 8 | Six to eleven months ago. The win-back tail. |
+| `RHYTHM` | the rest | Two weeks to seven months ago. |
+
+Left to chance, all the constructed traffic piled into the current month while
+the previous one got whatever fell through, and the manager's board reported a
+truthful, useless "↑983% on the month before".
 
 ## Deliberate limits
 
@@ -51,3 +70,17 @@ landing. These are constructed, not sampled:
   *never raised*, which only a finished prep sheet records — there is no honest
   way to seed them, and the scorecard says so on screen instead of inventing a
   number.
+- **Follow-ups are owned by role, not by person.** The cadence rule carries the
+  ownership, so the manager's board splits the backlog into advisor and BDC
+  queues rather than putting a number beside a name that nothing in the system
+  actually says.
+
+## If you change this file
+
+Rows are buffered and written with one statement per table, parents before
+children. Inserting row by row took over a minute; keep new data on the same
+path (`insertAll`) rather than adding an `await db.insert(...)` inside a loop.
+
+Adding or removing a single `chance()` call reshuffles the whole stream, so
+counts in this document are approximate and the customer attached to any given
+case will move.

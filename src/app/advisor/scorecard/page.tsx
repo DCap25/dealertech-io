@@ -168,11 +168,16 @@ export default async function ScorecardPage() {
             </p>
           </div>
           {/*
-            Said out loud, not implied. An advisor who suspects a manager is
-            reading this page will start gaming it within a week.
+            Precise, not reassuring. This used to read "Private — only you see
+            this", which stopped being true the day the manager's board landed:
+            revenue from closed repair orders appears there, as it already does
+            on their DMS report. Capture, easy-yes and streaks genuinely do not.
+            An advisor who catches the page overstating its own privacy will
+            distrust every number on it, so it names the line instead.
           */}
-          <p className="rounded-full bg-[var(--surface-muted)] px-3 py-1.5 text-xs font-semibold text-neutral-500">
-            Private — only you see this
+          <p className="max-w-xs rounded-2xl bg-[var(--surface-muted)] px-3.5 py-2 text-xs leading-relaxed text-neutral-500">
+            <span className="font-semibold">Capture, easy-yes and streaks are yours alone.</span>{' '}
+            Revenue from closed ROs is on your manager&rsquo;s board, the same as in the DMS.
           </p>
         </div>
       </header>

@@ -40,6 +40,34 @@ export function monthPeriod(asOf: Date, monthsAgo = 0): Period {
 }
 
 /**
+ * The first N days of a month, where N is how much of the current one has
+ * elapsed.
+ *
+ * The comparison a fixed-ops manager actually makes. `monthPeriod` measures
+ * twelve days of August against thirty-one days of July and reports the
+ * shortfall as a collapse — the arrow is dead wrong for four weeks out of
+ * every five, and it points the wrong way at the exact moment someone is
+ * deciding whether the month is in trouble.
+ */
+export function monthToDatePeriod(asOf: Date, monthsAgo = 0): Period {
+  const start = new Date(asOf.getFullYear(), asOf.getMonth() - monthsAgo, 1)
+  const monthEnd = new Date(start.getFullYear(), start.getMonth() + 1, 1)
+
+  // Through the same day of the month, inclusive. Clamped so the 31st of a
+  // long month does not run past the end of a short one.
+  const end = new Date(start.getFullYear(), start.getMonth(), asOf.getDate() + 1)
+
+  return {
+    start,
+    end: end > monthEnd ? monthEnd : end,
+    label:
+      monthsAgo === 0
+        ? 'Month to date'
+        : `${start.toLocaleString('en-US', { month: 'long' })} to the same day`,
+  }
+}
+
+/**
  * The most recent day this advisor did anything we can measure.
  *
  * Used to avoid showing a wall of zeros to someone who was simply off that

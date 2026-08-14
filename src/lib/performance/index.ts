@@ -6,7 +6,8 @@ export {
 export { buildInsights } from './insights'
 export { buildStreaks, groupByVisit } from './streaks'
 export {
-  buildScorecard, latestActivity, monthPeriod, periodIsEmpty, startOfWeek, weekPeriod,
+  buildScorecard, latestActivity, monthPeriod, monthToDatePeriod, periodIsEmpty, startOfWeek,
+  weekPeriod,
   type ScorecardInputs,
 } from './scorecard'
 export {

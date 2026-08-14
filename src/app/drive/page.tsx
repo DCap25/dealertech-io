@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { UserBadge } from '@/components/auth/user-badge'
+import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { loadDriveDay, getDefaultStore } from '@/lib/prep-sheet/load'
 import { AlertList, CoverageChips, money, PayerBadge, timeOf, UrgencyBadge } from './ui'
 import { demoNow } from '@/lib/demo-day'
@@ -47,14 +47,7 @@ export default async function DrivePage({
           <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
             {store.name} · Service Drive
           </p>
-          <nav className="flex gap-3 text-sm text-neutral-500">
-            <Link href="/customers" className="hover:underline">Customers</Link>
-            <Link href="/follow-up" className="hover:underline">Follow-ups</Link>
-            <Link href="/advisor/scorecard" className="font-semibold hover:underline">
-              My scorecard
-            </Link>
-            <UserBadge />
-          </nav>
+          <WorkspaceNav current="drive" />
         </div>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">Today&rsquo;s drive</h1>
         <p className="mt-1 text-neutral-600 dark:text-neutral-400">
