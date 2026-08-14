@@ -135,11 +135,27 @@ export default function HomePage() {
             >
               For managers
             </a>
+            {/*
+              Hidden on the narrowest screens, where the header has room for
+              the two things a phone visitor needs: a way in, and a way to ask
+              for a walkthrough. The hero carries its own link to the demo.
+            */}
             <Link
               href="/demo"
-              className="rounded-lg px-2 py-1.5 text-[var(--ink-soft)] transition hover:text-[var(--ink)]"
+              className="hidden rounded-lg px-2 py-1.5 text-[var(--ink-soft)] transition hover:text-[var(--ink)] sm:block"
             >
               Live demo
+            </Link>
+            {/*
+              A customer of ours arriving at the front door is not a prospect —
+              they are an advisor about to start a shift. Without this the only
+              way back into the product is knowing to type /login.
+            */}
+            <Link
+              href="/login"
+              className="touch-target inline-flex items-center rounded-lg px-2 py-1.5 font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink)]"
+            >
+              Sign in
             </Link>
             <a
               href="#demo"
@@ -447,6 +463,9 @@ export default function HomePage() {
             <a href="#how" className="transition hover:text-[var(--ink)]">How it works</a>
             <a href="#managers" className="transition hover:text-[var(--ink)]">For managers</a>
             <a href="#demo" className="transition hover:text-[var(--ink)]">Book a walkthrough</a>
+            <Link href="/login" className="font-semibold transition hover:text-[var(--ink)]">
+              Sign in
+            </Link>
           </nav>
         </div>
         <p className="mx-auto mt-6 max-w-6xl text-xs leading-relaxed text-[var(--ink-soft)] opacity-80">

@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth/session'
 import { safeRedirect } from '@/lib/auth/routes'
@@ -39,9 +40,14 @@ export default async function LoginPage({
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-12">
       <div>
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500">
+        {/* A way back out. Someone who lands here by mistake, or who wanted
+            the demo rather than the workspace, should not be stuck. */}
+        <Link
+          href="/"
+          className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500 transition hover:text-neutral-900 dark:hover:text-white"
+        >
           DealerTech.io
-        </p>
+        </Link>
         <h1 className="mt-2 text-3xl font-bold tracking-tight">Sign in</h1>
         <p className="mt-1.5 text-sm text-neutral-600 dark:text-neutral-400">
           Your drive, your follow-ups, your numbers.

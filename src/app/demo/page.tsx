@@ -26,6 +26,12 @@ export default function DemoPage() {
             ← Back to the site
           </Link>
           <Link
+            href="/login"
+            className="touch-target inline-flex items-center font-semibold text-[var(--ink-soft)] transition hover:text-[var(--ink)]"
+          >
+            Sign in
+          </Link>
+          <Link
             href="/#demo"
             className="touch-target inline-flex items-center rounded-xl bg-[var(--ink)] px-4 py-2 text-sm font-semibold text-[var(--paper)] transition hover:opacity-85"
           >
