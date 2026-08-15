@@ -5,6 +5,8 @@ import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { INVITABLE_ROLES, inviteStatus } from '@/lib/invites/invite'
 import { InviteForm } from './invite-form'
+import { StaffRow } from './staff-row'
+import { canManageStaff } from '@/lib/team/roster'
 import { revokeInvite } from './actions'
 import { notFound } from 'next/navigation'
 
@@ -23,26 +25,32 @@ export default async function TeamPage() {
   const store = await getCurrentStore()
   if (!store) notFound()
 
-  // The page is about adding and removing people. Showing it to an advisor
-  // would be advertising a door they cannot open.
-  const canManage = user.role === 'SERVICE_MANAGER' || user.role === 'ADMIN'
-  if (!canManage) notFound()
+  /*
+    The page is about adding and removing people. Showing it to an advisor
+    would be advertising a door they cannot open.
+
+    Uses the same predicate the actions do, so the page and the endpoints
+    behind it cannot disagree about who counts as a manager — which they did:
+    this list omitted FIXED_OPS_DIRECTOR, who in a group is often the only
+    manager-ish account at a rooftop.
+  */
+  if (!canManageStaff(user.role)) notFound()
 
   const db = getDb()
   const [staff, invitations] = await Promise.all([
+    // Inactive members are loaded too — a manager needs to see who they took
+    // off, both to confirm it happened and to put somebody back.
     db.select({
       id: schema.users.id,
       name: schema.users.fullName,
       email: schema.users.email,
       role: schema.userStoreRoles.role,
-      lastSeenAt: schema.users.lastSeenAt,
+      isActive: schema.userStoreRoles.isActive,
     })
       .from(schema.userStoreRoles)
       .innerJoin(schema.users, eq(schema.users.id, schema.userStoreRoles.userId))
-      .where(and(
-        eq(schema.userStoreRoles.storeId, store.id),
-        eq(schema.userStoreRoles.isActive, true),
-      )),
+      .where(eq(schema.userStoreRoles.storeId, store.id))
+      .orderBy(desc(schema.userStoreRoles.isActive), schema.users.fullName),
     db.select()
       .from(schema.storeInvitations)
       .where(and(
@@ -121,19 +129,25 @@ export default async function TeamPage() {
 
       <section className="mt-6">
         <h2 className="text-sm font-bold uppercase tracking-widest text-neutral-500">
-          Staff ({staff.length})
+          Staff ({staff.filter((s) => s.isActive).length})
         </h2>
+        <p className="mt-1 text-xs text-neutral-500">
+          Removing somebody takes away their access. It does not delete them — the repair orders
+          they wrote stay in their name.
+        </p>
         <ul className="mt-2 divide-y divide-neutral-100 rounded-xl border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
           {staff.map((s) => (
-            <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{s.name ?? s.email}</p>
-                <p className="text-xs text-neutral-500">{s.email}</p>
-              </div>
-              <span className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium dark:bg-neutral-900">
-                {roleLabel(s.role)}
-              </span>
-            </li>
+            <StaffRow
+              key={s.id}
+              member={{
+                userId: s.id,
+                name: s.name ?? s.email,
+                email: s.email,
+                role: s.role,
+                isActive: s.isActive,
+                isSelf: s.id === user.id,
+              }}
+            />
           ))}
         </ul>
       </section>

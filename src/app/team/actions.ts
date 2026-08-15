@@ -6,6 +6,10 @@ import { getDb, schema } from '@/db/client'
 import { requireUser } from '@/lib/auth/session'
 import { isInvitableRole, normaliseEmail } from '@/lib/invites/invite'
 import { createInvitation } from '@/lib/invites/create'
+import {
+  canChangeRole, canManageStaff, canRemove, canRestore,
+  type RosterMember, type StaffRole,
+} from '@/lib/team/roster'
 
 export interface InviteState {
   error?: string
@@ -21,9 +25,23 @@ export interface InviteState {
   invitedEmail?: string
 }
 
-/** Who may add staff. Advisors cannot invite themselves a manager. */
-function canManageStaff(role: string): boolean {
-  return role === 'SERVICE_MANAGER' || role === 'ADMIN'
+/**
+ * The store's roster, for the guards to reason over.
+ *
+ * Read fresh inside each action rather than passed from the page. The page
+ * rendered at some point in the past and these are POST endpoints — by the time
+ * one runs, the last manager may already have been removed by somebody else.
+ */
+async function roster(storeId: string): Promise<RosterMember[]> {
+  const rows = await getDb()
+    .select({
+      userId: schema.userStoreRoles.userId,
+      role: schema.userStoreRoles.role,
+      isActive: schema.userStoreRoles.isActive,
+    })
+    .from(schema.userStoreRoles)
+    .where(eq(schema.userStoreRoles.storeId, storeId))
+  return rows as RosterMember[]
 }
 
 export async function inviteStaff(
@@ -74,6 +92,90 @@ export async function inviteStaff(
 
   revalidatePath('/team')
   return { link: `/invite/${token}`, invitedEmail: email }
+}
+
+export interface RosterState {
+  error?: string
+  ok?: string
+}
+
+/**
+ * Take somebody off the roster.
+ *
+ * Deactivates the membership; it never deletes the person. An advisor who left
+ * in March still wrote February's repair orders and still owns the declines
+ * being followed up, so the name stays attached to the history and simply stops
+ * being able to sign in.
+ */
+export async function removeStaff(
+  _previous: RosterState,
+  formData: FormData,
+): Promise<RosterState> {
+  const user = await requireUser()
+  const targetUserId = String(formData.get('userId') ?? '')
+
+  const verdict = canRemove(await roster(user.storeId), user.id, targetUserId)
+  if (!verdict.ok) return { error: verdict.reason }
+
+  await getDb().update(schema.userStoreRoles)
+    .set({ isActive: false })
+    .where(and(
+      eq(schema.userStoreRoles.userId, targetUserId),
+      // Scoped to this store: a manager at one rooftop must not be able to
+      // remove somebody at another by posting their id.
+      eq(schema.userStoreRoles.storeId, user.storeId),
+    ))
+
+  revalidatePath('/team')
+  return { ok: 'Removed. Their history stays on the repair orders they wrote.' }
+}
+
+/** Put somebody back, for the advisor who returns after a season elsewhere. */
+export async function restoreStaff(
+  _previous: RosterState,
+  formData: FormData,
+): Promise<RosterState> {
+  const user = await requireUser()
+  const targetUserId = String(formData.get('userId') ?? '')
+
+  const verdict = canRestore(await roster(user.storeId), user.id, targetUserId)
+  if (!verdict.ok) return { error: verdict.reason }
+
+  await getDb().update(schema.userStoreRoles)
+    .set({ isActive: true })
+    .where(and(
+      eq(schema.userStoreRoles.userId, targetUserId),
+      eq(schema.userStoreRoles.storeId, user.storeId),
+    ))
+
+  revalidatePath('/team')
+  return { ok: 'Back on the roster.' }
+}
+
+export async function changeRole(
+  _previous: RosterState,
+  formData: FormData,
+): Promise<RosterState> {
+  const user = await requireUser()
+  const targetUserId = String(formData.get('userId') ?? '')
+  const nextRole = String(formData.get('role') ?? '')
+
+  if (!isInvitableRole(nextRole)) return { error: 'Pick a role from the list.' }
+
+  const verdict = canChangeRole(
+    await roster(user.storeId), user.id, targetUserId, nextRole as StaffRole,
+  )
+  if (!verdict.ok) return { error: verdict.reason }
+
+  await getDb().update(schema.userStoreRoles)
+    .set({ role: nextRole })
+    .where(and(
+      eq(schema.userStoreRoles.userId, targetUserId),
+      eq(schema.userStoreRoles.storeId, user.storeId),
+    ))
+
+  revalidatePath('/team')
+  return { ok: 'Role updated.' }
 }
 
 export async function revokeInvite(formData: FormData): Promise<void> {
