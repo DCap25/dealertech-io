@@ -1,6 +1,7 @@
 import 'server-only'
 import { and, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import type { OpportunityOutcome, OutcomeRecord, SoldLineRecord } from './types'
 
 /**
@@ -39,7 +40,10 @@ export interface AdvisorIdentity {
  * scorecard belonging to someone other than the person who worked the drive.
  */
 export async function getDefaultAdvisor(storeId: string): Promise<AdvisorIdentity | null> {
-  const db = getDb()
+  return withCurrentUserScope((db) => getDefaultAdvisorScoped(db, storeId))
+}
+
+async function getDefaultAdvisorScoped(db: ScopedDb, storeId: string): Promise<AdvisorIdentity | null> {
   // Role is per-store — a person can advise at one rooftop and manage another.
   const rows = await db
     .select({
@@ -70,7 +74,14 @@ export async function loadOutcomes(
   advisorId: string,
   since: Date,
 ): Promise<OutcomeRecord[]> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadOutcomesScoped(db, storeId, advisorId, since))
+}
+
+async function loadOutcomesScoped(db: ScopedDb, 
+  storeId: string,
+  advisorId: string,
+  since: Date,
+): Promise<OutcomeRecord[]> {
   const rows = await db
     .select()
     .from(schema.prepSheetOutcomes)
@@ -107,7 +118,14 @@ export async function loadSoldLines(
   advisorId: string,
   since: Date,
 ): Promise<SoldLineRecord[]> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadSoldLinesScoped(db, storeId, advisorId, since))
+}
+
+async function loadSoldLinesScoped(db: ScopedDb, 
+  storeId: string,
+  advisorId: string,
+  since: Date,
+): Promise<SoldLineRecord[]> {
 
   const ros = await db
     .select({ id: schema.repairOrders.id, closedAt: schema.repairOrders.closedAt })

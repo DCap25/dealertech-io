@@ -42,7 +42,14 @@ import { getDb } from './client'
  */
 const SCOPED_ROLE = 'authenticated'
 
-type ScopedDb = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
+/**
+ * A transaction-bound handle with the user's identity applied.
+ *
+ * Exported so loaders can take it as a parameter and keep their bodies
+ * unchanged: the usual conversion is a thin wrapper calling into the original
+ * function, which keeps the diff readable and the query logic reviewable.
+ */
+export type ScopedDb = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
 
 /**
  * Run a unit of work as a specific user.
@@ -76,6 +83,26 @@ export async function withUserScope<T>(
 
     return work(tx)
   })
+}
+
+/**
+ * The common case: scope to whoever is signed in right now.
+ *
+ * Loaders that only ever serve a page or an action do not need the user id
+ * threaded down through their signatures to reach this — the session is already
+ * resolved once per request and cached. Keeping it out of the signatures means
+ * the conversion does not ripple into every call site, and means a loader
+ * cannot be called with one user's id while serving another's request.
+ *
+ * Redirects to sign-in if there is no session, which is the correct outcome for
+ * anything that reads a dealership's data.
+ */
+export async function withCurrentUserScope<T>(
+  work: (tx: ScopedDb) => Promise<T>,
+): Promise<T> {
+  const { requireUser } = await import('@/lib/auth/session')
+  const user = await requireUser()
+  return withUserScope(user.id, work)
 }
 
 /**

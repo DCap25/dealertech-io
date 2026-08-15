@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm'
 import { addDays } from 'date-fns'
 import { getDb, schema } from '@/db/client'
+import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import { displayDetail } from './run'
 import type { CadenceTrigger } from './types'
 
@@ -65,7 +66,19 @@ export async function loadWorklist(
    */
   lookaheadDays = 0,
 ): Promise<Worklist> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadWorklistScoped(db, storeId, asOf, trigger, lookaheadDays))
+}
+
+async function loadWorklistScoped(db: ScopedDb, 
+  storeId: string,
+  asOf: Date = new Date(),
+  trigger?: CadenceTrigger,
+  /**
+   * How far ahead to include not-yet-due tasks. Zero keeps the historical
+   * behaviour — everything due now or overdue and nothing else.
+   */
+  lookaheadDays = 0,
+): Promise<Worklist> {
   const horizon = lookaheadDays > 0 ? addDays(asOf, lookaheadDays) : asOf
 
   const rows = await db

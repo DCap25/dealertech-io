@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import { evaluateCoverage, type Contract, type CoverageDetermination, type PrepaidEntitlement } from '@/lib/coverage'
 import { computeWarrantySnapshot, type WarrantySnapshot } from '@/lib/warranty'
 
@@ -72,7 +73,13 @@ export async function loadAdvisorWorkspace(
   storeId: string,
   day: Date,
 ): Promise<AdvisorWorkspace> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadAdvisorWorkspaceScoped(db, storeId, day))
+}
+
+async function loadAdvisorWorkspaceScoped(db: ScopedDb, 
+  storeId: string,
+  day: Date,
+): Promise<AdvisorWorkspace> {
   const from = startOfDay(day)
   const to = new Date(from)
   to.setDate(to.getDate() + 1)
@@ -243,7 +250,14 @@ export async function loadRepairOrder(
   repairOrderId: string,
   asOf: Date = new Date(),
 ): Promise<RepairOrderDetail | null> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadRepairOrderScoped(db, storeId, repairOrderId, asOf))
+}
+
+async function loadRepairOrderScoped(db: ScopedDb, 
+  storeId: string,
+  repairOrderId: string,
+  asOf: Date = new Date(),
+): Promise<RepairOrderDetail | null> {
 
   const [ro] = await db.select().from(schema.repairOrders).where(and(
     eq(schema.repairOrders.storeId, storeId),
@@ -390,7 +404,10 @@ export async function loadRepairOrder(
 
 /** Next RO number for the store. Real stores get this from the DMS. */
 export async function nextRoNumber(storeId: string): Promise<string> {
-  const db = getDb()
+  return withCurrentUserScope((db) => nextRoNumberScoped(db, storeId))
+}
+
+async function nextRoNumberScoped(db: ScopedDb, storeId: string): Promise<string> {
   const [row] = await db
     .select({ max: sql<string | null>`max(${schema.repairOrders.roNumber})` })
     .from(schema.repairOrders)

@@ -1,6 +1,7 @@
 import 'server-only'
 import { and, eq, gte, inArray, isNotNull, lt } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import type { Period } from '@/lib/performance'
 import type {
   ManagerAdvisor, ManagerAppointment, ManagerFollowUp, ManagerRepairOrder,
@@ -27,7 +28,10 @@ const SOLD_LINE_STATUSES = ['APPROVED', 'IN_PROGRESS', 'COMPLETE'] as const
 const DRIVE_ROLES = ['ADVISOR', 'SERVICE_MANAGER'] as const
 
 export async function loadAdvisors(storeId: string): Promise<ManagerAdvisor[]> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadAdvisorsScoped(db, storeId))
+}
+
+async function loadAdvisorsScoped(db: ScopedDb, storeId: string): Promise<ManagerAdvisor[]> {
   const rows = await db
     .select({
       id: schema.users.id,
@@ -53,7 +57,14 @@ export async function loadAppointments(
   from: Date,
   to: Date,
 ): Promise<ManagerAppointment[]> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadAppointmentsScoped(db, storeId, from, to))
+}
+
+async function loadAppointmentsScoped(db: ScopedDb, 
+  storeId: string,
+  from: Date,
+  to: Date,
+): Promise<ManagerAppointment[]> {
   const rows = await db
     .select({
       advisorId: schema.appointments.advisorId,
@@ -88,7 +99,13 @@ export async function loadRepairOrders(
   storeId: string,
   period: Period,
 ): Promise<ManagerRepairOrder[]> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadRepairOrdersScoped(db, storeId, period))
+}
+
+async function loadRepairOrdersScoped(db: ScopedDb, 
+  storeId: string,
+  period: Period,
+): Promise<ManagerRepairOrder[]> {
 
   const ros = await db
     .select({
@@ -156,7 +173,10 @@ export async function loadRepairOrders(
  * beside someone's name that nothing in the system actually says.
  */
 export async function loadBacklog(storeId: string): Promise<ManagerFollowUp[]> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadBacklogScoped(db, storeId))
+}
+
+async function loadBacklogScoped(db: ScopedDb, storeId: string): Promise<ManagerFollowUp[]> {
   const rows = await db
     .select({
       trigger: schema.cadenceTasks.trigger,

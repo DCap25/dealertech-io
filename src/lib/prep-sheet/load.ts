@@ -1,6 +1,7 @@
 import 'server-only'
 import { eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { toPrepSheetInputs, type StoreProfile } from '@/lib/dms'
 import { getDmsAdapter } from '@/lib/dms/registry'
 import { buildPrepSheet } from './build'
@@ -26,17 +27,18 @@ import type { PrepSheet } from './types'
  * obviously placeholders rather than plausible ones.
  */
 async function storeProfile(storeId: string): Promise<StoreProfile> {
-  const db = getDb()
+  return withCurrentUserScope(async (db) => {
   const [row] = await db
     .select({ state: schema.stores.state, laborRate: schema.stores.laborRate })
     .from(schema.stores)
     .where(eq(schema.stores.id, storeId))
     .limit(1)
 
-  return {
-    state: row?.state ?? undefined,
-    laborRate: Number(row?.laborRate ?? 0),
-  }
+    return {
+      state: row?.state ?? undefined,
+      laborRate: Number(row?.laborRate ?? 0),
+    }
+  })
 }
 
 function startOfDay(d: Date): Date {

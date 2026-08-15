@@ -1,5 +1,6 @@
 import { and, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import { displayDetail } from '@/lib/cadence/run'
 
 /**
@@ -41,7 +42,14 @@ export async function searchCustomers(
   query: string,
   limit = 50,
 ): Promise<CustomerSearchResult[]> {
-  const db = getDb()
+  return withCurrentUserScope((db) => searchCustomersScoped(db, storeId, query, limit))
+}
+
+async function searchCustomersScoped(db: ScopedDb, 
+  storeId: string,
+  query: string,
+  limit = 50,
+): Promise<CustomerSearchResult[]> {
   const term = query.trim()
 
   // Digits-only comparison so "(512) 555-1234" finds "5125551234".
@@ -220,7 +228,13 @@ export async function loadCustomerRecord(
   storeId: string,
   customerId: string,
 ): Promise<CustomerRecord | null> {
-  const db = getDb()
+  return withCurrentUserScope((db) => loadCustomerRecordScoped(db, storeId, customerId))
+}
+
+async function loadCustomerRecordScoped(db: ScopedDb, 
+  storeId: string,
+  customerId: string,
+): Promise<CustomerRecord | null> {
 
   const [customer] = await db
     .select()
