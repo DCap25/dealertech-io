@@ -99,6 +99,30 @@ export const userStoreRoles = pgTable(
 )
 
 /**
+ * DealerTech's own staff, as distinct from a dealership's.
+ *
+ * Grants the operational view — which dealerships exist, whether their jobs
+ * ran, who signed up — and deliberately not customer data. Reaching a specific
+ * dealership's customers is still done by being granted a role at that store,
+ * which leaves a row behind it rather than being an invisible capability.
+ */
+export const platformAdmins = pgTable(
+  'platform_admins',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+
+    grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+    grantedByUserId: uuid('granted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Revoked, never deleted — "who had access last March" needs an answer. */
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedByUserId: uuid('revoked_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    note: text('note'),
+  },
+  (t) => [index('platform_admins_user_idx').on(t.userId)],
+)
+
+/**
  * Staff invitations.
  *
  * A bearer credential: the link is enough to create an account with a named

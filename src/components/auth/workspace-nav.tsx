@@ -39,6 +39,11 @@ export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up
             {l.label}
           </Link>
         ))}
+      {/* Only DealerTech staff, and only when they are also working a store —
+          anyone without a dealership role lands on the console at sign-in. */}
+      {user?.isPlatformAdmin && (
+        <Link href="/admin" className="hover:underline">Platform</Link>
+      )}
       <StoreSwitcher />
       <UserBadge />
     </nav>

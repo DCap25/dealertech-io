@@ -1,8 +1,8 @@
 import 'server-only'
 import { cache } from 'react'
 import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
-import { and, asc, eq } from 'drizzle-orm'
+import { notFound, redirect } from 'next/navigation'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import {
@@ -46,6 +46,14 @@ export interface CurrentUser {
    * covers several. Anything more than one turns on the store switcher.
    */
   memberships: StoreMembership[]
+  /**
+   * DealerTech staff, not dealership staff.
+   *
+   * Unlocks the operational console at /admin — tenants, leads, job health —
+   * and grants no access whatsoever to any dealership's customers. That
+   * separation is the whole design; see migration 0016.
+   */
+  isPlatformAdmin: boolean
 }
 
 /**
@@ -55,7 +63,25 @@ export interface CurrentUser {
  * user; without this, a single Drive render would issue the same two queries
  * a dozen times.
  */
-export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
+/**
+ * Everything the request knows about who is calling.
+ *
+ * Permissive on purpose: `active` is null for DealerTech staff who hold no
+ * dealership role, which is a legitimate and expected state. Workspace code
+ * should use `getCurrentUser`, which requires a store; only the sign-in page
+ * and the operational console reach for this.
+ */
+export interface Session {
+  id: string
+  email: string
+  name: string
+  /** The rooftop being worked, or null for platform staff with no store role. */
+  active: StoreMembership | null
+  memberships: StoreMembership[]
+  isPlatformAdmin: boolean
+}
+
+export const getSession = cache(async (): Promise<Session | null> => {
   const supabase = await getSupabaseServerClient()
 
   // getUser() revalidates the token with Supabase. getSession() only decodes
@@ -90,17 +116,6 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     ))
     .orderBy(asc(schema.stores.name))
 
-  const first = rows[0]
-
-  /**
-   * Authenticated but not staff anywhere.
-   *
-   * Treated as signed out rather than as an error: it is what an invited user
-   * looks like before someone grants them a store role, and the sign-in page
-   * explains that better than a crash does.
-   */
-  if (!first) return null
-
   const memberships: StoreMembership[] = rows.map((r) => ({
     storeId: r.storeId,
     storeName: r.storeName,
@@ -115,17 +130,66 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     falls back to their own first rooftop.
   */
   const requested = (await cookies()).get(ACTIVE_STORE_COOKIE)?.value
-  const active = resolveActiveStore(memberships, requested)!
+  const active = resolveActiveStore(memberships, requested)
+
+  const platform = await db
+    .select({ id: schema.platformAdmins.id })
+    .from(schema.platformAdmins)
+    .where(and(
+      eq(schema.platformAdmins.userId, data.user.id),
+      isNull(schema.platformAdmins.revokedAt),
+    ))
+    .limit(1)
+
+  const isPlatformAdmin = platform.length > 0
+
+  /**
+   * Authenticated, but neither dealership staff nor DealerTech staff.
+   *
+   * Treated as signed out rather than as an error: it is what an invited user
+   * looks like before someone grants them a store role, and the sign-in page
+   * explains that better than a crash does.
+   */
+  if (!active && !isPlatformAdmin) return null
+
+  const [identity] = await db
+    .select({ email: schema.users.email, fullName: schema.users.fullName })
+    .from(schema.users)
+    .where(eq(schema.users.id, data.user.id))
+    .limit(1)
 
   return {
-    id: first.id,
-    email: first.email,
-    name: first.fullName ?? first.email,
+    id: data.user.id,
+    email: identity?.email ?? data.user.email ?? '',
+    name: identity?.fullName ?? identity?.email ?? data.user.email ?? '',
+    active,
+    memberships,
+    isPlatformAdmin,
+  }
+})
+
+/**
+ * Who is signed in, with a dealership attached.
+ *
+ * The workspace runs on this. Returns null for DealerTech staff who hold no
+ * store role — correct, because there is no drive to show them — which is why
+ * sign-in sends them to the operational console instead of the workspace.
+ */
+export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
+  const session = await getSession()
+  if (!session?.active) return null
+
+  const { active } = session
+  return {
+    id: session.id,
+    email: session.email,
+    name: session.name,
     storeId: active.storeId,
     storeName: active.storeName,
     role: active.role,
     isAdvisor: active.role === 'ADVISOR' || active.role === 'SERVICE_MANAGER',
-    memberships,
+    memberships: session.memberships,
+    isPlatformAdmin: session.isPlatformAdmin,
   }
 })
 
@@ -139,6 +203,21 @@ export async function requireUser(): Promise<CurrentUser> {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
   return user
+}
+
+/**
+ * DealerTech staff, or a 404.
+ *
+ * Not a redirect and not a 403. Somebody probing for an admin console should
+ * not learn from the response that one exists — and a dealership user who
+ * follows a stale link gets the same page as a typo, which is the truthful
+ * answer for them anyway.
+ */
+export async function requirePlatformAdmin(): Promise<Session> {
+  const session = await getSession()
+  if (!session) redirect('/login')
+  if (!session.isPlatformAdmin) notFound()
+  return session
 }
 
 /**

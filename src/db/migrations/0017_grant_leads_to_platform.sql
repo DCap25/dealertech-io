@@ -1,0 +1,24 @@
+-- Let platform staff actually read the leads their policy already allows.
+--
+-- ===========================================================================
+-- A POLICY IS NOT A GRANT
+-- ===========================================================================
+-- 0016 gave demo_requests a policy saying platform admins may read it. 0004 had
+-- previously done `REVOKE ALL ON public.demo_requests FROM authenticated`,
+-- which was right at the time: the marketing form writes through the privileged
+-- connection and nothing should have read leads through a user session.
+--
+-- The two together produce a failure worth remembering. Postgres checks the
+-- GRANT first and the policy second, so the console did not quietly return an
+-- empty list — it raised `permission denied for table demo_requests`. That is
+-- the good outcome. The dangerous version of this mistake is the other way
+-- round: a GRANT with no policy, which returns rows and looks like it works.
+--
+-- SELECT only. Leads are created by the anonymous marketing form through the
+-- privileged connection and are never edited from a session, so nothing here
+-- needs INSERT, UPDATE or DELETE — and the row-level policy still restricts
+-- even this to platform staff.
+--
+-- Idempotent. Applied with `npm run db:apply` — see src/db/README.md.
+
+GRANT SELECT ON public.demo_requests TO authenticated;

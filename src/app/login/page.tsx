@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { getCurrentUser } from '@/lib/auth/session'
+import { getSession } from '@/lib/auth/session'
 import { safeRedirect } from '@/lib/auth/routes'
 import { SignInForm } from './sign-in-form'
 
@@ -31,9 +31,16 @@ export default async function LoginPage({
   const { next } = await searchParams
   const target = safeRedirect(next)
 
-  // Already signed in — no reason to show a form.
-  const user = await getCurrentUser()
-  if (user) redirect(target)
+  /*
+    Already signed in — no reason to show a form.
+
+    Resolved from the session rather than from `getCurrentUser`, which requires
+    a dealership. DealerTech staff hold no store role, so that check said "not
+    signed in" and showed them a login form they had just used.
+  */
+  const session = await getSession()
+  if (session?.active) redirect(target)
+  if (session?.isPlatformAdmin) redirect('/admin')
 
   const showDemo = process.env.NODE_ENV !== 'production'
 
