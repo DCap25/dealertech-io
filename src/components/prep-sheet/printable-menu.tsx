@@ -1,21 +1,34 @@
 'use client'
 
-import { money } from '@/components/ui/primitives'
-import { customerDetail } from '@/lib/prep-sheet/presentation'
-import { TIER_COPY, type BuiltMenu } from '@/lib/menu/selection'
+import { useMemo } from 'react'
+import { money } from '@/components/present/service-menu'
+import { buildDeviceSnapshot } from '@/lib/pairing/snapshot'
+import type { MenuSelection } from '@/lib/menu/selection'
 import type { PrepSheet } from '@/lib/prep-sheet'
 
 /**
  * The menu, on paper.
  *
- * Built from the same selection as the tablet, in the same order, so the
- * fallback is the same document rather than a second thing to keep in sync.
  * It exists because a drive with one broken tablet still has customers on it,
  * and "our system is down" is not a thing anyone wants to say while holding
  * someone's keys.
  *
+ * ---------------------------------------------------------------------------
+ * SAME DATA, DIFFERENT MARKUP
+ * ---------------------------------------------------------------------------
+ * This builds its rows from `buildDeviceSnapshot` — the same function that
+ * feeds the tablet and the link — rather than from the sheet. Paper legitimately
+ * needs different markup: a table with tick boxes and a signature line is not a
+ * list of buttons. It does not need different *data*, and when it had its own
+ * derivation it drifted: the screen learned to say "price to be confirmed"
+ * before the printout did, so for a while the same visit could be quoted two
+ * different ways depending on which one the customer walked out with.
+ *
+ * The only things taken from the sheet are the document's own metadata — VIN,
+ * advisor, date — which are not part of what is being recommended.
+ *
  * Hidden on screen entirely and revealed by `@media print`, which is also why
- * it is safe to render inside the overlay: nothing here competes for space.
+ * it is safe to render inside an overlay: nothing here competes for space.
  *
  * The customer marks a box by hand. That is the same commitment a tap on the
  * tablet makes — an indication of what they want, which the advisor then
@@ -23,24 +36,25 @@ import type { PrepSheet } from '@/lib/prep-sheet'
  */
 export function PrintableMenu({
   sheet,
-  menu,
+  selection,
   printedAt,
 }: {
   sheet: PrepSheet
-  menu: BuiltMenu
+  /** What the advisor chose to show. The same selection the tablet renders. */
+  selection: MenuSelection
   printedAt: Date
 }) {
+  const snapshot = useMemo(() => buildDeviceSnapshot(sheet, selection), [sheet, selection])
+
   return (
     <div className="print-sheet hidden print:block">
       <header className="border-b-2 border-black pb-3">
         <div className="flex items-start justify-between gap-6">
           <div>
             <p className="text-[10pt] font-bold uppercase tracking-widest">Recommended service</p>
-            <p className="mt-1 text-[16pt] font-bold leading-tight">
-              {sheet.vehicle.modelYear} {sheet.vehicle.make} {sheet.vehicle.model}
-            </p>
+            <p className="mt-1 text-[16pt] font-bold leading-tight">{snapshot.vehicleLabel}</p>
             <p className="text-[10pt]">
-              {sheet.customer.name} · {sheet.projectedMileage.toLocaleString()} miles
+              {snapshot.customerName} · {snapshot.mileage.toLocaleString()} miles
             </p>
           </div>
           <div className="text-right text-[9pt] leading-snug">
@@ -58,17 +72,17 @@ export function PrintableMenu({
         </div>
       </header>
 
-      {menu.coveredTotal > 0 && (
+      {snapshot.coveredTotal > 0 && (
         <p className="mt-3 border border-black px-3 py-2 text-[11pt]">
-          <strong>{money(menu.coveredTotal)}</strong> of the work below is paid for by coverage you
-          already own.
+          <strong>{money(snapshot.coveredTotal)}</strong> of the work below is paid for by coverage
+          you already own.
         </p>
       )}
 
-      {menu.tiers.map((group) => (
+      {snapshot.tiers.map((group) => (
         <section key={group.tier} className="mt-5 break-inside-avoid">
-          <h2 className="text-[12pt] font-bold">{TIER_COPY[group.tier].title}</h2>
-          <p className="text-[9pt] italic">{TIER_COPY[group.tier].blurb}</p>
+          <h2 className="text-[12pt] font-bold">{group.title}</h2>
+          <p className="text-[9pt] italic">{group.blurb}</p>
 
           <table className="mt-2 w-full border-collapse text-[10pt]">
             <thead>
@@ -81,10 +95,9 @@ export function PrintableMenu({
             </thead>
             <tbody>
               {group.items.map((item) => {
-                const o = item.opportunity
-                const savings = Math.max(0, o.estimatedAmount - o.customerOutOfPocket)
+                const savings = Math.max(0, item.fullAmount - item.customerOutOfPocket)
                 return (
-                  <tr key={o.id} className="break-inside-avoid border-b border-neutral-400">
+                  <tr key={item.id} className="break-inside-avoid border-b border-neutral-400">
                     {/* Marked by hand. Same weight as a tap on the tablet. */}
                     <td className="py-2 align-top">
                       <span className="inline-block h-4 w-4 border border-black" />
@@ -93,8 +106,8 @@ export function PrintableMenu({
                       <span className="inline-block h-4 w-4 border border-black" />
                     </td>
                     <td className="py-2 pr-3 align-top">
-                      <p className="font-bold">{o.title}</p>
-                      <p className="text-[9pt] leading-snug">{customerDetail(o)}</p>
+                      <p className="font-bold">{item.title}</p>
+                      <p className="text-[9pt] leading-snug">{item.detail}</p>
                     </td>
                     {/*
                       A printed price is the hardest to walk back — the
@@ -102,16 +115,18 @@ export function PrintableMenu({
                       price on file, it says so rather than printing ours.
                     */}
                     <td className="py-2 text-right align-top tabular-nums">
-                      {o.priceSource === 'ESTIMATE' ? (
+                      {item.priceConfirmed === false ? (
                         <p className="font-bold">Price to be confirmed</p>
                       ) : (
                         <>
                           <p className="font-bold">
-                            {o.customerOutOfPocket === 0 ? 'No charge' : money(o.customerOutOfPocket)}
+                            {item.customerOutOfPocket === 0
+                              ? 'No charge'
+                              : money(item.customerOutOfPocket)}
                           </p>
                           {savings > 0 && (
                             <p className="text-[9pt]">
-                              <span className="line-through">{money(o.estimatedAmount)}</span> before
+                              <span className="line-through">{money(item.fullAmount)}</span> before
                               coverage
                             </p>
                           )}
@@ -129,7 +144,7 @@ export function PrintableMenu({
       <div className="mt-5 break-inside-avoid border-t-2 border-black pt-3">
         <div className="flex items-baseline justify-between text-[12pt]">
           <span className="font-bold">Everything recommended</span>
-          <span className="font-bold tabular-nums">{money(menu.customerTotal)}</span>
+          <span className="font-bold tabular-nums">{money(snapshot.customerTotal)}</span>
         </div>
       </div>
 

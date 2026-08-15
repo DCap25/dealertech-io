@@ -167,6 +167,48 @@ describe('buildDeviceSnapshot', () => {
     expect(snap.itemCount).toBe(1)
     expect(JSON.stringify(snap)).not.toContain('Tyres approaching')
   })
+
+  /*
+    Every customer-facing surface now decides whether to show a price by
+    reading `priceConfirmed` off this snapshot — the tablet, the link, the
+    advisor's own preview and the printout. It used to be decided in three
+    places from three derivations, and they disagreed for a while: the screen
+    said "price to be confirmed" while the paper the customer walked out with
+    printed our estimate. These tests guard the single fact they all read.
+  */
+  it('marks a price the store cannot bill as unconfirmed', () => {
+    const s2 = sheet([opp({ priceSource: 'ESTIMATE' })])
+    const snap = buildDeviceSnapshot(s2, { includedIds: ['o1'] })
+    expect(snap.tiers[0]!.items[0]!.priceConfirmed).toBe(false)
+  })
+
+  it('marks a price that came from the store as confirmed', () => {
+    const s2 = sheet([opp({ priceSource: 'STORE' })])
+    const snap = buildDeviceSnapshot(s2, { includedIds: ['o1'] })
+    expect(snap.tiers[0]!.items[0]!.priceConfirmed).toBe(true)
+  })
+
+  it('treats an integration with no price book at all as confirmed', () => {
+    // priceSource absent means nothing was resolved either way. Reading that
+    // as "unpriced" would redact every price on any DMS with no price book
+    // endpoint, which is a worse menu than the one we had.
+    const snap = buildDeviceSnapshot(sheet([opp()]), { includedIds: ['o1'] })
+    expect(snap.tiers[0]!.items[0]!.priceConfirmed).toBe(true)
+  })
+
+  it('leaves an unconfirmed price out of the totals underneath it', () => {
+    // The screen says "price to be confirmed" and then the total would have
+    // quietly included our figure — putting the number nobody can stand
+    // behind back in front of the customer by another route.
+    const s2 = sheet([
+      opp({ priceSource: 'STORE', estimatedAmount: 300, customerOutOfPocket: 200 }),
+      opp({ id: 'o2', title: 'Cabin filter', urgency: 'LOW', priceSource: 'ESTIMATE' }),
+    ])
+    const snap = buildDeviceSnapshot(s2, { includedIds: ['o1', 'o2'] })
+    expect(snap.itemCount).toBe(2)
+    expect(snap.customerTotal).toBe(200)
+    expect(snap.coveredTotal).toBe(100)
+  })
 })
 
 describe('sanitizeDecisions', () => {

@@ -237,7 +237,11 @@ export function MenuBuilder({
         of the fallback is a dead tablet, and reaching it should not require
         the tablet to work first.
       */}
-      <PrintableMenu sheet={sheet} menu={menu} printedAt={sheet.appointment?.scheduledAt ?? new Date()} />
+      <PrintableMenu
+        sheet={sheet}
+        selection={selection}
+        printedAt={sheet.appointment?.scheduledAt ?? new Date()}
+      />
 
       <div className="fixed inset-x-0 bottom-0 border-t border-[var(--border)] bg-[var(--background)]/95 px-5 py-3 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-3xl items-center gap-2">
