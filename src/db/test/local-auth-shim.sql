@@ -10,13 +10,30 @@
 
 CREATE SCHEMA IF NOT EXISTS auth;
 
+-- ---------------------------------------------------------------------------
 -- Matches Supabase's behaviour: read the subject claim, NULL when absent.
+--
+-- BOTH forms, because Supabase reads both and the two callers here use
+-- different ones. `request.jwt.claim.sub` is the flat legacy setting, which is
+-- what the RLS tests set directly. `request.jwt.claims` is the whole JWT as
+-- JSON, which is what `withUserScope` sets — and therefore what the entire
+-- application uses.
+--
+-- Reading only the flat form meant `auth.uid()` came back NULL for every query
+-- the real application made, so every policy matched nothing and every page
+-- rendered empty. The tests still passed, because they set the other one. An
+-- RLS harness that only works for the harness is worth very little; this is
+-- the line that lets the actual app be pointed at this database.
+-- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION auth.uid()
 RETURNS uuid
 LANGUAGE sql
 STABLE
 AS $$
-  SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid
+  SELECT COALESCE(
+    NULLIF(current_setting('request.jwt.claim.sub', true), ''),
+    NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'
+  )::uuid
 $$;
 
 DO $$

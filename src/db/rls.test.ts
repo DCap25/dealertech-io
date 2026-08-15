@@ -374,15 +374,16 @@ describe.skipIf(!reachable)('row-level security — tenant isolation', () => {
       is asserted rather than assumed — "not forced" is otherwise
       indistinguishable from "not protected".
 
-      It turns out to be shut harder than RLS alone would manage: the table was
-      never granted to `authenticated` at all, so this is refused at the
-      privilege layer before any policy is consulted. Worth pinning, because a
-      future migration that grants the role a blanket SELECT would move the
-      answer from "denied" to "allowed and unfiltered" in one step.
+      What closes it is RLS enabled with no policy at all, which matches no row
+      for anyone who is not the owner. Asserted as "sees nothing" rather than
+      "is refused" on purpose: production shuts this one harder still, because
+      `authenticated` was never granted the table either, but the shim here
+      grants every table deliberately so that a missing GRANT can never be what
+      makes an isolation test pass. Testing the privilege layer in a harness
+      that normalises the privilege layer away would prove nothing.
     */
-    await expect(
-      asUser(advisorA, (tx) => tx`SELECT filename FROM _applied_migrations`),
-    ).rejects.toThrow(/permission denied/i)
+    const rows = await asUser(advisorA, (tx) => tx`SELECT filename FROM _applied_migrations`)
+    expect(rows).toHaveLength(0)
   })
 
   it('gives every store-scoped table an isolation policy', async () => {
