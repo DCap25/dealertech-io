@@ -4,6 +4,7 @@ import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { buildDeviceSnapshot } from '@/lib/pairing/snapshot'
 import { endSession, listDevices, pushToDevice, sessionForAdvisor } from '@/lib/pairing/store'
+import { createLinkPresentation } from '@/lib/presentation/link-store'
 import type { MenuSelection } from '@/lib/menu/selection'
 import { demoNow } from '@/lib/demo-day'
 
@@ -71,6 +72,56 @@ export async function sendMenuToDevice(
     // the on-screen menu and the printout both still work.
     const detail = error instanceof Error ? error.message : 'Unknown error'
     return { status: 'ERROR', message: `Could not reach that tablet. ${detail}` }
+  }
+}
+
+export type LinkState =
+  | { status: 'CREATED'; path: string; sequence: number }
+  | { status: 'ERROR'; message: string }
+
+/**
+ * Send the same menu to the customer's own phone.
+ *
+ * This is the conversation the tablet cannot have. By the time the technician
+ * has finished the inspection the customer is at work, and a device on a desk
+ * in the drive is no use to them — but this is where most of the money on a
+ * repair order is won or lost.
+ *
+ * The snapshot is rebuilt here from the same prep sheet, exactly as it is for a
+ * tablet: the client sends ids, never prices. A tampered payload cannot put a
+ * number on a customer's phone that no engine produced.
+ */
+export async function sendMenuLink(
+  appointmentId: string,
+  includedIds: string[],
+): Promise<LinkState> {
+  const user = await requireUser()
+
+  const store = await getCurrentStore()
+  if (!store) return { status: 'ERROR', message: 'No store configured.' }
+
+  const sheets = await loadDriveDay(store.id, DAY(), DAY())
+  const sheet = sheets.find((s) => s.appointment?.id === appointmentId)
+  if (!sheet) return { status: 'ERROR', message: 'That appointment is no longer on the drive.' }
+
+  const selection: MenuSelection = {
+    includedIds: includedIds.filter((id) => typeof id === 'string'),
+  }
+
+  try {
+    const { token, sequence } = await createLinkPresentation({
+      storeId: user.storeId,
+      appointmentId,
+      advisorId: user.id,
+      snapshot: buildDeviceSnapshot(sheet, selection),
+      now: new Date(),
+    })
+    // The path only. The advisor's page builds the absolute URL from the
+    // request host, so a custom domain or a proxy produces a link that works.
+    return { status: 'CREATED', path: `/m/${token}`, sequence }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Unknown error'
+    return { status: 'ERROR', message: `Could not create the link. ${detail}` }
   }
 }
 

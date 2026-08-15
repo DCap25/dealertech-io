@@ -28,6 +28,19 @@ const PUBLIC_PREFIXES = [
   '/signup',
   '/invite',
   /**
+   * A menu link sent to a customer's phone.
+   *
+   * The person opening it is a customer, not a user — there is no account and
+   * never will be, so deny-by-default would send them to a sign-in page for
+   * something they cannot have. The token in the URL is the whole authority:
+   * 32 random bytes, hashed at rest, expiring in twelve hours, scoped to one
+   * visit.
+   *
+   * Short path on purpose. This goes in a text message, where every character
+   * is one more chance of a line break landing in the middle of the token.
+   */
+  '/m',
+  /**
    * The customer tablet. Not public in the sense of open — every action on
    * /api/device is authenticated by the device's own bearer token, and /present
    * shows nothing at all until a tablet has been claimed by an advisor.

@@ -11,6 +11,17 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/invite/J2wwmzr0HwYtP6lGL8gssSdFWq1ihxde')).toBe(true)
   })
 
+  it('lets a customer open a menu link sent to their phone', () => {
+    // They have no account and never will. Deny-by-default would send them to
+    // a sign-in page for something they cannot have — the same dead end
+    // invitations hit.
+    expect(isPublicPath('/m/AzwlXR-y2xfGVS9iP')).toBe(true)
+  })
+
+  it('does not open every path beginning with m', () => {
+    expect(isPublicPath('/manager')).toBe(false)
+  })
+
   it('lets a scheduler reach the cron endpoints', () => {
     // A job firing at six in the morning has no session. Leaving these to
     // deny-by-default sent Netlify's cron to the sign-in page and the sync
