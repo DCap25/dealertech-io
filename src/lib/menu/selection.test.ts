@@ -55,6 +55,27 @@ describe('defaultSelection', () => {
     const selection = defaultSelection([HIGH_2, HIGH])
     expect(selection.includedIds).toEqual(['high', 'high2'])
   })
+
+  it('leaves unverified interval services off the customer menu', () => {
+    // "We have no record of this" and "you are due for this" are different
+    // statements. An old car with no history carries half a dozen of the
+    // former, and defaulting them on hands the customer a page of guesses.
+    const unverified = opp({ id: 'guess', urgency: 'LOW', unverified: true })
+    const selection = defaultSelection([...ALL, unverified])
+    expect(selection.includedIds).not.toContain('guess')
+    expect(selection.includedIds).toEqual(['safety', 'high', 'high2', 'low'])
+  })
+
+  it('still offers them in the builder for the advisor to tick', () => {
+    // Off by default is not hidden. The advisor sees it, asks the customer,
+    // and adds it — which is the conversation the flag exists to force.
+    const unverified = opp({ id: 'guess', urgency: 'LOW', unverified: true })
+    const all = presentableItems([...ALL, unverified])
+    expect(all.map((i) => i.opportunity.id)).toContain('guess')
+
+    const menu = buildMenu([...ALL, unverified], toggle(defaultSelection([...ALL, unverified]), 'guess'))
+    expect(menu.items.map((i) => i.opportunity.id)).toContain('guess')
+  })
 })
 
 describe('toggle', () => {

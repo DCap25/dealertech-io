@@ -90,18 +90,30 @@ export function presentableItems(opportunities: Opportunity[]): MenuItem[] {
 }
 
 /**
- * The starting point: everything presentable, minus anything already skipped.
+ * The starting point: everything presentable, minus anything already skipped,
+ * minus anything we have not verified.
  *
- * Deliberately opt-out. An advisor who taps straight through gets the same
- * menu the product produced before this step existed, so curation is a thing
- * they can do rather than a thing they must do before a customer is served.
+ * Deliberately opt-out for the rest. An advisor who taps straight through gets
+ * the same menu the product produced before this step existed, so curation is
+ * a thing they can do rather than a thing they must do before a customer is
+ * served.
+ *
+ * The exception is items the engine flagged `unverified` — interval services
+ * with no record on file. Those are on the sheet as questions for the advisor,
+ * and an older vehicle with no history can carry half a dozen. Defaulting them
+ * on would put a page of "you may be due for this" in front of a customer, on
+ * the strength of a gap in our own records. They appear in the builder
+ * unchecked, so the advisor sees them and ticks the ones they have actually
+ * asked about.
  */
 export function defaultSelection(
   opportunities: Opportunity[],
   skippedIds: string[] = [],
 ): MenuSelection {
   const skipped = new Set(skippedIds)
-  const items = presentableItems(opportunities).filter((i) => !skipped.has(i.opportunity.id))
+  const items = presentableItems(opportunities)
+    .filter((i) => !skipped.has(i.opportunity.id))
+    .filter((i) => !i.opportunity.unverified)
 
   // Ranked the way the prep sheet ranked them, tier first. The engine already
   // decided what matters most; the advisor is editing that, not redoing it.

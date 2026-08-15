@@ -206,6 +206,8 @@ export function toPrepSheetInputs(
         currentMileage: vehicle.currentMileage ?? 0,
         avgMilesPerDay: vehicle.avgMilesPerDay,
         isHybridOrEv: vehicle.isHybridOrEv,
+        isFullyElectric: vehicle.isFullyElectric,
+        driveType: vehicle.driveType,
         isOriginalOwner: vehicle.isOriginalOwner,
       },
       appointment: {

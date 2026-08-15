@@ -40,6 +40,16 @@ export interface Opportunity {
   customerDetail?: string
   /** Row this came from — declined service, entitlement, recall campaign. */
   sourceId?: string
+  /**
+   * We inferred this rather than observed it, and it needs a word with the
+   * customer before it is presented as due.
+   *
+   * Set on interval services we have no service record for. The vehicle is past
+   * the interval and we have not seen the work done — but "we have no record"
+   * and "it is due" are different statements, and only the customer can close
+   * the gap. Items marked this way stay off the customer menu by default.
+   */
+  unverified?: boolean
 }
 
 export interface PrepSheetVehicle {
@@ -53,6 +63,14 @@ export interface PrepSheetVehicle {
   avgMilesPerDay: number | null
   isHybridOrEv: boolean
   isOriginalOwner: boolean
+  /**
+   * Null when the source system does not say. Driveline services are skipped
+   * rather than guessed at — a transfer case service on a front-wheel-drive
+   * car is worse than an omission.
+   */
+  driveType?: DriveType | null
+  /** True for battery-electric. A hybrid still has an engine to service. */
+  isFullyElectric?: boolean
 }
 
 export interface PrepSheetCustomer {
@@ -86,11 +104,37 @@ export interface OpenDecline {
   mileageAtDecline: number | null
 }
 
+/** How the wheels are driven. Decides which driveline services exist at all. */
+export type DriveType = 'FWD' | 'RWD' | 'AWD' | 'FOUR_WD'
+
 export interface MaintenanceInterval {
   description: string
   componentGroupKey: string
   intervalMiles: number
   estimatedAmount: number
+
+  /**
+   * Vehicles this service does not exist on.
+   *
+   * An electric car has no spark plugs and a front-wheel-drive car has no
+   * transfer case. Putting either on a menu is a visible, checkable error —
+   * and an advisor who has to delete a line before turning the tablet round
+   * stops trusting the rest of it.
+   *
+   * Absent means it applies to everything.
+   */
+  appliesTo?: {
+    /** Skip on battery-electric vehicles. */
+    combustionOnly?: boolean
+    /** Only on these drivelines. Skipped when the driveline is unknown. */
+    driveTypes?: DriveType[]
+    /**
+     * Newest model year this is offered for. Used where a system was phased
+     * out — hydraulic power steering, for one — and recommending it on a car
+     * that never had it is wrong rather than merely unnecessary.
+     */
+    maxModelYear?: number
+  }
 }
 
 export interface PrepSheetInput {

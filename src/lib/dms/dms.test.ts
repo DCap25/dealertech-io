@@ -42,6 +42,8 @@ function vehicle(over: Partial<DmsVehicle> = {}): DmsVehicle {
     currentMileage: 51_140,
     avgMilesPerDay: 28,
     isHybridOrEv: false,
+    isFullyElectric: false,
+    driveType: null,
     isOriginalOwner: true,
     ...over,
   }

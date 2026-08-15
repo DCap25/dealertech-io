@@ -92,6 +92,10 @@ function mapVehicle(
     currentMileage: v.currentMileage,
     avgMilesPerDay: v.avgMilesPerDay ? num(v.avgMilesPerDay) : null,
     isHybridOrEv: v.isHybridOrEv,
+    // Fuel type is what the DMS actually records; 'Electric' is the signal
+    // that there is no oil, no plugs and no induction service to sell.
+    isFullyElectric: (v.fuelType ?? '').toLowerCase() === 'electric',
+    driveType: normalizeDriveType(v.driveType),
     /**
      * Read from the ownership link, never assumed.
      *
@@ -508,4 +512,21 @@ export class MockDmsAdapter implements DmsAdapter {
 
 function isId(value: string | null): value is string {
   return typeof value === 'string' && value.length > 0
+}
+
+/**
+ * DMS records write drive type a dozen different ways.
+ *
+ * Anything unrecognised becomes null rather than a guess — a wrong driveline
+ * puts a transfer case service on a front-wheel-drive car, which is the kind
+ * of line an advisor has to delete in front of the customer.
+ */
+function normalizeDriveType(raw: string | null): 'FWD' | 'RWD' | 'AWD' | 'FOUR_WD' | null {
+  if (!raw) return null
+  const v = raw.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (v === 'FWD' || v.includes('FRONT')) return 'FWD'
+  if (v === 'RWD' || v.includes('REAR')) return 'RWD'
+  if (v === 'AWD' || v.includes('ALLWHEEL')) return 'AWD'
+  if (v === '4WD' || v === '4X4' || v === 'FOURWD' || v.includes('4WHEEL')) return 'FOUR_WD'
+  return null
 }

@@ -173,6 +173,114 @@ const LIBRARY: Explainer[] = [
       'You still get where you are going. You just buy tyres more often than you needed to.',
   },
   {
+    key: 'TIRE_BALANCE',
+    title: 'What balancing corrects',
+    diagram: 'GEOMETRY',
+    scenes: [
+      { holdMs: 4500, caption: 'A wheel and tyre are never perfectly even in weight. Small counterweights on the rim make up the difference.' },
+      { holdMs: 5000, caption: 'As the tyre wears, and if a weight is thrown off by a pothole, that balance drifts.' },
+      { holdMs: 5000, caption: 'An unbalanced wheel bounces very slightly at speed. You feel it as a vibration through the wheel or the seat at highway speeds.' },
+      { holdMs: 4000, caption: 'Because the bounce lands on the same patch of tread each rotation, it also wears the tyre in a scalloped pattern.' },
+    ],
+    ifIgnored:
+      'The vibration itself does no harm. What it costs is tread — a wheel out of balance wears its tyre unevenly, and that tyre is replaced sooner.',
+    candour:
+      'If you feel nothing at highway speed, this one is optional. It is usually worth doing with new tyres or a rotation rather than on its own.',
+  },
+  {
+    key: 'WIPER_BLADES',
+    title: 'How wiper blades fail',
+    diagram: 'LAYER_WEAR',
+    scenes: [
+      { holdMs: 4500, caption: 'A wiper works by dragging one thin, sharp rubber edge across the glass, flexing it over at the end of each stroke.' },
+      { holdMs: 5000, caption: 'Sunlight and heat harden that rubber. A blade ages sitting in a car park as much as it does in use.' },
+      { holdMs: 5000, caption: 'Once the edge stops flexing cleanly it leaves streaks, chatters, or lifts off the glass entirely.' },
+      { holdMs: 4000, caption: 'Most blades reach that point in about a year, which is why they are usually replaced by time rather than by mileage.' },
+    ],
+    ifIgnored:
+      'Streaking gets worse until the first hard rain at night, which is when it matters. A hardened blade can also drag grit across the glass and mark it.',
+  },
+  {
+    key: 'POWER_STEERING_PUMP',
+    title: 'What power steering fluid does',
+    diagram: 'FLUID_LIFE',
+    scenes: [
+      { holdMs: 4500, caption: 'On a car with hydraulic steering, a belt-driven pump pressurises fluid, and that pressure is what makes the wheel light.' },
+      { holdMs: 5000, caption: 'The fluid runs hot and passes through tight clearances in the pump and the steering rack.' },
+      { holdMs: 5000, caption: 'Over years it darkens and carries fine metal and seal debris, which is abrasive to the parts it is circulating through.' },
+      { holdMs: 4000, caption: 'Newer cars use an electric motor instead and have no fluid to service at all.' },
+    ],
+    ifIgnored:
+      'The usual sequence is a pump that whines, then a rack that seeps. Both are considerably more expensive than the fluid.',
+  },
+  {
+    key: 'DIFF_FLUID_SERVICE',
+    title: 'What differential fluid does',
+    diagram: 'FLUID_LIFE',
+    scenes: [
+      { holdMs: 4500, caption: 'The differential lets your driven wheels turn at different speeds through a corner. Its gears mesh by sliding against each other under very high pressure.' },
+      { holdMs: 5000, caption: 'Ordinary oil would be squeezed out of that contact. Gear oil carries additives that cling to the metal under load.' },
+      { holdMs: 5000, caption: 'Those additives are consumed as they do their job, and normal gear wear leaves fine metal suspended in the oil.' },
+      { holdMs: 4000, caption: 'Towing and heavy loads run the differential hotter and use the additives up faster.' },
+    ],
+    ifIgnored:
+      'Differentials are quiet until they are not. The first symptom is usually a whine that rises with road speed, and by then the gears are already worn.',
+  },
+  {
+    key: 'TRANSFER_CASE',
+    title: 'What the transfer case does',
+    diagram: 'FLUID_LIFE',
+    scenes: [
+      { holdMs: 4500, caption: 'On an all-wheel or four-wheel drive vehicle, the transfer case splits engine power between the front and rear axles.' },
+      { holdMs: 5000, caption: 'Inside it, a chain or a gear set runs constantly in a small amount of fluid — often under a litre.' },
+      { holdMs: 5000, caption: 'A small fill means the fluid works hard and degrades faster than the larger volumes elsewhere in the driveline.' },
+      { holdMs: 4000, caption: 'A two-wheel drive vehicle has no transfer case, so this service does not exist on one.' },
+    ],
+    ifIgnored:
+      'A worn transfer case chain shows up as a clunk or a shudder when the system engages, and the unit is normally replaced rather than repaired.',
+  },
+  {
+    key: 'PCV_SYSTEM',
+    title: 'What the PCV valve does',
+    diagram: 'FLOW_RESTRICTION',
+    scenes: [
+      { holdMs: 4500, caption: 'Some combustion pressure always leaks past the piston rings into the crankcase. It has to go somewhere.' },
+      { holdMs: 5000, caption: 'The PCV valve meters those vapours back into the intake to be burnt, instead of venting them or letting pressure build.' },
+      { holdMs: 5000, caption: 'The vapours carry oil mist, and over tens of thousands of miles that residue gums the valve up.' },
+      { holdMs: 4000, caption: 'A valve stuck shut lets crankcase pressure rise; one stuck open leans the idle mixture.' },
+    ],
+    ifIgnored:
+      'Crankcase pressure with nowhere to go pushes oil past the seals. A rear main seal leak costs many times what the valve does.',
+  },
+  {
+    key: 'ACCESSORY_DRIVE',
+    title: 'How a serpentine belt fails',
+    diagram: 'LAYER_WEAR',
+    scenes: [
+      { holdMs: 4500, caption: 'One belt drives the alternator, water pump and air conditioning compressor off the front of the engine.' },
+      { holdMs: 5000, caption: 'Modern belts are made of a rubber that does not crack the way older ones did. Instead they wear thin between the ribs.' },
+      { holdMs: 5000, caption: 'A worn belt sits deeper in the pulley grooves and starts to slip, which is where the squeal on a cold damp morning comes from.' },
+      { holdMs: 4000, caption: 'Because they no longer look bad before they fail, belts are measured with a wear gauge or replaced by interval.' },
+    ],
+    ifIgnored:
+      'When this belt breaks you lose charging and, on most engines, water pump drive. That is a car that stops where it is, not one you drive home.',
+  },
+  {
+    key: 'FUEL_INDUCTION_SERVICE',
+    title: 'Why intake valves get cleaned',
+    diagram: 'FLOW_RESTRICTION',
+    scenes: [
+      { holdMs: 4500, caption: 'On an older engine, fuel was sprayed onto the back of the intake valve, and the detergents in petrol washed it clean every time it ran.' },
+      { holdMs: 5000, caption: 'A direct-injection engine sprays fuel straight into the cylinder instead. Nothing washes the valve any more.' },
+      { holdMs: 5000, caption: 'Oil vapour from the crankcase still passes over it, and bakes onto the hot valve as carbon.' },
+      { holdMs: 4500, caption: 'Enough of it disturbs the airflow into the cylinder — usually a rough cold start or a stumble before anything else.' },
+    ],
+    ifIgnored:
+      'Carbon builds slowly over tens of thousands of miles. Left far enough, removing it means taking the intake off and blasting the valves, which is a much larger job.',
+    candour:
+      'Worth being straight about: if your engine is port-injected rather than direct-injected, petrol detergents already do this and the service has little to offer. And on heavy deposits, a chemical service helps less than the mechanical cleaning does — ask which your engine is.',
+  },
+  {
     key: 'SPARK_PLUGS',
     title: 'How spark plugs wear',
     diagram: 'IGNITION',

@@ -4,6 +4,7 @@ import {
   formatReading, latestInspection, remainingFraction, statusOf, worstReadingFor,
 } from './reading'
 import type { InspectionSnapshot } from '@/lib/prep-sheet'
+import { DEFAULT_INTERVALS } from '@/lib/prep-sheet/build'
 
 function inspection(
   items: Partial<InspectionSnapshot['items'][number]>[],
@@ -62,6 +63,21 @@ describe('the library', () => {
       expect(e.scale.present, e.key).toBeGreaterThan(e.scale.limit)
       expect(e.scale.limitMeans.length, e.key).toBeGreaterThan(10)
     }
+  })
+
+  it('has something to say about every service the menu can offer', () => {
+    // The menu and the library are edited in different files, months apart.
+    // A service with no explainer renders a "why?" button that does nothing,
+    // in front of a customer, which is worse than not offering the button.
+    for (const interval of DEFAULT_INTERVALS) {
+      expect(
+        explainerFor(interval.componentGroupKey),
+        `${interval.description} (${interval.componentGroupKey}) is on the menu with no explainer`,
+      ).not.toBeNull()
+    }
+    // Alignment reaches the menu from measured tread wear rather than from an
+    // interval, so it is not in the list above.
+    expect(explainerFor('WHEEL_ALIGNMENT')).not.toBeNull()
   })
 
   it('returns null for a group it has nothing to say about', () => {

@@ -197,12 +197,29 @@ function FluidLife({ t }: DiagramProps) {
         rx={8}
         className={p > 0.75 ? 'fill-rose-500' : p > 0.45 ? 'fill-amber-500' : 'fill-emerald-500'}
       />
+      {/*
+        No percentage here, deliberately.
+
+        This bar is driven by animation progress — it says how far through the
+        explainer you are, not how much additive is left in this car's fluid.
+        Nobody measures that. Printing "63% remaining" beside the customer's own
+        vehicle and price read as a measurement of it, which is the one thing
+        these explainers are not allowed to do. The end labels carry the same
+        idea without asserting a number about anyone.
+      */}
+      {/* Outside the bar on the right, so neither the header nor the fill covers them. */}
+      <text x={484} y={60} className="fill-neutral-500 text-[10px] uppercase tracking-wider">
+        new
+      </text>
+      <text x={484} y={200} className="fill-neutral-500 text-[10px] uppercase tracking-wider">
+        due
+      </text>
       <text
         x={400} y={225}
         textAnchor="middle"
         className="fill-neutral-600 text-[12px] font-semibold dark:fill-neutral-300"
       >
-        {Math.round((1 - p) * 100)}% remaining
+        across the service interval
       </text>
     </Frame>
   )

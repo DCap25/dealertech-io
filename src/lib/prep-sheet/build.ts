@@ -3,8 +3,10 @@ import { evaluateCoverage, type Payer } from '@/lib/coverage'
 import { computeWarrantySnapshot } from '@/lib/warranty'
 import { getComponentGroup } from '@/lib/taxonomy'
 import { predictWorstCorner, predictWear, TIRE_THRESHOLDS, BRAKE_THRESHOLDS, type WearReading } from './wear'
+import { detectAlignment, type AxleReading } from './alignment'
 import type {
-  MaintenanceInterval, Opportunity, OpportunityType, PrepSheet, PrepSheetInput, Urgency,
+  MaintenanceInterval, Opportunity, OpportunityType, PrepSheet, PrepSheetInput,
+  PrepSheetVehicle, Urgency,
 } from './types'
 
 /**
@@ -30,16 +32,113 @@ const WARRANTY_UPSELL_MONTHS = 6
 const WARRANTY_UPSELL_MILES = 8000
 const PPM_EXPIRY_WARNING_DAYS = 90
 
+/**
+ * The service menu.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IS AND IS NOT ON THIS LIST
+ * ---------------------------------------------------------------------------
+ * Everything here is a service that exists on the vehicles it is offered to,
+ * on an interval a manufacturer or a reputable shop actually publishes. Two
+ * kinds of thing are deliberately absent:
+ *
+ *  - Services whose applicability we cannot determine. A timing belt interval
+ *    is meaningless on a chain engine and we have no per-engine data, so it is
+ *    not here. Same for engine fuel filters, which are lifetime in-tank units
+ *    on most modern petrol cars.
+ *  - Wheel alignment, which is not a mileage service at all. It is recommended
+ *    from evidence — uneven wear across the axle — further down this file.
+ *
+ * Adding something you cannot be right about is worse than leaving it off. An
+ * advisor who has to delete a line before turning the tablet round stops
+ * believing the rest of the menu, and so does the customer.
+ */
 const DEFAULT_INTERVALS: MaintenanceInterval[] = [
-  { description: 'Oil & Filter Change', componentGroupKey: 'OIL_CHANGE', intervalMiles: 7500, estimatedAmount: 84 },
+  // ------------------------------------------------------------ every visit
+  { description: 'Oil & Filter Change', componentGroupKey: 'OIL_CHANGE', intervalMiles: 7500, estimatedAmount: 84,
+    appliesTo: { combustionOnly: true } },
   { description: 'Tire Rotation', componentGroupKey: 'TIRE_ROTATION', intervalMiles: 7500, estimatedAmount: 29 },
-  { description: 'Engine Air Filter', componentGroupKey: 'ENGINE_AIR_FILTER', intervalMiles: 30000, estimatedAmount: 75 },
+  { description: 'Wiper Blade Replacement', componentGroupKey: 'WIPER_BLADES', intervalMiles: 15000, estimatedAmount: 62 },
+  { description: 'Tire Balance', componentGroupKey: 'TIRE_BALANCE', intervalMiles: 15000, estimatedAmount: 79 },
+
+  // ---------------------------------------------------------------- filters
+  { description: 'Engine Air Filter', componentGroupKey: 'ENGINE_AIR_FILTER', intervalMiles: 30000, estimatedAmount: 75,
+    appliesTo: { combustionOnly: true } },
   { description: 'Cabin Air Filter', componentGroupKey: 'CABIN_AIR_FILTER', intervalMiles: 30000, estimatedAmount: 97 },
+
+  // ----------------------------------------------------------------- fluids
   { description: 'Brake Fluid Exchange', componentGroupKey: 'BRAKE_FLUID_SERVICE', intervalMiles: 45000, estimatedAmount: 183 },
-  { description: 'Transmission Fluid Service', componentGroupKey: 'TRANS_FLUID_SERVICE', intervalMiles: 60000, estimatedAmount: 367 },
-  { description: 'Spark Plug Replacement', componentGroupKey: 'SPARK_PLUGS', intervalMiles: 100000, estimatedAmount: 535 },
-  { description: 'Coolant Flush', componentGroupKey: 'COOLANT_SERVICE', intervalMiles: 100000, estimatedAmount: 250 },
+  { description: 'Transmission Fluid Service', componentGroupKey: 'TRANS_FLUID_SERVICE', intervalMiles: 60000, estimatedAmount: 367,
+    appliesTo: { combustionOnly: true } },
+  /*
+    An electric car does have coolant — it thermally manages the battery and
+    the inverter — so this is not gated because the system is absent. It is
+    gated because there is no generic EV interval to stand behind: Tesla lists
+    none at all for the Model 3 and Y, and other makers scatter between 50,000
+    and 150,000 miles. A 100,000-mile flush is a combustion-engine number, and
+    quoting it at an owner who can pull up their own schedule in thirty seconds
+    is the same invention the alignment rule exists to avoid.
+  */
+  { description: 'Coolant Flush', componentGroupKey: 'COOLANT_SERVICE', intervalMiles: 100000, estimatedAmount: 250,
+    appliesTo: { combustionOnly: true } },
+  /*
+    Hydraulic racks were near-universal until the early 2010s and are now rare
+    — most cars sold since are electrically assisted and have no fluid at all.
+    Capped by model year rather than offered to everyone.
+  */
+  { description: 'Power Steering Fluid Exchange', componentGroupKey: 'POWER_STEERING_PUMP', intervalMiles: 60000, estimatedAmount: 165,
+    appliesTo: { combustionOnly: true, maxModelYear: 2012 } },
+
+  // ------------------------------------------------------------- driveline
+  /*
+    A front-wheel-drive car's differential lives inside the transaxle and is
+    serviced with the transmission fluid. Only cars with a driven rear axle
+    have a separate one to service.
+
+    The combustion gate here is not about the engine. An electric car pairs its
+    motor, reduction gearing and differential into one sealed drive unit filled
+    for life — a rear-drive Model 3 has no serviceable diff and no transfer
+    case, despite matching on driveline. Offering either is the same fabricated
+    line item as quoting it spark plugs.
+  */
+  { description: 'Differential Fluid Service', componentGroupKey: 'DIFF_FLUID_SERVICE', intervalMiles: 45000, estimatedAmount: 189,
+    appliesTo: { combustionOnly: true, driveTypes: ['RWD', 'AWD', 'FOUR_WD'] } },
+  { description: 'Transfer Case Fluid Service', componentGroupKey: 'TRANSFER_CASE', intervalMiles: 45000, estimatedAmount: 169,
+    appliesTo: { combustionOnly: true, driveTypes: ['AWD', 'FOUR_WD'] } },
+
+  // ----------------------------------------------------------------- engine
+  { description: 'Fuel System Induction Service', componentGroupKey: 'FUEL_INDUCTION_SERVICE', intervalMiles: 30000, estimatedAmount: 199,
+    appliesTo: { combustionOnly: true } },
+  { description: 'PCV Valve Replacement', componentGroupKey: 'PCV_SYSTEM', intervalMiles: 60000, estimatedAmount: 120,
+    appliesTo: { combustionOnly: true } },
+  { description: 'Serpentine Belt Replacement', componentGroupKey: 'ACCESSORY_DRIVE', intervalMiles: 90000, estimatedAmount: 210,
+    appliesTo: { combustionOnly: true } },
+  { description: 'Spark Plug Replacement', componentGroupKey: 'SPARK_PLUGS', intervalMiles: 100000, estimatedAmount: 535,
+    appliesTo: { combustionOnly: true } },
 ]
+
+/**
+ * Does this service exist on this vehicle at all?
+ *
+ * Unknown driveline means skip, not guess. A menu that quietly drops a
+ * differential service we were not sure about costs one line; a menu that
+ * offers a transfer case service on a Camry costs the advisor the room.
+ */
+export function intervalApplies(
+  interval: MaintenanceInterval,
+  vehicle: PrepSheetVehicle,
+): boolean {
+  const rules = interval.appliesTo
+  if (!rules) return true
+
+  if (rules.combustionOnly && vehicle.isFullyElectric) return false
+  if (rules.maxModelYear !== undefined && vehicle.modelYear > rules.maxModelYear) return false
+  if (rules.driveTypes) {
+    if (!vehicle.driveType) return false
+    if (!rules.driveTypes.includes(vehicle.driveType)) return false
+  }
+  return true
+}
 
 function money(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -196,6 +295,40 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
     }
   }
 
+  /**
+   * Alignment, from evidence rather than from a schedule.
+   *
+   * Uses the newest reading per corner, since the question is what the tyres
+   * look like today — not how they have trended.
+   */
+  const latestPerCorner: AxleReading[] = []
+  for (const [position, readings] of treadByPosition) {
+    const newest = readings.reduce((a, b) => (b.mileage > a.mileage ? b : a))
+    latestPerCorner.push({ position, value: newest.value })
+  }
+  const alignment = detectAlignment(latestPerCorner)
+  if (alignment) {
+    const amount = 149
+    const determination = coverageFor('four wheel alignment', 'WHEEL_ALIGNMENT', amount)
+    raw.push({
+      type: 'MAINTENANCE_DUE',
+      title: 'Four Wheel Alignment',
+      detail: alignment.detail,
+      customerDetail: alignment.detail,
+      componentGroupKey: 'WHEEL_ALIGNMENT',
+      estimatedAmount: amount,
+      customerOutOfPocket: determination.customerOutOfPocket,
+      likelyPayer: determination.payer,
+      // Not a safety item — the car drives straight. It is a tyre-life
+      // argument, and overstating it is how the whole menu loses credibility.
+      urgency: 'MEDIUM',
+      closeProbability: 0.4,
+      talkTrack:
+        `Show them the two numbers. ${alignment.detail} Alignment costs a fraction of the ` +
+        `set of tyres it saves, and the car may drive perfectly straight the whole time.`,
+    })
+  }
+
   const worstTire = predictWorstCorner(treadByPosition, TIRE_THRESHOLDS, vehicle.avgMilesPerDay)
   if (worstTire) {
     const { prediction, position } = worstTire
@@ -250,21 +383,35 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
   }
 
   // ------------------------------------------------- 4. maintenance due
-  const intervals = input.maintenanceIntervals ?? DEFAULT_INTERVALS
+  const intervals = (input.maintenanceIntervals ?? DEFAULT_INTERVALS).filter((interval) =>
+    intervalApplies(interval, input.vehicle),
+  )
+  /**
+   * How short an interval has to be before "no record" can be shrugged off.
+   *
+   * With no history, something has to be assumed. For an oil change or a tyre
+   * rotation, assuming the customer has broadly kept up is fair — the car is
+   * running, and these get done everywhere from quick-lube to the driveway. So
+   * the next boundary above the current odometer is a reasonable next-due.
+   *
+   * That same assumption applied to a 45,000-mile brake fluid exchange asserts
+   * something we have no basis for. Those are handled in the second pass below,
+   * as questions rather than as recommendations.
+   */
+  const ASSUME_KEPT_UP_BELOW = 30_000
+
+  /**
+   * Services with a known last-done odometer, plus the short-interval services
+   * we are willing to assume have been kept up.
+   */
   for (const interval of intervals) {
     const lastAt = input.lastServiceMileageByGroup?.[interval.componentGroupKey]
     const hasRecord = lastAt !== undefined
+    if (!hasRecord && interval.intervalMiles >= ASSUME_KEPT_UP_BELOW) continue
 
-    /**
-     * With no record of the service ever being done, assume the NEXT interval
-     * boundary rather than treating it as overdue since zero. Defaulting to
-     * zero made every interval read "overdue by 100,000 miles" on an older
-     * vehicle, which buries the items that genuinely matter.
-     */
     const dueAt = hasRecord
       ? lastAt + interval.intervalMiles
       : Math.ceil(Math.max(projectedMileage, 1) / interval.intervalMiles) * interval.intervalMiles
-
     // Only interesting if due now or within the next couple of thousand miles.
     if (projectedMileage < dueAt - 2000) continue
 
@@ -272,7 +419,7 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
     const overdueBy = projectedMileage - dueAt
 
     const detail = !hasRecord
-      ? `No record of this service. Next interval falls at ${dueAt.toLocaleString()} miles — confirm history with the customer.`
+      ? `Every ${interval.intervalMiles.toLocaleString()} miles. No record on file, so the next one is taken as ${dueAt.toLocaleString()} — confirm with the customer.`
       : overdueBy >= 0
         ? `Overdue by ${overdueBy.toLocaleString()} miles — last done at ${lastAt.toLocaleString()}, projected ${projectedMileage.toLocaleString()} at arrival.`
         : `Due at ${dueAt.toLocaleString()} miles, ${Math.abs(overdueBy).toLocaleString()} away.`
@@ -281,23 +428,80 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
       type: 'MAINTENANCE_DUE',
       title: interval.description,
       detail,
-      // The advisor version asks them to confirm history — fine to read, not
-      // fine to hand to the customer on a tablet.
-      customerDetail: !hasRecord
-        ? `Recommended at ${dueAt.toLocaleString()} miles.`
-        : detail,
+      // The advisor version says "confirm with the customer". Fine to read at
+      // the podium, not fine to hand across on a tablet.
+      customerDetail: hasRecord
+        ? detail
+        : `Recommended every ${interval.intervalMiles.toLocaleString()} miles.`,
       componentGroupKey: interval.componentGroupKey,
       estimatedAmount: interval.estimatedAmount,
       customerOutOfPocket: determination.customerOutOfPocket,
       likelyPayer: determination.payer,
-      // An unverified interval is a question, not a recommendation.
-      urgency: !hasRecord ? 'LOW' : overdueBy > interval.intervalMiles * 0.5 ? 'MEDIUM' : 'LOW',
-      closeProbability: determination.payer === 'PPM' ? 0.85 : hasRecord ? 0.5 : 0.3,
+      urgency: hasRecord && overdueBy > interval.intervalMiles * 0.5 ? 'MEDIUM' : 'LOW',
+      closeProbability: determination.payer === 'PPM' ? 0.85 : hasRecord ? 0.5 : 0.35,
       talkTrack: determination.payer === 'PPM'
         ? `Already paid for on their prepaid plan. Redeem it today.`
         : hasRecord
           ? `Present with the mileage. Bundling it with today's visit saves them a trip.`
-          : `Ask when this was last done before recommending it — guessing damages trust.`,
+          : `Confirm when this was last done before presenting it as due.`,
+    })
+  }
+
+  /**
+   * The long-interval services, where we have no record at all.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THIS IS ITS OWN PASS
+   * ---------------------------------------------------------------------------
+   * Every interval used to assume the next boundary above the current odometer,
+   * which quietly asserts that all the earlier ones were met. On a 7,500-mile
+   * oil change that is a safe bet, and the pass above still makes it. On a
+   * 45,000-mile brake fluid exchange it means a car at 92,000 miles with no
+   * record anywhere is told its fluid is due at 135,000 — which is why the
+   * flushes and driveline services almost never reached a sheet.
+   *
+   * What we can honestly say here is narrower: this is an N-mile service, the
+   * car is past N, and we have not seen it done. That is a question for the
+   * customer, not a recommendation, and it is worded and ranked as one.
+   *
+   * A vehicle with no history at all qualifies for every long interval at once,
+   * which is a lot of lines. They are not capped: LOW urgency sinks them below
+   * everything measured, and the advisor picks what reaches the tablet in the
+   * menu builder. Truncating instead would mean either hiding items silently or
+   * raising an alert for something that is not one, and the red alert band is
+   * spent on park-it recalls — putting a maintenance footnote in it teaches
+   * advisors to skim past the band that matters.
+   */
+  const unrecorded = intervals
+    .filter((interval) => interval.intervalMiles >= ASSUME_KEPT_UP_BELOW)
+    .filter((interval) => input.lastServiceMileageByGroup?.[interval.componentGroupKey] === undefined)
+    .filter((interval) => projectedMileage >= interval.intervalMiles)
+
+  for (const interval of unrecorded) {
+    const determination = coverageFor(interval.description, interval.componentGroupKey, interval.estimatedAmount)
+
+    raw.push({
+      type: 'MAINTENANCE_DUE',
+      title: interval.description,
+      detail:
+        `${interval.intervalMiles.toLocaleString()}-mile service with no record on file. ` +
+        `Vehicle projects to ${projectedMileage.toLocaleString()} at arrival — ask when it was last done ` +
+        `before recommending it.`,
+      // The advisor version tells them to ask. Turning the tablet round must
+      // not show the customer our own instruction to interrogate them.
+      customerDetail: `Recommended every ${interval.intervalMiles.toLocaleString()} miles.`,
+      componentGroupKey: interval.componentGroupKey,
+      estimatedAmount: interval.estimatedAmount,
+      customerOutOfPocket: determination.customerOutOfPocket,
+      likelyPayer: determination.payer,
+      // An unverified interval is a question. It never outranks a measurement,
+      // and it stays off the customer's menu until the advisor has asked.
+      unverified: true,
+      urgency: 'LOW',
+      closeProbability: determination.payer === 'PPM' ? 0.85 : 0.3,
+      talkTrack: determination.payer === 'PPM'
+        ? `Already paid for on their prepaid plan. Redeem it today.`
+        : `Ask when this was last done before recommending it — guessing damages trust.`,
     })
   }
 

@@ -49,6 +49,13 @@ export interface DmsVehicle {
   /** Derived from odometer history where the source system provides it. */
   avgMilesPerDay: number | null
   isHybridOrEv: boolean
+  /** Battery-electric. A hybrid still has an engine to service. */
+  isFullyElectric: boolean
+  /**
+   * FWD / RWD / AWD / FOUR_WD. Null when the source system does not say —
+   * driveline services are skipped rather than guessed at.
+   */
+  driveType: 'FWD' | 'RWD' | 'AWD' | 'FOUR_WD' | null
   /**
    * Whether the current owner is the original one. Load-bearing: several OEM
    * powertrain terms are original-owner-only, so a wrong answer here changes

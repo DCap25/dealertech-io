@@ -47,6 +47,41 @@ const FLEET = [
   { make: 'NISSAN', models: ['Altima', 'Rogue', 'Frontier'], wmi: '1N4', weight: 2 },
 ]
 
+/**
+ * Drive type by model.
+ *
+ * Real, because the prep sheet uses it to decide whether a differential or
+ * transfer case service exists on the car at all. Seeding everything AWD would
+ * put a transfer case service on a Camry, which is exactly the line an advisor
+ * has to delete in front of a customer.
+ *
+ * Where a model is genuinely sold both ways — a RAV4, an Explorer — the split
+ * is a coin flip, which is also what a real drive looks like.
+ */
+const DRIVE_BY_MODEL: Record<string, 'FWD' | 'RWD' | 'AWD' | 'FOUR_WD'> = {
+  // Body-on-frame trucks and SUVs: rear drive, four-wheel drive optional.
+  'F-150': 'FOUR_WD', Silverado: 'FOUR_WD', Tacoma: 'FOUR_WD', Frontier: 'FOUR_WD',
+  Bronco: 'FOUR_WD',
+  // Rear-drive unibody.
+  Explorer: 'RWD',
+  // Transverse front-drive cars and crossovers.
+  Camry: 'FWD', Accord: 'FWD', Civic: 'FWD', Altima: 'FWD', Malibu: 'FWD',
+  Elantra: 'FWD', Escape: 'FWD', Edge: 'FWD', Equinox: 'FWD',
+  // Sold both ways; picked per vehicle below.
+  RAV4: 'AWD', 'CR-V': 'AWD', Rogue: 'AWD', Tucson: 'AWD', 'Santa Fe': 'AWD',
+  Highlander: 'AWD', Pilot: 'AWD',
+  // Dual-motor and single-motor both exist in the fleet.
+  'Model 3': 'RWD', 'Model Y': 'AWD',
+}
+
+function driveTypeFor(model: string): 'FWD' | 'RWD' | 'AWD' | 'FOUR_WD' {
+  const base = DRIVE_BY_MODEL[model] ?? 'FWD'
+  // Crossovers sold both ways are roughly half front-drive in the real world.
+  if (base === 'AWD' && chance(0.45)) return 'FWD'
+  if (base === 'FOUR_WD' && chance(0.35)) return 'RWD'
+  return base
+}
+
 const OP_CODES = [
   { code: 'LOF', description: 'Lube, Oil & Filter', group: 'OIL_CHANGE', hours: 0.5, labor: 39, parts: 45, maint: true },
   { code: 'ROT', description: 'Tire Rotation', group: 'TIRE_ROTATION', hours: 0.4, labor: 29, parts: 0, maint: true },
@@ -66,6 +101,15 @@ const OP_CODES = [
   { code: 'DIAG', description: 'Diagnostic Scan', group: 'DIAGNOSTIC_SCAN', hours: 1.0, labor: 185, parts: 0, maint: false },
   { code: 'WIPER', description: 'Wiper Blade Replacement', group: 'WIPER_BLADES', hours: 0.2, labor: 18, parts: 44, maint: true },
   { code: 'ALT', description: 'Replace Alternator', group: 'ALTERNATOR', hours: 2.2, labor: 407, parts: 465, maint: false },
+  // The rest of the flush and filter menu, so a sold line has an op code to
+  // land on rather than the prep sheet recommending work the shop cannot bill.
+  { code: 'PS-FLU', description: 'Power Steering Fluid Exchange', group: 'POWER_STEERING_PUMP', hours: 0.9, labor: 128, parts: 37, maint: true },
+  { code: 'DIFF-SVC', description: 'Differential Fluid Service', group: 'DIFF_FLUID_SERVICE', hours: 1.0, labor: 148, parts: 41, maint: true },
+  { code: 'TCASE-SVC', description: 'Transfer Case Fluid Service', group: 'TRANSFER_CASE', hours: 0.9, labor: 132, parts: 37, maint: true },
+  { code: 'IND-SVC', description: 'Fuel System Induction Service', group: 'FUEL_INDUCTION_SERVICE', hours: 1.0, labor: 148, parts: 51, maint: true },
+  { code: 'PCV', description: 'PCV Valve Replacement', group: 'PCV_SYSTEM', hours: 0.6, labor: 89, parts: 31, maint: true },
+  { code: 'BELT', description: 'Serpentine Belt Replacement', group: 'ACCESSORY_DRIVE', hours: 1.1, labor: 163, parts: 47, maint: true },
+  { code: 'BAL', description: 'Tire Balance', group: 'TIRE_BALANCE', hours: 0.6, labor: 79, parts: 0, maint: true },
 ]
 
 const CONCERNS = [
@@ -285,6 +329,7 @@ export async function seed(connectionString?: string) {
         id: vehicleId, storeId, vin: makeVin(spec.wmi, modelYear), vinValid: true,
         make: spec.make, model: veh.model, modelYear,
         fuelType: isEv ? 'Electric' : 'Gasoline', isHybridOrEv: isEv,
+        driveType: driveTypeFor(veh.model),
         inServiceDate: isoDate(inService),
         currentMileage: mileage, mileageAsOf: NOW,
         avgMilesPerDay: (mileage / Math.max(1, ageYears * 365)).toFixed(2),
