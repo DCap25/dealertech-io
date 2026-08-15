@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, desc } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { loadDriveDay, getDefaultStore } from '@/lib/prep-sheet/load'
 import { money } from '../../../records-ui'
@@ -67,6 +67,23 @@ export default async function WriteUpPage({
 
   const suggestedOpCodeIds = menu.filter((m) => m.suggested).map((m) => m.id)
 
+  /**
+   * The newest actual reading, for the odometer warning.
+   *
+   * Deliberately not `sheet.projectedMileage` — that is an estimate, and the
+   * form is already prefilled with it. Warning that an entry falls below a
+   * projection would fire on most of the drive and mean nothing.
+   */
+  const [lastReadingRow] = await db.select({
+    mileage: schema.mileageReadings.mileage,
+    recordedAt: schema.mileageReadings.recordedAt,
+    source: schema.mileageReadings.source,
+  })
+    .from(schema.mileageReadings)
+    .where(eq(schema.mileageReadings.vehicleId, sheet.vehicle.id))
+    .orderBy(desc(schema.mileageReadings.recordedAt), desc(schema.mileageReadings.mileage))
+    .limit(1)
+
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
       <Link href="/advisor" className="text-sm text-neutral-500 hover:underline">
@@ -131,6 +148,11 @@ export default async function WriteUpPage({
           defaultConcerns={sheet.appointment?.concerns ?? ''}
           menu={menu}
           suggestedOpCodeIds={suggestedOpCodeIds}
+          lastReading={lastReadingRow ? {
+            mileage: lastReadingRow.mileage,
+            recordedAt: lastReadingRow.recordedAt.toISOString(),
+            source: lastReadingRow.source,
+          } : null}
         />
       </div>
     </main>

@@ -1,16 +1,32 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { nextRoNumber } from '@/lib/advisor/load'
 import { requireUser } from '@/lib/auth/session'
 import { soldComponentGroups } from '@/lib/reconcile/sold-work'
+import { checkOdometer, overrideSummary, validateOverride } from '@/lib/odometer/check'
 
 export interface ActionState {
   ok?: boolean
   error?: string
   repairOrderId?: string
+  /**
+   * The odometer went backwards and nothing has been written yet.
+   *
+   * Returned instead of an error string because the client has to render a
+   * real decision — the numbers, the likely cause, and the reasons on offer —
+   * and a sentence in a red box is not that.
+   */
+  odometer?: {
+    entered: number
+    previous: number
+    shortfall: number
+    severity: 'MINOR' | 'MAJOR'
+    headline: string
+    likelyCause: string | null
+  }
 }
 
 function num(value: FormDataEntryValue | null, fallback = 0): number {
@@ -31,7 +47,7 @@ export async function openRepairOrder(
 ): Promise<ActionState> {
   // A server action is a POST endpoint whether or not a page ever
   // rendered, so the guard belongs here and not only in the middleware.
-  await requireUser()
+  const user = await requireUser()
   const appointmentId = String(formData.get('appointmentId') ?? '')
   const mileage = num(formData.get('mileage'))
   const concerns = String(formData.get('concerns') ?? '').trim()
@@ -56,6 +72,62 @@ export async function openRepairOrder(
   if (existing[0]) {
     // Already written up — send the advisor to the RO rather than duplicating it.
     return { ok: true, repairOrderId: existing[0].id }
+  }
+
+  /**
+   * An odometer that went backwards stops here.
+   *
+   * Checked on the server rather than only in the form: this is a POST endpoint
+   * whether or not a page rendered it, and the client's copy of "the last
+   * reading" is a prop it was handed. The authority is the reading series.
+   *
+   * Compared against the newest actual reading, never against the projection
+   * the form is prefilled with — that estimate is routinely above the real
+   * odometer, and comparing to it would fire this on half the drive.
+   */
+  const [lastReadingRow] = await db.select({
+    mileage: schema.mileageReadings.mileage,
+    recordedAt: schema.mileageReadings.recordedAt,
+    source: schema.mileageReadings.source,
+  })
+    .from(schema.mileageReadings)
+    .where(eq(schema.mileageReadings.vehicleId, appointment.vehicleId))
+    .orderBy(desc(schema.mileageReadings.recordedAt), desc(schema.mileageReadings.mileage))
+    .limit(1)
+
+  const odometer = checkOdometer(mileage, lastReadingRow ?? null)
+  let override: { reasonCode: string; note: string; summary: string } | null = null
+
+  if (odometer.status === 'BELOW_LAST_READING') {
+    const submitted = String(formData.get('odometerOverrideReason') ?? '')
+    const verdict = validateOverride(
+      submitted
+        ? { reasonCode: submitted, note: String(formData.get('odometerOverrideNote') ?? '') }
+        : null,
+    )
+
+    if (!verdict.ok) {
+      // Nothing has been written. The client re-submits with a reason, or the
+      // advisor goes back and corrects the number — which is the likelier fix
+      // and the one the prompt leads with.
+      return {
+        error: verdict.error,
+        odometer: {
+          entered: odometer.entered,
+          previous: odometer.last.mileage,
+          shortfall: odometer.shortfall,
+          severity: odometer.severity,
+          headline: odometer.headline,
+          likelyCause: odometer.likelyCause?.message ?? null,
+        },
+      }
+    }
+
+    override = {
+      reasonCode: verdict.reasonCode,
+      note: verdict.note,
+      summary: overrideSummary(verdict.reasonCode, verdict.note, mileage, odometer.last.mileage),
+    }
   }
 
   const storeId = appointment.storeId
@@ -115,8 +187,23 @@ export async function openRepairOrder(
 
   await db.insert(schema.mileageReadings).values({
     storeId, vehicleId: appointment.vehicleId, mileage, recordedAt: now, source: 'WRITE_UP',
+    // Only populated on an accepted rollback. This row is the audit trail.
+    previousMileage: override ? (lastReadingRow?.mileage ?? null) : null,
+    overrideReason: override?.reasonCode ?? null,
+    overrideNote: override?.summary ?? null,
+    overrideByUserId: override ? user.id : null,
+    overrideAt: override ? now : null,
   })
 
+  /**
+   * The vehicle record follows the reading, including downwards.
+   *
+   * Tempting to keep the higher number "just in case", but that would leave the
+   * vehicle claiming an odometer nobody can see on the cluster, and every
+   * coverage decision from here keys off it. If a cluster was replaced, the low
+   * number is the truth. The confirmation above is what makes it safe to trust:
+   * this only runs once somebody said so on the record.
+   */
   await db.update(schema.vehicles)
     .set({ currentMileage: mileage, mileageAsOf: now, updatedAt: now })
     .where(eq(schema.vehicles.id, appointment.vehicleId))

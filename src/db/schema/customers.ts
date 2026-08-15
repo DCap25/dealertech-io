@@ -1,7 +1,7 @@
 import {
   pgTable, uuid, text, timestamp, boolean, integer, numeric, date, index, unique,
 } from 'drizzle-orm/pg-core'
-import { stores } from './tenancy'
+import { stores, users } from './tenancy'
 import { contactChannelEnum } from './enums'
 
 export const customers = pgTable(
@@ -159,7 +159,25 @@ export const mileageReadings = pgTable(
     mileage: integer('mileage').notNull(),
     recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
     source: text('source').notNull().default('MANUAL'),
+
+    /**
+     * Set only when this reading went backwards and someone accepted it.
+     *
+     * An odometer cannot decrease, so the decision to record one that did is
+     * the whole audit trail — who said it was legitimate, and why. Stored on
+     * the reading rather than derived later, because the question is what the
+     * advisor was looking at when they decided, not what the history says now.
+     */
+    previousMileage: integer('previous_mileage'),
+    overrideReason: text('override_reason'),
+    overrideNote: text('override_note'),
+    overrideByUserId: uuid('override_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    overrideAt: timestamp('override_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('mileage_readings_vehicle_idx').on(t.vehicleId, t.recordedAt)],
+  (t) => [
+    index('mileage_readings_vehicle_idx').on(t.vehicleId, t.recordedAt),
+    index('mileage_readings_override_idx').on(t.storeId, t.overrideAt),
+  ],
 )
