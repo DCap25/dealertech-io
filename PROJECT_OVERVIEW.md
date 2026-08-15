@@ -315,17 +315,49 @@ the only record of a bug that took a long time to find.
 
 Stated plainly so nobody discovers them the hard way.
 
-- **No transactions on multi-step writes.** `advisor/actions.ts` has ~26
-  sequential `await db` calls and zero transactions. This is the highest-
-  priority robustness gap in the codebase.
-- **`audit_log` has been empty since migration 0000.** The table exists;
-  nothing writes to it.
-- No error monitoring, no rate limiting, no CI pipeline, no integration tests.
-- `/api/health` is allowlisted but does not exist.
-- Newly-introduced Tailwind utility classes have occasionally failed to reach
-  the dev stylesheet (`bg-sky-800` was verifiably absent while `bg-sky-600`
-  was present). Root cause unresolved — check generated CSS when a new colour
-  does not appear.
-- `sr-only` renders visibly in this setup.
-- Platform admin credentials created during development should be rotated
-  before anything real depends on them.
+- **Shared demo passwords are live.** The six `@lonestarford.test` accounts on
+  the production Supabase project all share `dealertech-demo`, which is the
+  committed default in `scripts/provision-auth-users.ts`. They hold active
+  roles at the demo dealership, so anyone who has read this repository can sign
+  in and see it. The script now refuses that default against a non-local
+  database, but the accounts that already exist need rotating — see below.
+- **`admindan@dealertech.io` needs its password rotated.** Platform admin, so
+  it reaches every tenant's operational data.
+- No error monitoring, no CI pipeline, no integration tests.
+- Rate limiting is per-instance and in-memory (`src/lib/rate-limit/`), which
+  stops the cheap version and not a distributed one. A shared store is the
+  honest fix when it is worth the dependency.
+- `advisor/actions.ts` still has no test coverage of its own; the write paths
+  are exercised by hand and by `src/db/transaction.test.ts`.
+
+### Rotating the credentials
+
+```bash
+# Demo staff — pick a password, tell whoever needs it, do not commit it.
+DEMO_PASSWORD="$(openssl rand -base64 24)" npm run auth:provision -- --repair
+
+# Platform admin — recreate with a new password, then confirm the grant.
+npm run platform:create
+npm run platform:list
+```
+
+`--repair` deletes and recreates a mismatched login, so read what
+`provision-auth-users.ts` says about it before running it against anything
+that matters.
+
+### Two things that turned out not to be bugs
+
+Recorded because both were listed here as defects for a while and both cost
+somebody an afternoon:
+
+- **"Newly-introduced Tailwind classes never reach the stylesheet."** They do.
+  The dev server was serving a stale CSS chunk, which happens if `next build`
+  is run while `next dev` is running — the build clobbers `.next` underneath
+  it. Symptom: the stylesheet byte count does not change when you add a class.
+  Fix: stop the dev server, delete `.next`, start it again.
+- **"`sr-only` renders visibly."** Same cause. Tailwind 4.3 defines `sr-only`
+  and emits it correctly; a clean rebuild takes the generated sheet from
+  84,729 to 89,285 bytes and a real `.sr-only` element computes
+  `position: absolute; width: 1px; clip-path: inset(50%)`.
+
+If a class seems to be missing, check the byte count before checking Tailwind.

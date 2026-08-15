@@ -7,6 +7,7 @@ import type { CopilotIntent, CopilotRequest } from '@/lib/copilot'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import { demoNow } from '@/lib/demo-day'
 import { getCurrentUser, getCurrentStore } from '@/lib/auth/session'
+import { FixedWindowLimiter } from '@/lib/rate-limit/window'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,6 +21,9 @@ const INTENTS: CopilotIntent[] = [
 
 /** Long enough for a real question, short enough not to be a prompt-stuffing vector. */
 const MAX_INPUT_CHARS = 500
+
+/** Per signed-in user. See the note at the call site for why it is keyed there. */
+const copilotLimiter = new FixedWindowLimiter({ limit: 30, windowMs: 60_000 })
 
 interface Body {
   appointmentId?: unknown
@@ -45,8 +49,29 @@ export async function POST(req: Request) {
    * deploy artifact on the host, and this endpoint returns a customer's
    * coverage detail and spends model tokens.
    */
-  if (!(await getCurrentUser())) {
+  const user = await getCurrentUser()
+  if (!user) {
     return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
+  }
+
+  /*
+    Keyed on the user, and applied after the auth check rather than before it.
+
+    Before it, an anonymous flood would consume the allowance of whoever it was
+    keyed to — and there is nobody to key it to yet, so every anonymous caller
+    would share one bucket and lock each other out. After it, the only way to
+    spend somebody's allowance is to already be them.
+
+    The cost being limited here is money, not data: every call that gets past
+    this spends model tokens on somebody's API bill. Thirty a minute is far
+    more than an advisor asks and far less than a loop costs.
+  */
+  const gate = copilotLimiter.check(user.id, Date.now())
+  if (!gate.ok) {
+    return NextResponse.json(
+      { error: 'Too many questions at once — give it a moment.' },
+      { status: 429, headers: { 'retry-after': String(gate.retryAfterSeconds) } },
+    )
   }
 
   let body: Body

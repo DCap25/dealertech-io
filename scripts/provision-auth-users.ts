@@ -23,14 +23,47 @@ import { createClient } from '@supabase/supabase-js'
 import { sql } from 'drizzle-orm'
 import { getDb } from '../src/db/client'
 
-const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'dealertech-demo'
+/**
+ * The shared demo password.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE DEFAULT IS REFUSED OUTSIDE LOCAL WORK
+ * ---------------------------------------------------------------------------
+ * This default is committed to the repository, which is fine for a throwaway
+ * container and not fine anywhere a real person can reach. It has already
+ * ended up on the live Supabase project once: six accounts with active store
+ * roles at the demo dealership, all sharing a password that anybody reading
+ * this file knows.
+ *
+ * So the constant is only usable against a local database. Point this at
+ * anything else and it insists on being told a password, which is the moment
+ * somebody has to think about what they are creating.
+ */
+const DEFAULT_DEMO_PASSWORD = 'dealertech-demo'
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? DEFAULT_DEMO_PASSWORD
 const REPAIR = process.argv.includes('--repair')
+
+/** localhost and 127.0.0.1 only — anything else is somebody's real project. */
+function isLocalDatabase(url: string | undefined): boolean {
+  if (!url) return false
+  return /@(localhost|127\.0\.0\.1)[:/]/.test(url)
+}
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const secret = process.env.SUPABASE_SECRET_KEY
   if (!url || !secret) {
     console.error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY in .env.local first.')
+    process.exit(1)
+  }
+
+  if (DEMO_PASSWORD === DEFAULT_DEMO_PASSWORD && !isLocalDatabase(process.env.DATABASE_URL)) {
+    console.error(
+      'Refusing to create accounts with the committed demo password against a non-local database.\n' +
+      'That password is in the repository, so every account made with it is public.\n\n' +
+      '  DEMO_PASSWORD="$(openssl rand -base64 24)" npm run auth:provision\n\n' +
+      'Print it, put it somewhere shared, and do not commit it.',
+    )
     process.exit(1)
   }
 
