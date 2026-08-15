@@ -119,3 +119,32 @@ export function landingPath(account: {
   */
   return '/drive'
 }
+
+/**
+ * Where sign-in sends someone, given what they asked for and what they are.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS ITS OWN FUNCTION
+ * ---------------------------------------------------------------------------
+ * The first attempt at this lived inline in the sign-in action and was dead on
+ * arrival, because the login page ran `safeRedirect(next)` before rendering the
+ * form. That turns an absent `?next=` into "/drive", so the action saw an
+ * explicit request on every single sign-in and never reached the branch that
+ * looks at the account. The bug was invisible in review and only showed up as
+ * "signing in still doesn't work".
+ *
+ * Pulling it out makes the distinction that matters — asked for nothing, vs
+ * asked for the drive — a thing tests can hold, rather than a property of how
+ * two files happen to be wired together.
+ *
+ * `requested` must be the raw value from the query string. Empty means the
+ * account decides.
+ */
+export function signInDestination(
+  requested: string | null | undefined,
+  account: { hasStore: boolean; isPlatformAdmin: boolean },
+): string {
+  if (!requested) return landingPath(account)
+  // Sanitised here, so callers can pass user input through untouched.
+  return safeRedirect(requested)
+}

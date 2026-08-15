@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPublicPath, landingPath, safeRedirect } from './routes'
+import { isPublicPath, landingPath, safeRedirect, signInDestination } from './routes'
 
 describe('isPublicPath', () => {
   it('lets someone reach an invitation or a trial without an account', () => {
@@ -142,5 +142,40 @@ describe('landingPath', () => {
     // An invited user before anyone granted them a role. /drive bounces to the
     // sign-in page, which is the surface that says why.
     expect(landingPath({ hasStore: false, isPlatformAdmin: false })).toBe('/drive')
+  })
+})
+
+describe('signInDestination', () => {
+  const PLATFORM = { hasStore: false, isPlatformAdmin: true }
+  const ADVISOR = { hasStore: true, isPlatformAdmin: false }
+
+  it('lets the account decide when nothing was asked for', () => {
+    expect(signInDestination('', PLATFORM)).toBe('/admin')
+    expect(signInDestination(null, PLATFORM)).toBe('/admin')
+    expect(signInDestination(undefined, ADVISOR)).toBe('/drive')
+  })
+
+  it('distinguishes "asked for nothing" from "asked for the drive"', () => {
+    /*
+      The regression this file exists for. The login page ran safeRedirect()
+      on the query string before rendering the form, which turns an absent
+      ?next= into "/drive" — so the action saw an explicit request every time
+      and never looked at the account. Platform staff went to /drive and were
+      bounced straight back to the sign-in form.
+
+      These two calls must not agree.
+    */
+    expect(signInDestination('', PLATFORM)).toBe('/admin')
+    expect(signInDestination('/drive', PLATFORM)).toBe('/drive')
+  })
+
+  it('honours a real destination somebody was headed to', () => {
+    expect(signInDestination('/follow-up?owner=BDC', ADVISOR)).toBe('/follow-up?owner=BDC')
+  })
+
+  it('still refuses an off-origin destination', () => {
+    // Passing the raw query string through must not have opened a redirect.
+    expect(signInDestination('https://evil.example', ADVISOR)).toBe('/drive')
+    expect(signInDestination('//evil.example', PLATFORM)).toBe('/drive')
   })
 })

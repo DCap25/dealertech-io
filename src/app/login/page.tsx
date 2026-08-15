@@ -32,6 +32,20 @@ export default async function LoginPage({
   const target = safeRedirect(next)
 
   /*
+    The form carries the RAW request, not `target`.
+
+    `safeRedirect` collapses "nowhere in particular" into /drive, so passing
+    `target` to the form made every sign-in look like it had explicitly asked
+    for the drive — and the action, which only picks a destination by account
+    type when nothing was asked for, never got the chance. DealerTech staff
+    went to /drive and were turned straight back here.
+
+    The action sanitises this before redirecting, so passing it through
+    unresolved is not an open redirect.
+  */
+  const requested = next ?? ''
+
+  /*
     Already signed in — no reason to show a form.
 
     Resolved from the session rather than from `getCurrentUser`, which requires
@@ -61,7 +75,7 @@ export default async function LoginPage({
         </p>
       </div>
 
-      <SignInForm next={target} demoUsers={showDemo ? DEMO_USERS : []} />
+      <SignInForm next={requested} demoUsers={showDemo ? DEMO_USERS : []} />
 
       <p className="mt-8 text-xs leading-relaxed text-neutral-500">
         Accounts are created by your service manager. If you cannot get in, ask them to check your

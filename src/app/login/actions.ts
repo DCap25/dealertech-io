@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { accountShape } from '@/lib/auth/session'
-import { landingPath, safeRedirect } from '@/lib/auth/routes'
+import { signInDestination } from '@/lib/auth/routes'
 
 export interface SignInState {
   error?: string
@@ -33,17 +33,13 @@ export async function signIn(_previous: SignInState, formData: FormData): Promis
 
   revalidatePath('/', 'layout')
 
-  // Somewhere they were headed before being asked to sign in wins outright.
-  if (requested) redirect(safeRedirect(requested))
-
   /*
-    Otherwise the destination depends on what this account actually is.
-
-    Defaulting to /drive sent DealerTech staff — who hold no dealership role —
-    to a page that immediately turned them back to the sign-in form, which is
-    indistinguishable from the sign-in having failed.
+    Somewhere they were already headed wins outright; otherwise the account
+    decides. `requested` must arrive raw — the login page used to resolve it
+    first, which made every sign-in look like it had asked for /drive and sent
+    DealerTech staff to a page that turned them straight back here.
   */
-  redirect(landingPath(await accountShape(data.user.id)))
+  redirect(signInDestination(requested, await accountShape(data.user.id)))
 }
 
 export async function signOut(): Promise<never> {
