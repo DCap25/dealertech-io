@@ -1,8 +1,7 @@
 import Link from 'next/link'
 import { UserBadge } from '@/components/auth/user-badge'
 import { Card } from '@/components/ui/primitives'
-import { requireUser } from '@/lib/auth/session'
-import { getDefaultStore } from '@/lib/prep-sheet/load'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { monthToDatePeriod, weekPeriod } from '@/lib/performance'
 import { buildBoard, type AdvisorRow, type Attention, type AttentionTone } from '@/lib/manager'
 import { loadAdvisors, loadAppointments, loadBacklog, loadRepairOrders } from '@/lib/manager/load'
@@ -190,7 +189,7 @@ export default async function ManagerPage({
     )
   }
 
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16 text-center">

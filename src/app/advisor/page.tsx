@@ -1,10 +1,9 @@
 import Link from 'next/link'
 import { UserBadge } from '@/components/auth/user-badge'
 import { loadAdvisorWorkspace } from '@/lib/advisor/load'
-import { getDefaultStore } from '@/lib/prep-sheet/load'
 import { money } from '../records-ui'
 import { demoNow } from '@/lib/demo-day'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,7 +30,7 @@ export default async function AdvisorPage() {
   // deploy artifact on the host, and this page must not serve a dealership
   // to an anonymous request even if it never runs.
   await requireUser()
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16 text-center">

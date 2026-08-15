@@ -1,7 +1,7 @@
 'use server'
 
-import { requireUser } from '@/lib/auth/session'
-import { getDefaultStore, loadDriveDay } from '@/lib/prep-sheet/load'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { buildDeviceSnapshot } from '@/lib/pairing/snapshot'
 import { endSession, listDevices, pushToDevice, sessionForAdvisor } from '@/lib/pairing/store'
 import type { MenuSelection } from '@/lib/menu/selection'
@@ -38,7 +38,7 @@ export async function sendMenuToDevice(
 ): Promise<PushState> {
   const user = await requireUser()
 
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) return { status: 'ERROR', message: 'No store configured.' }
 
   const sheets = await loadDriveDay(store.id, DAY(), DAY())

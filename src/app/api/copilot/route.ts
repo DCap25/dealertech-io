@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getDefaultStore, loadDriveDay } from '@/lib/prep-sheet/load'
+import { loadDriveDay } from '@/lib/prep-sheet/load'
 import {
   SYSTEM_PROMPT, buildCopilotContext, buildUserPrompt, getProvider, sourceLabel,
 } from '@/lib/copilot'
 import type { CopilotIntent, CopilotRequest } from '@/lib/copilot'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import { demoNow } from '@/lib/demo-day'
-import { getCurrentUser } from '@/lib/auth/session'
+import { getCurrentUser, getCurrentStore } from '@/lib/auth/session'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     )
   }
 
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) {
     return NextResponse.json({ error: 'No store configured.' }, { status: 500 })
   }

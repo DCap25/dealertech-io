@@ -1,12 +1,11 @@
 import Link from 'next/link'
 import { Card } from '@/components/ui/primitives'
-import { getDefaultStore } from '@/lib/prep-sheet/load'
 import {
   buildScorecard, latestActivity, monthPeriod, periodIsEmpty, weekPeriod,
   type Insight, type Metric, type Streak,
 } from '@/lib/performance'
 import { loadOutcomes, loadSoldLines } from '@/lib/performance/load'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { demoNow } from '@/lib/demo-day'
 
 export const dynamic = 'force-dynamic'
@@ -98,7 +97,7 @@ function StreakRow({ streak }: { streak: Streak }) {
 export default async function ScorecardPage() {
   // The signed-in advisor, not whichever row the database returned first.
   const user = await requireUser()
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16 text-center">

@@ -1,10 +1,10 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { loadDriveDay, getDefaultStore } from '@/lib/prep-sheet/load'
+import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { vinLastSix } from '@/lib/prep-sheet/presentation'
 import { PrepSheetView } from '@/components/prep-sheet/prep-sheet-view'
 import { demoNow } from '@/lib/demo-day'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +16,7 @@ export async function generateMetadata({
   params: Promise<{ appointmentId: string }>
 }) {
   const { appointmentId } = await params
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) return { title: 'Prep Sheet' }
   const sheets = await loadDriveDay(store.id, DAY(), DAY())
   const sheet = sheets.find((s) => s.appointment?.id === appointmentId)
@@ -43,7 +43,7 @@ export default async function PrepSheetPage({
   // to an anonymous request even if it never runs.
   await requireUser()
   const { appointmentId } = await params
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) notFound()
 
   const sheets = await loadDriveDay(store.id, DAY(), DAY())

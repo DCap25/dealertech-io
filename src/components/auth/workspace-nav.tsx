@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { UserBadge } from '@/components/auth/user-badge'
+import { StoreSwitcher } from '@/components/auth/store-switcher'
 import { getCurrentUser } from '@/lib/auth/session'
 
 /**
@@ -33,6 +34,7 @@ export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up
             {l.label}
           </Link>
         ))}
+      <StoreSwitcher />
       <UserBadge />
     </nav>
   )

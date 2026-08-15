@@ -2,12 +2,11 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { loadVehicleRecord } from '@/lib/records/vehicle'
 import { WearPanel } from '@/components/wear/wear-panel'
-import { getDefaultStore } from '@/lib/prep-sheet/load'
 import type { TermStatus } from '@/lib/warranty'
 import type { WearPrediction } from '@/lib/prep-sheet'
 import { Empty, money, Panel, shortDate, Stat } from '../../records-ui'
 import { demoNow } from '@/lib/demo-day'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +19,7 @@ export async function generateMetadata({
   params: Promise<{ vehicleId: string }>
 }) {
   const { vehicleId } = await params
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) return { title: 'Vehicle' }
   const record = await loadVehicleRecord(store.id, vehicleId, AS_OF())
   return { title: record ? `${record.label}` : 'Vehicle' }
@@ -121,7 +120,7 @@ export default async function VehiclePage({
   // to an anonymous request even if it never runs.
   await requireUser()
   const { vehicleId } = await params
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) notFound()
 
   const v = await loadVehicleRecord(store.id, vehicleId, AS_OF())

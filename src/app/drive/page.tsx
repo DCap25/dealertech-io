@@ -1,9 +1,9 @@
 import Link from 'next/link'
 import { WorkspaceNav } from '@/components/auth/workspace-nav'
-import { loadDriveDay, getDefaultStore } from '@/lib/prep-sheet/load'
+import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { AlertList, CoverageChips, money, PayerBadge, timeOf, UrgencyBadge } from './ui'
 import { demoNow } from '@/lib/demo-day'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +21,7 @@ export default async function DrivePage({
   // to an anonymous request even if it never runs.
   await requireUser()
   const params = await searchParams
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
 
   if (!store) {
     return (

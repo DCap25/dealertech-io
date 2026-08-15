@@ -1,9 +1,14 @@
 import 'server-only'
 import { cache } from 'react'
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { and, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import {
+  ACTIVE_STORE_COOKIE, resolveActiveStore,
+  type StaffRole, type StoreMembership,
+} from './active-store'
 
 /**
  * Who is using the app right now.
@@ -14,18 +19,33 @@ import { getSupabaseServerClient } from '@/lib/supabase/server'
  * another.
  */
 
-export type StaffRole = 'ADVISOR' | 'BDC' | 'SERVICE_MANAGER' | 'TECHNICIAN' | 'ADMIN'
+/*
+  Re-exported so callers keep importing "the session" rather than having to
+  know which half of it is pure.
+*/
+export {
+  ACTIVE_STORE_COOKIE, resolveActiveStore,
+  type StaffRole, type StoreMembership,
+} from './active-store'
 
 export interface CurrentUser {
   /** Matches `auth.users.id`, which is what every RLS policy resolves on. */
   id: string
   email: string
   name: string
+  /** The active rooftop. Every tenant-scoped query keys off this. */
   storeId: string
   storeName: string
   role: StaffRole
   /** Roles that work the drive and own follow-ups. */
   isAdvisor: boolean
+  /**
+   * Every rooftop this person can work.
+   *
+   * Dealer groups move staff between stores, and a fixed-ops director often
+   * covers several. Anything more than one turns on the store switcher.
+   */
+  memberships: StoreMembership[]
 }
 
 /**
@@ -44,6 +64,13 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   if (error || !data.user) return null
 
   const db = getDb()
+  /*
+    Every active membership, not the first one the database happened to return.
+
+    Ordered by store name so the fallback is stable: without it, "their default
+    rooftop" could change between requests, and a user would find themselves
+    looking at a different dealership after a reload.
+  */
   const rows = await db
     .select({
       id: schema.users.id,
@@ -56,10 +83,14 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     .from(schema.users)
     .innerJoin(schema.userStoreRoles, eq(schema.userStoreRoles.userId, schema.users.id))
     .innerJoin(schema.stores, eq(schema.stores.id, schema.userStoreRoles.storeId))
-    .where(and(eq(schema.users.id, data.user.id), eq(schema.userStoreRoles.isActive, true)))
-    .limit(1)
+    .where(and(
+      eq(schema.users.id, data.user.id),
+      eq(schema.userStoreRoles.isActive, true),
+      eq(schema.stores.isActive, true),
+    ))
+    .orderBy(asc(schema.stores.name))
 
-  const row = rows[0]
+  const first = rows[0]
 
   /**
    * Authenticated but not staff anywhere.
@@ -68,17 +99,33 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
    * looks like before someone grants them a store role, and the sign-in page
    * explains that better than a crash does.
    */
-  if (!row) return null
+  if (!first) return null
 
-  const role = row.role as StaffRole
+  const memberships: StoreMembership[] = rows.map((r) => ({
+    storeId: r.storeId,
+    storeName: r.storeName,
+    role: r.role as StaffRole,
+  }))
+
+  /*
+    The cookie chooses; the membership list authorises.
+
+    Read as a hint and then checked against what this user actually holds, so a
+    hand-edited cookie naming another dealership's id resolves to nothing and
+    falls back to their own first rooftop.
+  */
+  const requested = (await cookies()).get(ACTIVE_STORE_COOKIE)?.value
+  const active = resolveActiveStore(memberships, requested)!
+
   return {
-    id: row.id,
-    email: row.email,
-    name: row.fullName ?? row.email,
-    storeId: row.storeId,
-    storeName: row.storeName,
-    role,
-    isAdvisor: role === 'ADVISOR' || role === 'SERVICE_MANAGER',
+    id: first.id,
+    email: first.email,
+    name: first.fullName ?? first.email,
+    storeId: active.storeId,
+    storeName: active.storeName,
+    role: active.role,
+    isAdvisor: active.role === 'ADVISOR' || active.role === 'SERVICE_MANAGER',
+    memberships,
   }
 })
 
@@ -93,3 +140,31 @@ export async function requireUser(): Promise<CurrentUser> {
   if (!user) redirect('/login')
   return user
 }
+
+/**
+ * The rooftop being worked, in full.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS
+ * ---------------------------------------------------------------------------
+ * It replaces `getDefaultStore()`, which was `SELECT * FROM stores LIMIT 1` —
+ * fine while exactly one dealership existed, and catastrophic the moment a
+ * second one did: every page would have shown the new customer whichever store
+ * the database returned first.
+ *
+ * Engines need more than an id. Labour rate prices every estimate, state drives
+ * CARB terms and inspection rules, and the franchise brand decides which
+ * schedule a menu is built from — so this returns the row, not just the id.
+ *
+ * Cached per request, like the user it depends on.
+ */
+export const getCurrentStore = cache(async () => {
+  const user = await requireUser()
+  const db = getDb()
+  const [store] = await db
+    .select()
+    .from(schema.stores)
+    .where(eq(schema.stores.id, user.storeId))
+    .limit(1)
+  return store
+})

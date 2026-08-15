@@ -1,12 +1,11 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { loadRepairOrder } from '@/lib/advisor/load'
-import { getDefaultStore } from '@/lib/prep-sheet/load'
 import type { TermStatus } from '@/lib/warranty'
 import { money, Panel, shortDate } from '../../../records-ui'
 import { AddRecommendation, CloseRoButton, PendingLine } from './sell-call'
 import { demoNow } from '@/lib/demo-day'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,7 +23,7 @@ const PAYER_LABEL: Record<string, string> = {
 
 export async function generateMetadata({ params }: { params: Promise<{ roId: string }> }) {
   const { roId } = await params
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) return { title: 'Repair Order' }
   const ro = await loadRepairOrder(store.id, roId, AS_OF())
   return { title: ro ? `RO ${ro.roNumber} — ${ro.customerName}` : 'Repair Order' }
@@ -40,7 +39,7 @@ export default async function RepairOrderPage({
   // to an anonymous request even if it never runs.
   await requireUser()
   const { roId } = await params
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) notFound()
 
   const ro = await loadRepairOrder(store.id, roId, AS_OF())

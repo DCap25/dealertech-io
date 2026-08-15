@@ -2,8 +2,7 @@
 
 import { and, eq, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
-import { getDefaultStore } from '@/lib/prep-sheet/load'
-import { getCurrentUser } from '@/lib/auth/session'
+import { getCurrentUser, getCurrentStore } from '@/lib/auth/session'
 import type { OpportunityOutcome } from '@/lib/performance'
 
 /**
@@ -45,7 +44,7 @@ export async function recordVisitOutcomes(
     const user = await getCurrentUser()
     if (!user) return { ok: false, error: 'Sign in to record outcomes.' }
 
-    const store = await getDefaultStore()
+    const store = await getCurrentStore()
     if (!store) return { ok: false, error: 'No store configured.' }
 
     const db = getDb()

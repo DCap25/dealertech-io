@@ -1,9 +1,8 @@
 import Link from 'next/link'
 import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { searchCustomers } from '@/lib/records/customer'
-import { getDefaultStore } from '@/lib/prep-sheet/load'
 import { formatPhone, money, monthYear } from '../records-ui'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +20,7 @@ export default async function CustomersPage({
   // to an anonymous request even if it never runs.
   await requireUser()
   const { q } = await searchParams
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
 
   if (!store) {
     return (

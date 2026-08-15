@@ -2,13 +2,12 @@ import Link from 'next/link'
 import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { Card } from '@/components/ui/primitives'
 import { loadWorklist } from '@/lib/cadence/worklist'
-import { getDefaultStore } from '@/lib/prep-sheet/load'
 import {
   filterItems, groupByUrgency, ownerFrom, summarize, triggerMeta,
   type FollowUpItem, type FollowUpOwner,
 } from '@/lib/follow-up/view'
 import type { CadenceTrigger } from '@/lib/cadence'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { FollowUpCard } from './follow-up-card'
 import { demoDayEnd } from '@/lib/demo-day'
 
@@ -72,7 +71,7 @@ export default async function FollowUpPage({
   const params = await searchParams
   const user = await requireUser()
   const ownerTabs = ownerTabsFor(user.role)
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
 
   if (!store) {
     return (

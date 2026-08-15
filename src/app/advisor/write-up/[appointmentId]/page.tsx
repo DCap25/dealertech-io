@@ -2,11 +2,11 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { eq, and, desc } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
-import { loadDriveDay, getDefaultStore } from '@/lib/prep-sheet/load'
+import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { money } from '../../../records-ui'
 import { WriteUpForm, type MenuItem } from './write-up-form'
 import { demoNow } from '@/lib/demo-day'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,7 +24,7 @@ export default async function WriteUpPage({
   // to an anonymous request even if it never runs.
   await requireUser()
   const { appointmentId } = await params
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) notFound()
 
   const db = getDb()

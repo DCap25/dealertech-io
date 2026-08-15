@@ -1,11 +1,11 @@
 'use server'
 
-import { getDefaultStore, loadDriveDay } from '@/lib/prep-sheet/load'
+import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { buildHandOffPayload } from '@/lib/prep-sheet/command-center'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import { getDmsAdapter } from '@/lib/dms/registry'
 import { demoNow } from '@/lib/demo-day'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import {
   describeReceipt, provenanceNote, withProvenance,
   type DecisionSource, type HandOffReceipt,
@@ -67,7 +67,7 @@ export async function pushHandOffForVisit(
       }
     }
 
-    const store = await getDefaultStore()
+    const store = await getCurrentStore()
     if (!store) {
       return failure(vendor, 'No store configured.')
     }

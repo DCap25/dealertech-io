@@ -1,11 +1,10 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { loadCustomerRecord } from '@/lib/records/customer'
-import { getDefaultStore } from '@/lib/prep-sheet/load'
 import {
   ConsentBadge, Empty, formatPhone, money, Panel, shortDate, Stat, VehicleLink,
 } from '../../records-ui'
-import { requireUser } from '@/lib/auth/session'
+import { requireUser, getCurrentStore } from '@/lib/auth/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +14,7 @@ export async function generateMetadata({
   params: Promise<{ customerId: string }>
 }) {
   const { customerId } = await params
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) return { title: 'Customer' }
   const record = await loadCustomerRecord(store.id, customerId)
   return { title: record ? `${record.name}` : 'Customer' }
@@ -31,7 +30,7 @@ export default async function CustomerPage({
   // to an anonymous request even if it never runs.
   await requireUser()
   const { customerId } = await params
-  const store = await getDefaultStore()
+  const store = await getCurrentStore()
   if (!store) notFound()
 
   const record = await loadCustomerRecord(store.id, customerId)

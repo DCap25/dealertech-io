@@ -1,4 +1,5 @@
 import 'server-only'
+import { eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { toPrepSheetInputs, type StoreProfile } from '@/lib/dms'
 import { getDmsAdapter } from '@/lib/dms/registry'
@@ -16,11 +17,27 @@ import type { PrepSheet } from './types'
 /**
  * Store settings the engine needs for pricing and state-specific rules.
  *
- * Hardcoded for the demo store. A real deployment reads these from the store
- * record — labour rate in particular varies by rooftop and drives every
- * estimate on the sheet.
+ * Read from the rooftop being worked, not hardcoded. Labour rate varies by
+ * store and prices every estimate on the sheet; state decides CARB hybrid
+ * terms and inspection rules. A second dealership inheriting the first one's
+ * door rate would quote wrong money on every line.
+ *
+ * Falls back only when the row is somehow missing, and to values that are
+ * obviously placeholders rather than plausible ones.
  */
-const STORE_PROFILE: StoreProfile = { state: 'TX', laborRate: 185 }
+async function storeProfile(storeId: string): Promise<StoreProfile> {
+  const db = getDb()
+  const [row] = await db
+    .select({ state: schema.stores.state, laborRate: schema.stores.laborRate })
+    .from(schema.stores)
+    .where(eq(schema.stores.id, storeId))
+    .limit(1)
+
+  return {
+    state: row?.state ?? undefined,
+    laborRate: Number(row?.laborRate ?? 0),
+  }
+}
 
 function startOfDay(d: Date): Date {
   const out = new Date(d)
@@ -45,13 +62,19 @@ export async function loadDriveDay(
   const to = new Date(from)
   to.setDate(to.getDate() + 1)
 
-  const bundle = await getDmsAdapter().pullDriveBundle(storeId, { from, to })
-  return toPrepSheetInputs(bundle, STORE_PROFILE, asOf).map(buildPrepSheet)
+  const [bundle, profile] = await Promise.all([
+    getDmsAdapter().pullDriveBundle(storeId, { from, to }),
+    storeProfile(storeId),
+  ])
+  return toPrepSheetInputs(bundle, profile, asOf).map(buildPrepSheet)
 }
 
-/** The store to show when no tenant has been selected yet. */
-export async function getDefaultStore() {
-  const db = getDb()
-  const [store] = await db.select().from(schema.stores).limit(1)
-  return store
-}
+/*
+  `getDefaultStore()` used to live here — `SELECT * FROM stores LIMIT 1`.
+
+  Deleted rather than deprecated. It was correct only for as long as the
+  database held exactly one dealership, and on the second one every page that
+  called it would have served the new customer another dealer's drive. The
+  active rooftop now comes from the session: `getCurrentStore()` in
+  @/lib/auth/session.
+*/
