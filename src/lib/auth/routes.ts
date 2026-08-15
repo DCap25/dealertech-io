@@ -89,3 +89,33 @@ export function safeRedirect(target: string | null | undefined, fallback = '/dri
   if (target.startsWith('//') || target.startsWith('/\\')) return fallback
   return target
 }
+
+/**
+ * Where a freshly signed-in account belongs when it did not ask for anywhere.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS NOT JUST /drive
+ * ---------------------------------------------------------------------------
+ * DealerTech staff hold no dealership role, so the workspace has nothing to
+ * show them. Sending them to /drive meant `requireUser()` turned them straight
+ * back to the sign-in page, and the only route out was a second bounce that
+ * happened to land on the console — a three-hop chain where every hop had to
+ * agree about the session, and any disagreement between them is an infinite
+ * redirect between /login and /admin rather than a page.
+ *
+ * Deciding the destination once, at the point we already know who signed in,
+ * removes the chain. Pure so the decision is testable without a session.
+ */
+export function landingPath(account: {
+  /** Holds at least one active role at an active dealership. */
+  hasStore: boolean
+  isPlatformAdmin: boolean
+}): string {
+  if (account.hasStore) return '/drive'
+  if (account.isPlatformAdmin) return '/admin'
+  /*
+    Neither. An invited user before anybody granted them a role — /drive sends
+    them to the sign-in page, which is the surface that explains that state.
+  */
+  return '/drive'
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPublicPath, safeRedirect } from './routes'
+import { isPublicPath, landingPath, safeRedirect } from './routes'
 
 describe('isPublicPath', () => {
   it('lets someone reach an invitation or a trial without an account', () => {
@@ -115,5 +115,32 @@ describe('safeRedirect', () => {
 
   it('honours a caller-supplied fallback', () => {
     expect(safeRedirect(null, '/follow-up')).toBe('/follow-up')
+  })
+})
+
+describe('landingPath', () => {
+  it('sends dealership staff to the drive', () => {
+    expect(landingPath({ hasStore: true, isPlatformAdmin: false })).toBe('/drive')
+  })
+
+  it('sends DealerTech staff with no dealership to the console', () => {
+    /*
+      The bug this exists to prevent: a platform admin signed in successfully,
+      was sent to /drive, and requireUser() turned them straight back to the
+      sign-in form — indistinguishable from the password being wrong.
+    */
+    expect(landingPath({ hasStore: false, isPlatformAdmin: true })).toBe('/admin')
+  })
+
+  it('prefers the drive when somebody is both', () => {
+    // A DealerTech employee who also works a rooftop is there to work it.
+    // The console is one link away; the drive is their shift.
+    expect(landingPath({ hasStore: true, isPlatformAdmin: true })).toBe('/drive')
+  })
+
+  it('sends an account with neither to the workspace, which explains itself', () => {
+    // An invited user before anyone granted them a role. /drive bounces to the
+    // sign-in page, which is the surface that says why.
+    expect(landingPath({ hasStore: false, isPlatformAdmin: false })).toBe('/drive')
   })
 })

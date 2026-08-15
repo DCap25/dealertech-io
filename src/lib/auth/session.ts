@@ -206,6 +206,46 @@ export async function requireUser(): Promise<CurrentUser> {
 }
 
 /**
+ * What kind of account this is, for one user id.
+ *
+ * Deliberately takes the id rather than reading the session. It is called from
+ * the sign-in action immediately after `signInWithPassword`, where the auth
+ * cookies have been written but nothing has read them back yet — resolving the
+ * session there would depend on the cookie jar reflecting a write made moments
+ * earlier in the same request, which is a subtle thing to hang a redirect on.
+ * The id is already in hand and cannot be stale.
+ */
+export async function accountShape(userId: string): Promise<{
+  hasStore: boolean
+  isPlatformAdmin: boolean
+}> {
+  const db = getDb()
+
+  const [store, platform] = await Promise.all([
+    db
+      .select({ storeId: schema.userStoreRoles.storeId })
+      .from(schema.userStoreRoles)
+      .innerJoin(schema.stores, eq(schema.stores.id, schema.userStoreRoles.storeId))
+      .where(and(
+        eq(schema.userStoreRoles.userId, userId),
+        eq(schema.userStoreRoles.isActive, true),
+        eq(schema.stores.isActive, true),
+      ))
+      .limit(1),
+    db
+      .select({ id: schema.platformAdmins.id })
+      .from(schema.platformAdmins)
+      .where(and(
+        eq(schema.platformAdmins.userId, userId),
+        isNull(schema.platformAdmins.revokedAt),
+      ))
+      .limit(1),
+  ])
+
+  return { hasStore: store.length > 0, isPlatformAdmin: platform.length > 0 }
+}
+
+/**
  * DealerTech staff, or a 404.
  *
  * Not a redirect and not a 403. Somebody probing for an admin console should

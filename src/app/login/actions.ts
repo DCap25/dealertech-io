@@ -3,7 +3,8 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
-import { safeRedirect } from '@/lib/auth/routes'
+import { accountShape } from '@/lib/auth/session'
+import { landingPath, safeRedirect } from '@/lib/auth/routes'
 
 export interface SignInState {
   error?: string
@@ -19,19 +20,30 @@ export interface SignInState {
 export async function signIn(_previous: SignInState, formData: FormData): Promise<SignInState> {
   const email = String(formData.get('email') ?? '').trim().toLowerCase()
   const password = String(formData.get('password') ?? '')
-  const next = safeRedirect(String(formData.get('next') ?? ''))
+  const requested = String(formData.get('next') ?? '')
 
   if (!email || !password) return { error: 'Enter your email and password.' }
 
   const supabase = await getSupabaseServerClient()
-  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
-  if (error) {
+  if (error || !data.user) {
     return { error: 'That email and password did not match. Please try again.' }
   }
 
   revalidatePath('/', 'layout')
-  redirect(next)
+
+  // Somewhere they were headed before being asked to sign in wins outright.
+  if (requested) redirect(safeRedirect(requested))
+
+  /*
+    Otherwise the destination depends on what this account actually is.
+
+    Defaulting to /drive sent DealerTech staff — who hold no dealership role —
+    to a page that immediately turned them back to the sign-in form, which is
+    indistinguishable from the sign-in having failed.
+  */
+  redirect(landingPath(await accountShape(data.user.id)))
 }
 
 export async function signOut(): Promise<never> {
