@@ -158,6 +158,15 @@ export interface PrepSheetInput {
   maintenanceIntervals?: MaintenanceInterval[]
   /** Odometer at which each maintenance group was last performed. */
   lastServiceMileageByGroup?: Record<string, number>
+  /**
+   * Set when the source system's odometer contradicted its own history and the
+   * mapping layer used a different figure.
+   *
+   * Carried through to the sheet as an alert rather than applied silently: an
+   * import has nobody to ask, so the correction has to reach the one person who
+   * can look at the actual cluster.
+   */
+  odometerNote?: string
 }
 
 export interface PrepSheet {

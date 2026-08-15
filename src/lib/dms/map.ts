@@ -1,5 +1,6 @@
 import type { Contract, PrepaidEntitlement } from '@/lib/coverage'
 import type { InspectionSnapshot, PrepSheetInput } from '@/lib/prep-sheet'
+import { reconcileOdometer } from '@/lib/odometer/reconcile'
 import type {
   DmsCoverage, DmsDriveBundle, DmsInspection, DmsPrepaidEntitlement, DmsServiceLine,
 } from './types'
@@ -182,6 +183,32 @@ export function toPrepSheetInputs(
     const customer = appointment.customerId ? customerById.get(appointment.customerId) : undefined
     if (!vehicle || !customer) continue
 
+    /**
+     * Check the vehicle record's odometer against the rest of the payload.
+     *
+     * There is no advisor in an import to ask, but there is usually evidence:
+     * a bundle claiming 50,000 miles while carrying an inspection taken at
+     * 92,000 has already told us which number is wrong. See reconcileOdometer
+     * for why the higher figure wins.
+     */
+    const odometer = reconcileOdometer(vehicle.currentMileage, [
+      ...(inspectionsByVehicle.get(vehicle.id) ?? []).map((i) => ({
+        mileage: i.mileage ?? 0,
+        source: 'an inspection',
+        recordedAt: i.recordedAt,
+      })),
+      ...(linesByVehicle.get(vehicle.id) ?? []).map((l) => ({
+        mileage: l.mileage ?? 0,
+        source: 'a closed repair order',
+        recordedAt: l.closedAt,
+      })),
+      ...(declinesByVehicle.get(vehicle.id) ?? []).map((d) => ({
+        mileage: d.mileageAtDecline ?? 0,
+        source: 'work declined at an earlier visit',
+        recordedAt: d.declinedAt,
+      })),
+    ])
+
     inputs.push({
       asOf,
       store,
@@ -203,13 +230,14 @@ export function toPrepSheetInputs(
         model: vehicle.model,
         modelYear: vehicle.modelYear,
         inServiceDate: vehicle.inServiceDate,
-        currentMileage: vehicle.currentMileage ?? 0,
+        currentMileage: odometer.mileage,
         avgMilesPerDay: vehicle.avgMilesPerDay,
         isHybridOrEv: vehicle.isHybridOrEv,
         isFullyElectric: vehicle.isFullyElectric,
         driveType: vehicle.driveType,
         isOriginalOwner: vehicle.isOriginalOwner,
       },
+      odometerNote: odometer.correction?.message,
       appointment: {
         id: appointment.id,
         scheduledAt: appointment.scheduledAt,

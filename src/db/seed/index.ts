@@ -208,6 +208,8 @@ export async function seed(connectionString?: string) {
   const vehicles: {
     id: string; customerId: string; make: string; model: string; modelYear: number
     mileage: number; inService: Date; isOriginalOwner: boolean; isEv: boolean
+    /** Miles per day, so past visits can be placed on the odometer coherently. */
+    perDay: number
   }[] = []
 
   /**
@@ -318,10 +320,11 @@ export async function seed(connectionString?: string) {
       const mileage = Math.max(1200, Math.round(ageYears * int(8000, 17000) + int(-2000, 4000)))
       const vehicleId = randomUUID()
       const isEv = spec.make === 'TESLA'
+      const perDay = mileage / Math.max(1, ageYears * 365)
 
       vehicles.push({
         id: vehicleId, customerId: id, make: spec.make, model: pick(spec.models),
-        modelYear, mileage, inService, isOriginalOwner: chance(0.6), isEv,
+        modelYear, mileage, inService, isOriginalOwner: chance(0.6), isEv, perDay,
       })
 
       const veh = vehicles[vehicles.length - 1]!
@@ -332,7 +335,7 @@ export async function seed(connectionString?: string) {
         driveType: driveTypeFor(veh.model),
         inServiceDate: isoDate(inService),
         currentMileage: mileage, mileageAsOf: NOW,
-        avgMilesPerDay: (mileage / Math.max(1, ageYears * 365)).toFixed(2),
+        avgMilesPerDay: perDay.toFixed(2),
         licensePlate: `${pick(['ABC', 'BCD', 'CDE', 'DEF'])}${int(1000, 9999)}`,
         licenseState: 'TX',
       })
@@ -458,7 +461,6 @@ export async function seed(connectionString?: string) {
 
   for (const veh of vehicles) {
     const visits = int(1, 4)
-    let mileageAtVisit = Math.round(veh.mileage * 0.45)
     // Tread wears down visit over visit — two points give a slope, and a slope
     // gives a predicted sell date.
     let tread = int(9, 11)
@@ -488,7 +490,22 @@ export async function seed(connectionString?: string) {
       const daysBack = daysSinceLast + (visits - 1 - v) * int(140, 220)
       const visitDate = daysAgo(daysBack, NOW)
       if (visitDate > NOW) continue
-      mileageAtVisit += int(4000, 9000)
+
+      /*
+        Placed on the odometer by when the visit happened, not accumulated
+        forward from a fraction of it.
+
+        Accumulating (0.45 × current, then +4–9k per visit) overshot on any
+        low-mileage car: a 24,843-mile Santa Fe ended up with an inspection
+        recorded at 26,209, which cannot happen — a past visit's odometer is
+        always below today's. That impossible history is exactly what the DMS
+        odometer reconciliation flags, so the seed was manufacturing warnings
+        about itself on six of the thirty-four sheets.
+      */
+      const mileageAtVisit = Math.max(
+        500,
+        Math.round(veh.mileage - daysBack * veh.perDay),
+      )
       tread = Math.max(2, tread - int(1, 2))
 
       const roId = randomUUID()

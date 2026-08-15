@@ -186,6 +186,14 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
     vehicle.currentMileage + (vehicle.avgMilesPerDay ?? 0) * daysAhead,
   )
 
+  /*
+    Raised first, because it undermines everything below it. Every coverage
+    determination on this sheet keys off the odometer, so if the source system
+    contradicted itself about what that is, the advisor should read that before
+    they read the numbers it produced.
+  */
+  if (input.odometerNote) alerts.push(input.odometerNote)
+
   const warranty = computeWarrantySnapshot({
     make: vehicle.make,
     modelYear: vehicle.modelYear,

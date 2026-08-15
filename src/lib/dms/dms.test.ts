@@ -296,6 +296,63 @@ describe('toPrepSheetInputs', () => {
     expect(inputs[0]?.vehicle.currentMileage).toBe(0)
   })
 
+  describe('when the bundle contradicts its own odometer', () => {
+    const stale = (over: Partial<DmsDriveBundle> = {}) => bundle({
+      vehicles: [vehicle({ currentMileage: 50_000 })],
+      ...over,
+    })
+
+    const inspectionAt = (mileage: number): DmsInspection => ({
+      id: 'i1', vehicleId: 'v1', mileage,
+      recordedAt: new Date('2026-07-04T12:00:00Z'), items: [],
+    })
+
+    const lineAt = (mileage: number): DmsServiceLine => ({
+      repairOrderId: 'r1', vehicleId: 'v1', componentGroupKey: 'OIL_CHANGE',
+      description: 'Lube, Oil & Filter', mileage,
+      closedAt: new Date('2026-06-01T12:00:00Z'),
+      payType: 'CUSTOMER_PAY', amount: 84, customerAmount: 84,
+    })
+
+    it('works from the higher figure the payload itself proves', () => {
+      // A vehicle record at 50,000 arriving with an inspection taken at
+      // 92,000. Trusting the record would leave mileage-based warranty
+      // looking live when it expired 42,000 miles ago.
+      const inputs = toPrepSheetInputs(stale({ inspections: [inspectionAt(92_000)] }), store, ASOF)
+      expect(inputs[0]?.vehicle.currentMileage).toBe(92_000)
+    })
+
+    it('takes closed repair orders and old declines as evidence too', () => {
+      const fromLine = toPrepSheetInputs(stale({ serviceLines: [lineAt(88_000)] }), store, ASOF)
+      expect(fromLine[0]?.vehicle.currentMileage).toBe(88_000)
+    })
+
+    it('says so rather than correcting it quietly', () => {
+      // An import has nobody to ask, so the one case this gets wrong — a
+      // genuinely replaced cluster — has to reach someone who can look at it.
+      const inputs = toPrepSheetInputs(stale({ inspections: [inspectionAt(92_000)] }), store, ASOF)
+      expect(inputs[0]?.odometerNote).toContain('50,000')
+      expect(inputs[0]?.odometerNote).toContain('92,000')
+    })
+
+    it('stays quiet when the vehicle record is the highest figure', () => {
+      const inputs = toPrepSheetInputs(
+        bundle({ inspections: [inspectionAt(33_290)] }), store, ASOF,
+      )
+      expect(inputs[0]?.odometerNote).toBeUndefined()
+    })
+
+    it('does not borrow another vehicle’s odometer', () => {
+      // The evidence is indexed per vehicle. A high reading on the customer's
+      // other car must not raise this one's odometer.
+      const inputs = toPrepSheetInputs(stale({
+        inspections: [{ ...inspectionAt(92_000), vehicleId: 'v2' }],
+      }), store, ASOF)
+      expect(inputs[0]?.vehicle.currentMileage).toBe(50_000)
+      expect(inputs[0]?.odometerNote).toBeUndefined()
+    })
+  })
+
   it('returns nothing for an empty bundle', () => {
     expect(toPrepSheetInputs(emptyBundle(), store, ASOF)).toEqual([])
   })
