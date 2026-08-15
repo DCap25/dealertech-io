@@ -47,6 +47,19 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/favicon.ico')).toBe(true)
   })
 
+  it('lets a load balancer reach the health check', () => {
+    /*
+      A probe carries no session and never will. Gated, it would get a redirect
+      to the sign-in page — which is a 307, which most load balancers read as
+      "not healthy", so the instance is pulled from rotation while being
+      perfectly fine.
+
+      Both forms, because monitoring calls the deep one with a query string.
+    */
+    expect(isPublicPath('/api/health')).toBe(true)
+    expect(isPublicPath('/api/health/')).toBe(true)
+  })
+
   it('protects every workspace surface', () => {
     for (const path of [
       '/drive',
