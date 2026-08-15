@@ -1,11 +1,19 @@
 # DealerTech.io
 
-**A multi-tenant SaaS CRM for automotive dealership service departments.**
+**A selling tool for service advisors. A customer relationship builder second.**
+
+Get the order right, because it decides what gets built. This is a sales tool —
+it exists to help an advisor present everything, pitch the right work, and
+close it. The relationship and the record-keeping are what make the selling
+work over years instead of one visit, but they serve the sale; the sale does
+not serve them. A feature that does not make an advisor better in front of a
+customer is not a priority here, however good it would look on a CRM feature
+list.
 
 > DealerTech is the service advisor's primary daily workspace.
 > The DMS is the system of record.
 
-That one line governs almost every design decision in this repo. If you read
+That line governs almost every technical decision in this repo. If you read
 nothing else, read it twice. We do not replace the dealership's DMS — we sit on
 top of it, make the advisor brilliant at their job for the ninety seconds they
 have with each customer, and hand the result back to the DMS in a form it
@@ -40,16 +48,25 @@ misses reads to the customer as a lie.
 trustworthy ones.** They build relationships, they know the product, and they
 never pitch something they cannot stand behind.
 
-So the product is not "close more". The product is: give the advisor perfect
-recall and total honesty, and the closing follows. Specifically —
+That is the whole strategy. We are unapologetically building a tool to sell
+more work — we just think the highest-selling advisor in the country is the one
+the customer believes. So every feature here arms the advisor to present
+everything and pitch the right thing:
 
 - They know **exactly what coverage the customer already owns**, so the first
-  number on the screen is what the customer does *not* have to pay.
+  number on the screen is what the customer does *not* have to pay — which is
+  also the single most effective opener in the business.
 - They can **see the vehicle's history instantly**, so what they pitch is what
-  the car actually needs.
+  the car actually needs, and they can say why.
 - They can **show, not tell** — an animation of what a 3mm brake pad means,
   next to this vehicle's own measurement.
+- **Nothing gets missed.** The engine ranks every opportunity on the car, so
+  the safety item is presented even on the eighth write-up of the morning.
 - They never quote a price the DMS will not honour.
+
+The relationship layer — history, coverage, follow-up on declined work, cadence
+— is what turns one good conversation into a decade of them. It is second in
+priority, not second in importance.
 
 ### The vision
 
