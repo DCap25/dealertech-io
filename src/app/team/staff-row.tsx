@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import { changeRole, removeStaff, restoreStaff, type RosterState } from './actions'
 import { INVITABLE_ROLES } from '@/lib/invites/invite'
 
@@ -28,8 +28,18 @@ export function StaffRow({ member }: { member: StaffMember }) {
   const [roleState, roleAction, rolePending] = useActionState(changeRole, INITIAL)
   const [removeState, removeAction, removePending] = useActionState(removeStaff, INITIAL)
   const [restoreState, restoreAction, restorePending] = useActionState(restoreStaff, INITIAL)
+  const [confirming, setConfirming] = useState(false)
 
   const error = roleState.error ?? removeState.error ?? restoreState.error
+
+  /*
+    Drop the confirmation when the row changes side.
+
+    React keeps this component mounted across a remove and a later put-back,
+    so without this the restored row would come back already asking whether to
+    remove them again.
+  */
+  useEffect(() => { setConfirming(false) }, [member.isActive])
 
   return (
     <li className="p-3">
@@ -72,16 +82,41 @@ export function StaffRow({ member }: { member: StaffMember }) {
               </button>
             </form>
 
-            <form action={removeAction}>
-              <input type="hidden" name="userId" value={member.userId} />
+            {/*
+              Two steps, and the second one names them.
+
+              A native confirm() would block the page and could only say "are
+              you sure?" — which is the least useful question available. The
+              risk being guarded against is not hesitation, it is clicking the
+              row above the one you meant, and only a name catches that.
+            */}
+            {!confirming ? (
               <button
-                type="submit"
-                disabled={removePending}
-                className="rounded-md border border-neutral-300 px-2 py-1 text-xs font-medium transition hover:border-rose-500 hover:text-rose-700 disabled:opacity-50 dark:border-neutral-700 dark:hover:border-rose-500 dark:hover:text-rose-400"
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="rounded-md border border-neutral-300 px-2 py-1 text-xs font-medium transition hover:border-rose-500 hover:text-rose-700 dark:border-neutral-700 dark:hover:border-rose-500 dark:hover:text-rose-400"
               >
-                {removePending ? '…' : 'Remove'}
+                Remove
               </button>
-            </form>
+            ) : (
+              <form action={removeAction} className="flex items-center gap-1.5">
+                <input type="hidden" name="userId" value={member.userId} />
+                <button
+                  type="submit"
+                  disabled={removePending}
+                  className="rounded-md bg-rose-700 px-2 py-1 text-xs font-semibold text-white transition hover:bg-rose-600 disabled:opacity-50"
+                >
+                  {removePending ? 'Removing…' : `Yes, remove ${member.isSelf ? 'me' : member.name.split(' ')[0]}`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  className="rounded-md border border-neutral-300 px-2 py-1 text-xs font-medium dark:border-neutral-700"
+                >
+                  Cancel
+                </button>
+              </form>
+            )}
           </div>
         ) : (
           <form action={restoreAction} className="flex items-center gap-2">
@@ -97,6 +132,14 @@ export function StaffRow({ member }: { member: StaffMember }) {
           </form>
         )}
       </div>
+
+      {confirming && !error && (
+        <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
+          {member.isSelf
+            ? 'You will lose access to this dealership immediately. Work already on a repair order stays in your name, and another manager can put you back.'
+            : `${member.name} loses access immediately. Work already on a repair order stays in their name, and you can put them back.`}
+        </p>
+      )}
 
       {error && (
         <p className="mt-2 rounded-md border border-rose-300 bg-rose-50 p-2 text-xs text-rose-900 dark:border-rose-700 dark:bg-rose-950 dark:text-rose-100">
