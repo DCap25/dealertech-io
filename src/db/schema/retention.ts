@@ -111,6 +111,15 @@ export const cadenceTasks = pgTable(
     title: text('title').notNull(),
     detail: text('detail'),
     talkTrack: text('talk_track'),
+    /**
+     * The work this task is chasing.
+     *
+     * Null when the task is not about a specific service — a thank-you call or
+     * a dormant-customer win-back has no component group, and nothing should
+     * infer one. Closing an RO uses this to retire tasks for work that was
+     * just sold, so a customer is never called to re-offer what they bought.
+     */
+    componentGroupKey: text('component_group_key'),
     /** Revenue on the table, so a rep can work the list highest-value first. */
     estimatedValue: numeric('estimated_value', { precision: 10, scale: 2 }),
     priority: integer('priority').notNull().default(100),
@@ -135,6 +144,7 @@ export const cadenceTasks = pgTable(
     index('cadence_tasks_assigned_idx').on(t.assignedUserId, t.status, t.dueAt),
     index('cadence_tasks_customer_idx').on(t.customerId),
     index('cadence_tasks_trigger_idx').on(t.storeId, t.trigger),
+    index('cadence_tasks_component_idx').on(t.storeId, t.componentGroupKey),
   ],
 )
 

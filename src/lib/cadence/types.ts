@@ -111,6 +111,15 @@ export interface GeneratedTask {
   /** Stable identity for the thing that triggered it — used for dedupe. */
   sourceKey: string | null
   sourceDeclinedServiceId?: string
+  /**
+   * The work being chased, when the task is about a specific service.
+   *
+   * Left unset for tasks that are about the relationship rather than a job —
+   * a thank-you call or a win-back. Closing an RO retires pending tasks whose
+   * group was just sold, so this is what stops a customer being rung up to
+   * re-offer work they have already paid for.
+   */
+  componentGroupKey?: string | null
   /** Explains a suppression decision when one applies. */
   suppressedReason?: string
 }

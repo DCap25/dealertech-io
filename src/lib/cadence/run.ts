@@ -247,6 +247,7 @@ export async function runCadence(
         vehicleId: t.vehicleId,
         trigger: t.trigger,
         sourceDeclinedServiceId: t.sourceDeclinedServiceId,
+        componentGroupKey: t.componentGroupKey ?? null,
         title: t.title,
         // The source key rides along in detail so a re-run can dedupe without
         // a schema change. Extracted back out by extractSourceKey.

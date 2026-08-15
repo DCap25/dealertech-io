@@ -137,6 +137,7 @@ export function generateCadenceTasks(context: CadenceContext): GeneratedTask[] {
               dueAt,
               sourceKey: `decline:${decline.id}`,
               sourceDeclinedServiceId: decline.id,
+              componentGroupKey: decline.componentGroupKey,
             })
           }
         }
@@ -173,6 +174,7 @@ export function generateCadenceTasks(context: CadenceContext): GeneratedTask[] {
               estimatedValue: interval.value,
               dueAt: addDays(asOf, Math.min(daysAway, lookahead)),
               sourceKey: `maint:${vehicle.id}:${interval.key}:${dueAtMiles}`,
+              componentGroupKey: interval.key,
             })
           }
         }
@@ -198,6 +200,15 @@ export function generateCadenceTasks(context: CadenceContext): GeneratedTask[] {
                 'They already paid for these. Use it or lose it — this is the cheapest possible reason to book a visit.',
               estimatedValue: remaining * PPM_VISIT_VALUE,
               dueAt,
+              /*
+                No componentGroupKey, deliberately.
+
+                This task chases an unused plan balance, not a job. Four prepaid
+                oil changes expiring is not resolved by selling one of them —
+                three are still on the table and the plan still runs out. Tagging
+                it with OIL_CHANGE would make the next closed RO mark it done and
+                drop the other three on the floor.
+              */
               sourceKey: `ppm:${entitlement.contractId}:${entitlement.componentGroupKey}`,
             })
           }

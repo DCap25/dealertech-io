@@ -1,10 +1,11 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { nextRoNumber } from '@/lib/advisor/load'
 import { requireUser } from '@/lib/auth/session'
+import { soldComponentGroups } from '@/lib/reconcile/sold-work'
 
 export interface ActionState {
   ok?: boolean
@@ -297,6 +298,48 @@ export async function closeRepairOrder(
       .where(eq(schema.appointments.id, ro.appointmentId))
   }
 
+  /**
+   * Settle what this visit actually did.
+   *
+   * Scoped to this RO's vehicle, not the customer. A household with a truck and
+   * a car declines the same jobs on both, and selling a coolant flush on the
+   * Santa Fe must not quietly write off the one still owed on the Bronco.
+   */
+  // Passed the full line set, not `billable` — which states count as performed
+   // is the pure function's rule to own, and a line declined on this very RO
+   // must not be read as settling anything.
+  const soldGroups = soldComponentGroups(lines)
+  if (soldGroups.length > 0) {
+    await db.update(schema.declinedServices)
+      .set({ resolvedAt: now, resolvedByRoId: repairOrderId })
+      .where(and(
+        eq(schema.declinedServices.vehicleId, ro.vehicleId),
+        isNull(schema.declinedServices.resolvedAt),
+        inArray(schema.declinedServices.componentGroupKey, soldGroups),
+      ))
+
+    /*
+      Retire the chase, but record why.
+
+      SOLD_ELSEWHERE would be a lie — they bought it here. There is no outcome
+      for "the thing happened before anyone worked the task", so the outcome is
+      left null and the note carries the RO number. A BDC manager reviewing a
+      rep's completed list can see at a glance that this one closed itself.
+    */
+    await db.update(schema.cadenceTasks)
+      .set({
+        status: 'COMPLETED',
+        completedAt: now,
+        outcomeNotes: `Work performed on RO ${ro.roNumber}.`,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(schema.cadenceTasks.vehicleId, ro.vehicleId),
+        eq(schema.cadenceTasks.status, 'PENDING'),
+        inArray(schema.cadenceTasks.componentGroupKey, soldGroups),
+      ))
+  }
+
   // Keep the customer aggregates true — the goodwill and loyalty logic reads them.
   await db.execute(sql`
     UPDATE customers c SET
@@ -315,5 +358,9 @@ export async function closeRepairOrder(
 
   revalidatePath('/advisor')
   revalidatePath(`/advisor/ro/${repairOrderId}`)
+  // The reconciliation above changes both of these, and a stale follow-up list
+  // showing work that was just sold is the bug this whole block exists to fix.
+  revalidatePath('/follow-up')
+  revalidatePath(`/customers/${ro.customerId}`)
   return { ok: true }
 }
