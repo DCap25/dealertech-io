@@ -5,6 +5,7 @@ import { withCurrentUserScope } from '@/db/scoped'
 import { toPrepSheetInputs, type StoreProfile } from '@/lib/dms'
 import { getDmsAdapter } from '@/lib/dms/registry'
 import { buildPrepSheet } from './build'
+import { toPriceBook } from './pricing'
 import type { PrepSheet } from './types'
 
 /**
@@ -64,11 +65,38 @@ export async function loadDriveDay(
   const to = new Date(from)
   to.setDate(to.getDate() + 1)
 
-  const [bundle, profile] = await Promise.all([
-    getDmsAdapter().pullDriveBundle(storeId, { from, to }),
+  const adapter = getDmsAdapter()
+
+  const [bundle, profile, priced] = await Promise.all([
+    adapter.pullDriveBundle(storeId, { from, to }),
     storeProfile(storeId),
+    /*
+      The store's own prices.
+
+      Pulled every drive load rather than cached, because a price the customer
+      is quoted has to be the one the shop will actually bill — and the morning
+      sync, or somebody editing an op code at ten o'clock, both move it. A
+      stale menu price is the thing this whole change exists to stop.
+
+      An integration with no price book returns null and every recommendation
+      falls back to the engine's estimate, which is what happened everywhere
+      before this.
+    */
+    adapter.capabilities.canPullPriceBook
+      ? adapter.pullPriceBook(storeId).catch(() => null)
+      : Promise.resolve(null),
   ])
-  return toPrepSheetInputs(bundle, profile, asOf).map(buildPrepSheet)
+
+  const priceBook = priced
+    ? toPriceBook(priced.map((p) => ({
+        code: p.code,
+        description: p.description,
+        laborAmount: p.laborAmount ?? 0,
+        partsAmount: p.partsAmount ?? 0,
+      })))
+    : undefined
+
+  return toPrepSheetInputs(bundle, profile, asOf, priceBook).map(buildPrepSheet)
 }
 
 /*

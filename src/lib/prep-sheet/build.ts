@@ -4,6 +4,7 @@ import { computeWarrantySnapshot } from '@/lib/warranty'
 import { getComponentGroup } from '@/lib/taxonomy'
 import { predictWorstCorner, predictWear, TIRE_THRESHOLDS, BRAKE_THRESHOLDS, type WearReading } from './wear'
 import { detectAlignment, type AxleReading } from './alignment'
+import { resolvePrice } from './pricing'
 import type {
   MaintenanceInterval, Opportunity, OpportunityType, PrepSheet, PrepSheetInput,
   PrepSheetVehicle, Urgency,
@@ -55,20 +56,20 @@ const PPM_EXPIRY_WARNING_DAYS = 90
  */
 const DEFAULT_INTERVALS: MaintenanceInterval[] = [
   // ------------------------------------------------------------ every visit
-  { description: 'Oil & Filter Change', componentGroupKey: 'OIL_CHANGE', intervalMiles: 7500, estimatedAmount: 84,
+  { description: 'Oil & Filter Change', componentGroupKey: 'OIL_CHANGE', intervalMiles: 7500, estimatedAmount: 84, opCode: 'LOF',
     appliesTo: { combustionOnly: true } },
-  { description: 'Tire Rotation', componentGroupKey: 'TIRE_ROTATION', intervalMiles: 7500, estimatedAmount: 29 },
-  { description: 'Wiper Blade Replacement', componentGroupKey: 'WIPER_BLADES', intervalMiles: 15000, estimatedAmount: 62 },
-  { description: 'Tire Balance', componentGroupKey: 'TIRE_BALANCE', intervalMiles: 15000, estimatedAmount: 79 },
+  { description: 'Tire Rotation', componentGroupKey: 'TIRE_ROTATION', intervalMiles: 7500, estimatedAmount: 29, opCode: 'ROT' },
+  { description: 'Wiper Blade Replacement', componentGroupKey: 'WIPER_BLADES', intervalMiles: 15000, estimatedAmount: 62, opCode: 'WIPER' },
+  { description: 'Tire Balance', componentGroupKey: 'TIRE_BALANCE', intervalMiles: 15000, estimatedAmount: 79, opCode: 'BAL' },
 
   // ---------------------------------------------------------------- filters
-  { description: 'Engine Air Filter', componentGroupKey: 'ENGINE_AIR_FILTER', intervalMiles: 30000, estimatedAmount: 75,
+  { description: 'Engine Air Filter', componentGroupKey: 'ENGINE_AIR_FILTER', intervalMiles: 30000, estimatedAmount: 75, opCode: 'ENG-FLT',
     appliesTo: { combustionOnly: true } },
-  { description: 'Cabin Air Filter', componentGroupKey: 'CABIN_AIR_FILTER', intervalMiles: 30000, estimatedAmount: 97 },
+  { description: 'Cabin Air Filter', componentGroupKey: 'CABIN_AIR_FILTER', intervalMiles: 30000, estimatedAmount: 97, opCode: 'CAB-FLT' },
 
   // ----------------------------------------------------------------- fluids
-  { description: 'Brake Fluid Exchange', componentGroupKey: 'BRAKE_FLUID_SERVICE', intervalMiles: 45000, estimatedAmount: 183 },
-  { description: 'Transmission Fluid Service', componentGroupKey: 'TRANS_FLUID_SERVICE', intervalMiles: 60000, estimatedAmount: 367,
+  { description: 'Brake Fluid Exchange', componentGroupKey: 'BRAKE_FLUID_SERVICE', intervalMiles: 45000, estimatedAmount: 183, opCode: 'BRK-FLU' },
+  { description: 'Transmission Fluid Service', componentGroupKey: 'TRANS_FLUID_SERVICE', intervalMiles: 60000, estimatedAmount: 367, opCode: 'TRANS-SVC',
     appliesTo: { combustionOnly: true } },
   /*
     An electric car does have coolant — it thermally manages the battery and
@@ -79,14 +80,14 @@ const DEFAULT_INTERVALS: MaintenanceInterval[] = [
     quoting it at an owner who can pull up their own schedule in thirty seconds
     is the same invention the alignment rule exists to avoid.
   */
-  { description: 'Coolant Flush', componentGroupKey: 'COOLANT_SERVICE', intervalMiles: 100000, estimatedAmount: 250,
+  { description: 'Coolant Flush', componentGroupKey: 'COOLANT_SERVICE', intervalMiles: 100000, estimatedAmount: 250, opCode: 'COOL-FL',
     appliesTo: { combustionOnly: true } },
   /*
     Hydraulic racks were near-universal until the early 2010s and are now rare
     — most cars sold since are electrically assisted and have no fluid at all.
     Capped by model year rather than offered to everyone.
   */
-  { description: 'Power Steering Fluid Exchange', componentGroupKey: 'POWER_STEERING_PUMP', intervalMiles: 60000, estimatedAmount: 165,
+  { description: 'Power Steering Fluid Exchange', componentGroupKey: 'POWER_STEERING_PUMP', intervalMiles: 60000, estimatedAmount: 165, opCode: 'PS-FLU',
     appliesTo: { combustionOnly: true, maxModelYear: 2012 } },
 
   // ------------------------------------------------------------- driveline
@@ -101,19 +102,19 @@ const DEFAULT_INTERVALS: MaintenanceInterval[] = [
     case, despite matching on driveline. Offering either is the same fabricated
     line item as quoting it spark plugs.
   */
-  { description: 'Differential Fluid Service', componentGroupKey: 'DIFF_FLUID_SERVICE', intervalMiles: 45000, estimatedAmount: 189,
+  { description: 'Differential Fluid Service', componentGroupKey: 'DIFF_FLUID_SERVICE', intervalMiles: 45000, estimatedAmount: 189, opCode: 'DIFF-SVC',
     appliesTo: { combustionOnly: true, driveTypes: ['RWD', 'AWD', 'FOUR_WD'] } },
-  { description: 'Transfer Case Fluid Service', componentGroupKey: 'TRANSFER_CASE', intervalMiles: 45000, estimatedAmount: 169,
+  { description: 'Transfer Case Fluid Service', componentGroupKey: 'TRANSFER_CASE', intervalMiles: 45000, estimatedAmount: 169, opCode: 'TCASE-SVC',
     appliesTo: { combustionOnly: true, driveTypes: ['AWD', 'FOUR_WD'] } },
 
   // ----------------------------------------------------------------- engine
-  { description: 'Fuel System Induction Service', componentGroupKey: 'FUEL_INDUCTION_SERVICE', intervalMiles: 30000, estimatedAmount: 199,
+  { description: 'Fuel System Induction Service', componentGroupKey: 'FUEL_INDUCTION_SERVICE', intervalMiles: 30000, estimatedAmount: 199, opCode: 'IND-SVC',
     appliesTo: { combustionOnly: true } },
-  { description: 'PCV Valve Replacement', componentGroupKey: 'PCV_SYSTEM', intervalMiles: 60000, estimatedAmount: 120,
+  { description: 'PCV Valve Replacement', componentGroupKey: 'PCV_SYSTEM', intervalMiles: 60000, estimatedAmount: 120, opCode: 'PCV',
     appliesTo: { combustionOnly: true } },
-  { description: 'Serpentine Belt Replacement', componentGroupKey: 'ACCESSORY_DRIVE', intervalMiles: 90000, estimatedAmount: 210,
+  { description: 'Serpentine Belt Replacement', componentGroupKey: 'ACCESSORY_DRIVE', intervalMiles: 90000, estimatedAmount: 210, opCode: 'BELT',
     appliesTo: { combustionOnly: true } },
-  { description: 'Spark Plug Replacement', componentGroupKey: 'SPARK_PLUGS', intervalMiles: 100000, estimatedAmount: 535,
+  { description: 'Spark Plug Replacement', componentGroupKey: 'SPARK_PLUGS', intervalMiles: 100000, estimatedAmount: 535, opCode: 'PLUGS',
     appliesTo: { combustionOnly: true } },
 ]
 
@@ -316,7 +317,7 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
   }
   const alignment = detectAlignment(latestPerCorner)
   if (alignment) {
-    const amount = 149
+    const { amount, source: priceSource } = resolvePrice(input.priceBook, 'ALIGN', 149)
     const determination = coverageFor('four wheel alignment', 'WHEEL_ALIGNMENT', amount)
     raw.push({
       type: 'MAINTENANCE_DUE',
@@ -325,6 +326,7 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
       customerDetail: alignment.detail,
       componentGroupKey: 'WHEEL_ALIGNMENT',
       estimatedAmount: amount,
+      priceSource,
       customerOutOfPocket: determination.customerOutOfPocket,
       likelyPayer: determination.payer,
       // Not a safety item — the car drives straight. It is a tyre-life
@@ -345,7 +347,7 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
       prediction.milesUntilSellThreshold !== null &&
       prediction.milesUntilSellThreshold <= WEAR_HORIZON_MILES
     if (dueNow || dueSoon) {
-      const amount = 1100
+      const { amount, source: priceSource } = resolvePrice(input.priceBook, 'TIRE4', 1100)
       const determination = coverageFor('replace tires road hazard', 'TIRES', amount)
       raw.push({
         type: 'WEAR_PREDICTED',
@@ -357,6 +359,7 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
             : `Worst corner ${position} at ${prediction.currentValue}/32", wearing ${prediction.ratePerThousandMiles}/32" per 1,000 miles — reaches ${TIRE_THRESHOLDS.sell}/32" in about ${prediction.milesUntilSellThreshold?.toLocaleString()} miles.`,
         componentGroupKey: 'TIRES',
         estimatedAmount: amount,
+        priceSource,
         customerOutOfPocket: determination.customerOutOfPocket,
         likelyPayer: determination.payer,
         urgency: prediction.isCritical ? 'SAFETY' : 'HIGH',
@@ -371,7 +374,7 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
   const brakePrediction = predictWear(brakeReadings, BRAKE_THRESHOLDS, vehicle.avgMilesPerDay)
   if (brakePrediction && (brakePrediction.isAtSellThreshold ||
       (brakePrediction.milesUntilSellThreshold !== null && brakePrediction.milesUntilSellThreshold <= WEAR_HORIZON_MILES))) {
-    const amount = 618
+    const { amount, source: priceSource } = resolvePrice(input.priceBook, 'BRK-FR', 618)
     const determination = coverageFor('front brake pads and rotors', 'BRAKE_PADS_SHOES', amount)
     raw.push({
       type: 'WEAR_PREDICTED',
@@ -382,6 +385,7 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
           : '.'),
       componentGroupKey: 'BRAKE_PADS_SHOES',
       estimatedAmount: amount,
+      priceSource,
       customerOutOfPocket: determination.customerOutOfPocket,
       likelyPayer: determination.payer,
       urgency: brakePrediction.isCritical ? 'SAFETY' : 'HIGH',
@@ -423,7 +427,8 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
     // Only interesting if due now or within the next couple of thousand miles.
     if (projectedMileage < dueAt - 2000) continue
 
-    const determination = coverageFor(interval.description, interval.componentGroupKey, interval.estimatedAmount)
+    const { amount: price, source: priceSource } = resolvePrice(input.priceBook, interval.opCode, interval.estimatedAmount)
+    const determination = coverageFor(interval.description, interval.componentGroupKey, price)
     const overdueBy = projectedMileage - dueAt
 
     const detail = !hasRecord
@@ -442,7 +447,8 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
         ? detail
         : `Recommended every ${interval.intervalMiles.toLocaleString()} miles.`,
       componentGroupKey: interval.componentGroupKey,
-      estimatedAmount: interval.estimatedAmount,
+      estimatedAmount: price,
+      priceSource,
       customerOutOfPocket: determination.customerOutOfPocket,
       likelyPayer: determination.payer,
       urgency: hasRecord && overdueBy > interval.intervalMiles * 0.5 ? 'MEDIUM' : 'LOW',
@@ -486,7 +492,8 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
     .filter((interval) => projectedMileage >= interval.intervalMiles)
 
   for (const interval of unrecorded) {
-    const determination = coverageFor(interval.description, interval.componentGroupKey, interval.estimatedAmount)
+    const { amount: price, source: priceSource } = resolvePrice(input.priceBook, interval.opCode, interval.estimatedAmount)
+    const determination = coverageFor(interval.description, interval.componentGroupKey, price)
 
     raw.push({
       type: 'MAINTENANCE_DUE',
@@ -499,7 +506,8 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
       // not show the customer our own instruction to interrogate them.
       customerDetail: `Recommended every ${interval.intervalMiles.toLocaleString()} miles.`,
       componentGroupKey: interval.componentGroupKey,
-      estimatedAmount: interval.estimatedAmount,
+      estimatedAmount: price,
+      priceSource,
       customerOutOfPocket: determination.customerOutOfPocket,
       likelyPayer: determination.payer,
       // An unverified interval is a question. It never outranks a measurement,

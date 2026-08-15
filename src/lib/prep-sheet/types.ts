@@ -1,5 +1,6 @@
 import type { Contract, OpenRecall, Payer, PrepaidEntitlement } from '@/lib/coverage'
 import type { WarrantySnapshot } from '@/lib/warranty'
+import type { PriceBook } from './pricing'
 
 export type OpportunityType =
   | 'RECALL_OPEN'
@@ -40,6 +41,15 @@ export interface Opportunity {
   customerDetail?: string
   /** Row this came from — declined service, entitlement, recall campaign. */
   sourceId?: string
+  /**
+   * Whether this price is the store's own or our estimate.
+   *
+   * An advisor about to turn a tablet round should be able to tell the
+   * difference. "Your op code says $106" and "we think it's about $84" are
+   * different degrees of confidence, and only one of them is safe to defend to
+   * a customer.
+   */
+  priceSource?: 'STORE' | 'ESTIMATE'
   /**
    * We inferred this rather than observed it, and it needs a word with the
    * customer before it is presented as due.
@@ -111,7 +121,21 @@ export interface MaintenanceInterval {
   description: string
   componentGroupKey: string
   intervalMiles: number
+  /**
+   * The engine's own figure, used when the store has no matching op code.
+   *
+   * A fallback rather than the price: a recommendation that vanished because
+   * its price was missing would be worse than one priced approximately.
+   */
   estimatedAmount: number
+  /**
+   * The store op code this recommendation means.
+   *
+   * Named explicitly rather than matched on component group, because a group
+   * is not specific enough — front and rear brakes share BRAKE_PADS_SHOES and
+   * cost different money.
+   */
+  opCode?: string
 
   /**
    * Vehicles this service does not exist on.
@@ -167,6 +191,14 @@ export interface PrepSheetInput {
    * can look at the actual cluster.
    */
   odometerNote?: string
+  /**
+   * The store's priced operations, keyed by op code.
+   *
+   * Absent means every recommendation falls back to the engine's estimate,
+   * which is what happens on an integration with no price book. Present means
+   * the customer is quoted this dealership's actual money.
+   */
+  priceBook?: PriceBook
 }
 
 export interface PrepSheet {

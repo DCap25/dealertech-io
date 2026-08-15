@@ -1,6 +1,7 @@
 import type { Contract, PrepaidEntitlement } from '@/lib/coverage'
 import type { InspectionSnapshot, PrepSheetInput } from '@/lib/prep-sheet'
 import { reconcileOdometer } from '@/lib/odometer/reconcile'
+import type { PriceBook } from '@/lib/prep-sheet/pricing'
 import type {
   DmsCoverage, DmsDriveBundle, DmsInspection, DmsPrepaidEntitlement, DmsServiceLine,
 } from './types'
@@ -164,6 +165,7 @@ export function toPrepSheetInputs(
   bundle: DmsDriveBundle,
   store: StoreProfile,
   asOf: Date,
+  priceBook?: PriceBook,
 ): PrepSheetInput[] {
   const customerById = new Map(bundle.customers.map((c) => [c.id, c]))
   const vehicleById = new Map(bundle.vehicles.map((v) => [v.id, v]))
@@ -238,6 +240,7 @@ export function toPrepSheetInputs(
         isOriginalOwner: vehicle.isOriginalOwner,
       },
       odometerNote: odometer.correction?.message,
+      priceBook,
       appointment: {
         id: appointment.id,
         scheduledAt: appointment.scheduledAt,
