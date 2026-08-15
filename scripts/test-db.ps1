@@ -48,6 +48,23 @@ function Build-Database($database) {
         if ($m.Name -like '0000*') { Apply-Sql $m.FullName $database }
     }
     Apply-Sql (Join-Path $Root 'src\db\test\local-auth-shim.sql') $database
+
+    # The ledger `npm run db:apply` keeps, created here because this script
+    # applies the files directly and never goes through it. Without the table,
+    # 0014 fails on the line that turns RLS on for it, and every migration from
+    # there on is silently missing — which is how this database ended up
+    # several columns behind the schema the tests are written against.
+    $ledger = @"
+CREATE TABLE IF NOT EXISTS public._applied_migrations (
+  filename   text PRIMARY KEY,
+  applied_at timestamptz NOT NULL DEFAULT now()
+);
+"@
+    $ledgerFile = Join-Path $env:TEMP "dealertech-ledger.sql"
+    Set-Content -Path $ledgerFile -Value $ledger -Encoding utf8
+    Apply-Sql $ledgerFile $database
+    Remove-Item $ledgerFile -Force
+
     foreach ($m in $migrations) {
         if ($m.Name -notlike '0000*') { Apply-Sql $m.FullName $database }
     }

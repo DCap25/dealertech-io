@@ -407,7 +407,17 @@ export async function nextRoNumber(storeId: string): Promise<string> {
   return withCurrentUserScope((db) => nextRoNumberScoped(db, storeId))
 }
 
-async function nextRoNumberScoped(db: ScopedDb, storeId: string): Promise<string> {
+/**
+ * The same, on a transaction the caller already opened.
+ *
+ * Exported because the write-up has to allocate this number inside the same
+ * transaction as the repair order it belongs to, and the wrapper above cannot
+ * be used for that: it opens a transaction of its own, and the connection pool
+ * is `max: 1` wherever the database is reached through a pooler. Asking it for
+ * a second connection while holding the first is not a slow query, it is a
+ * deadlock that never resolves.
+ */
+export async function nextRoNumberScoped(db: ScopedDb, storeId: string): Promise<string> {
   const [row] = await db
     .select({ max: sql<string | null>`max(${schema.repairOrders.roNumber})` })
     .from(schema.repairOrders)

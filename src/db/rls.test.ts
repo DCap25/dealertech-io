@@ -246,9 +246,32 @@ describe.skipIf(!reachable)('row-level security — tenant isolation', () => {
       JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public'
         AND c.relkind = 'r'
+        -- The migration ledger, excluded here for the same reason 0014
+        -- excludes it: it is infrastructure with no store_id to write a policy
+        -- against, so it carries RLS with no policy at all — which denies
+        -- everything — and is deliberately NOT forced, because the migration
+        -- runner owns the table and has to write to it.
+        AND c.relname <> '_applied_migrations'
         AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity)
     `
     expect(rows.map((r) => r.table_name)).toEqual([])
+  })
+
+  it('denies the ledger to a signed-in user despite not forcing it', async () => {
+    /*
+      The exception above is only safe if something else closes the gap, so it
+      is asserted rather than assumed — "not forced" is otherwise
+      indistinguishable from "not protected".
+
+      It turns out to be shut harder than RLS alone would manage: the table was
+      never granted to `authenticated` at all, so this is refused at the
+      privilege layer before any policy is consulted. Worth pinning, because a
+      future migration that grants the role a blanket SELECT would move the
+      answer from "denied" to "allowed and unfiltered" in one step.
+    */
+    await expect(
+      asUser(advisorA, (tx) => tx`SELECT filename FROM _applied_migrations`),
+    ).rejects.toThrow(/permission denied/i)
   })
 
   it('gives every store-scoped table an isolation policy', async () => {

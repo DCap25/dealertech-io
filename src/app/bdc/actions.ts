@@ -53,73 +53,96 @@ export async function logOutcome(
   const now = new Date()
   const retryable = outcome === 'NO_ANSWER' || outcome === 'LEFT_VOICEMAIL'
 
-  await db
-    .update(schema.cadenceTasks)
-    .set(
-      retryable
-        ? {
-            // Still open — try again in two days rather than dropping the lead.
-            status: 'PENDING',
-            dueAt: addDays(now, 2),
-            outcome,
-            outcomeNotes: notes || null,
-            updatedAt: now,
-          }
-        : {
-            status: 'COMPLETED',
-            completedAt: now,
-            outcome,
-            outcomeNotes: notes || null,
-            updatedAt: now,
-          },
-    )
-    .where(eq(schema.cadenceTasks.id, taskId))
+  /**
+   * ---------------------------------------------------------------------------
+   * ONE CALL, UP TO FIVE ROWS
+   * ---------------------------------------------------------------------------
+   * The pair that makes this worth a transaction is DO_NOT_CONTACT: the
+   * customer flag and the `consent_events` row are a suppression and the record
+   * of why it exists. Landing the flag without the record leaves a customer
+   * silently unreachable with nothing saying who asked or when — which is the
+   * half you need when somebody later asks whether the request was honoured.
+   * Landing the record without the flag is worse: it says the request was taken
+   * while the rules go on surfacing them.
+   *
+   * The call log matters for a duller reason. BDC performance is measured in
+   * calls made against appointments set, so a task that moves without its log
+   * makes a rep look like they did less work than they did.
+   */
+  try {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(schema.cadenceTasks)
+        .set(
+          retryable
+            ? {
+                // Still open — try again in two days rather than dropping the lead.
+                status: 'PENDING',
+                dueAt: addDays(now, 2),
+                outcome,
+                outcomeNotes: notes || null,
+                updatedAt: now,
+              }
+            : {
+                status: 'COMPLETED',
+                completedAt: now,
+                outcome,
+                outcomeNotes: notes || null,
+                updatedAt: now,
+              },
+        )
+        .where(eq(schema.cadenceTasks.id, taskId))
 
-  // Log the attempt regardless of outcome — BDC performance is measured on
-  // calls made against appointments set, and an unlogged call is an untracked
-  // one.
-  await db.insert(schema.callLogs).values({
-    storeId: task.storeId,
-    customerId: task.customerId,
-    vehicleId: task.vehicleId,
-    cadenceTaskId: task.id,
-    direction: 'OUTBOUND',
-    outcome:
-      outcome === 'NO_ANSWER' ? 'NO_ANSWER'
-      : outcome === 'LEFT_VOICEMAIL' ? 'VOICEMAIL'
-      : outcome === 'WRONG_NUMBER' ? 'WRONG_NUMBER'
-      : 'CONNECTED',
-    phoneNumber: '',
-    startedAt: now,
-    notes: notes || null,
-  })
+      // Log the attempt regardless of outcome — BDC performance is measured on
+      // calls made against appointments set, and an unlogged call is an untracked
+      // one.
+      await tx.insert(schema.callLogs).values({
+        storeId: task.storeId,
+        customerId: task.customerId,
+        vehicleId: task.vehicleId,
+        cadenceTaskId: task.id,
+        direction: 'OUTBOUND',
+        outcome:
+          outcome === 'NO_ANSWER' ? 'NO_ANSWER'
+          : outcome === 'LEFT_VOICEMAIL' ? 'VOICEMAIL'
+          : outcome === 'WRONG_NUMBER' ? 'WRONG_NUMBER'
+          : 'CONNECTED',
+        phoneNumber: '',
+        startedAt: now,
+        notes: notes || null,
+      })
 
-  if (outcome === 'DO_NOT_CONTACT') {
-    // Honour it globally and immediately. The worklist also filters on this,
-    // so any already-generated task for them disappears on the next render.
-    await db
-      .update(schema.customers)
-      .set({ doNotCall: true, updatedAt: now })
-      .where(eq(schema.customers.id, task.customerId))
+      if (outcome === 'DO_NOT_CONTACT') {
+        // Honour it globally and immediately. The worklist also filters on this,
+        // so any already-generated task for them disappears on the next render.
+        await tx
+          .update(schema.customers)
+          .set({ doNotCall: true, updatedAt: now })
+          .where(eq(schema.customers.id, task.customerId))
 
-    await db.insert(schema.consentEvents).values({
-      storeId: task.storeId,
-      customerId: task.customerId,
-      eventType: 'REVOKED',
-      scope: 'VOICE',
-      channelAddress: '',
-      source: 'BDC_CALL',
-      disclosureText: 'Customer asked not to be contacted during an outbound service call.',
+        await tx.insert(schema.consentEvents).values({
+          storeId: task.storeId,
+          customerId: task.customerId,
+          eventType: 'REVOKED',
+          scope: 'VOICE',
+          channelAddress: '',
+          source: 'BDC_CALL',
+          disclosureText: 'Customer asked not to be contacted during an outbound service call.',
+        })
+      }
+
+      if (notes) {
+        await tx.insert(schema.customerNotes).values({
+          storeId: task.storeId,
+          customerId: task.customerId,
+          vehicleId: task.vehicleId,
+          body: `[${outcome.replace(/_/g, ' ').toLowerCase()}] ${notes}`,
+        })
+      }
     })
-  }
-
-  if (notes) {
-    await db.insert(schema.customerNotes).values({
-      storeId: task.storeId,
-      customerId: task.customerId,
-      vehicleId: task.vehicleId,
-      body: `[${outcome.replace(/_/g, ' ').toLowerCase()}] ${notes}`,
-    })
+  } catch (error) {
+    console.error('[bdc] logOutcome rolled back:', error)
+    return { error: 'Could not save that outcome. Nothing was recorded — try again.' }
   }
 
   revalidatePath('/bdc')

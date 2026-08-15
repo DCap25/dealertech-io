@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
-import { nextRoNumber } from '@/lib/advisor/load'
+import { nextRoNumberScoped } from '@/lib/advisor/load'
 import { requireUser } from '@/lib/auth/session'
 import { soldComponentGroups } from '@/lib/reconcile/sold-work'
 import { checkOdometer, overrideSummary, validateOverride } from '@/lib/odometer/check'
@@ -32,6 +32,29 @@ export interface ActionState {
 function num(value: FormDataEntryValue | null, fallback = 0): number {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+/**
+ * A failure with a message meant for the advisor.
+ *
+ * Inside a transaction the only way to roll back is to throw, but not every
+ * throw should reach a person: a constraint violation or a dropped connection
+ * is ours to fix and reads as gibberish at the podium. This marks the ones
+ * that were written for them, so everything else can be logged and replaced
+ * with a sentence that says what to do next.
+ */
+class AdvisorError extends Error {}
+
+/**
+ * Turn whatever came out of a transaction into something the form can render.
+ *
+ * A rollback is invisible to the caller — the write simply did not happen — so
+ * the only thing left to get right is what the advisor is told about it.
+ */
+function failed(error: unknown, fallback: string): ActionState {
+  if (error instanceof AdvisorError) return { error: error.message }
+  console.error('[advisor] transaction rolled back:', error)
+  return { error: fallback }
 }
 
 /**
@@ -131,85 +154,135 @@ export async function openRepairOrder(
   }
 
   const storeId = appointment.storeId
-  const roNumber = await nextRoNumber(storeId)
   const now = new Date()
-
-  const [ro] = await db.insert(schema.repairOrders).values({
-    storeId,
-    appointmentId,
-    customerId: appointment.customerId,
-    vehicleId: appointment.vehicleId,
-    advisorId: appointment.advisorId,
-    roNumber,
-    status: 'OPEN',
-    mileageIn: mileage,
-    openedAt: now,
-  }).returning({ id: schema.repairOrders.id })
-  if (!ro) return { error: 'Could not open the repair order.' }
-
-  // Selected menu items become approved lines — the customer authorised these
-  // at the podium. Anything the tech finds later comes in as RECOMMENDED.
-  if (opCodeIds.length > 0) {
-    const opCodes = await db.select().from(schema.opCodes)
-      .where(and(eq(schema.opCodes.storeId, storeId), eq(schema.opCodes.isActive, true)))
-    const byId = new Map(opCodes.map((o) => [o.id, o]))
-
-    const values = opCodeIds
-      .map((id, index) => {
-        const op = byId.get(id)
-        if (!op) return null
-        return {
-          storeId,
-          repairOrderId: ro.id,
-          opCodeId: op.id,
-          lineNumber: index + 1,
-          description: op.description,
-          componentGroupKey: op.componentGroupKey,
-          payType: 'CUSTOMER_PAY' as const,
-          status: 'APPROVED' as const,
-          laborHours: op.laborHours ?? '0',
-          laborAmount: op.laborAmount ?? '0',
-          partsAmount: op.partsAmount ?? '0',
-          customerAmount: String(Number(op.laborAmount ?? 0) + Number(op.partsAmount ?? 0)),
-          complaint: concerns || null,
-          approvedAt: now,
-          approvedBy: 'Customer at write-up',
-        }
-      })
-      .filter((v): v is NonNullable<typeof v> => v !== null)
-
-    if (values.length > 0) await db.insert(schema.roLines).values(values)
-  }
-
-  await db.update(schema.appointments)
-    .set({ status: 'ARRIVED', arrivedAt: now, customerConcerns: concerns || appointment.customerConcerns, updatedAt: now })
-    .where(eq(schema.appointments.id, appointmentId))
-
-  await db.insert(schema.mileageReadings).values({
-    storeId, vehicleId: appointment.vehicleId, mileage, recordedAt: now, source: 'WRITE_UP',
-    // Only populated on an accepted rollback. This row is the audit trail.
-    previousMileage: override ? (lastReadingRow?.mileage ?? null) : null,
-    overrideReason: override?.reasonCode ?? null,
-    overrideNote: override?.summary ?? null,
-    overrideByUserId: override ? user.id : null,
-    overrideAt: override ? now : null,
-  })
+  /*
+    Pulled out of `appointment` before the transaction opens. Both were checked
+    for null above, but TypeScript drops that narrowing at the edge of a
+    callback — it cannot know the closure runs immediately.
+  */
+  const { customerId, vehicleId } = appointment
 
   /**
-   * The vehicle record follows the reading, including downwards.
+   * ---------------------------------------------------------------------------
+   * WHERE THE BOUNDARY IS, AND WHY
+   * ---------------------------------------------------------------------------
+   * Everything above is reading and deciding: does the appointment exist, has it
+   * already been written up, does the odometer make sense. None of it changes
+   * anything, and the odometer branch above deliberately returns a decision for
+   * the advisor to make rather than an error — that is not a failed write, so it
+   * has no business inside a transaction.
    *
-   * Tempting to keep the higher number "just in case", but that would leave the
-   * vehicle claiming an odometer nobody can see on the cluster, and every
-   * coverage decision from here keys off it. If a cluster was replaced, the low
-   * number is the truth. The confirmation above is what makes it safe to trust:
-   * this only runs once somebody said so on the record.
+   * From here it is one act. A repair order without its lines is a ticket the
+   * technician cannot work; without the appointment moving to ARRIVED it stays
+   * on the drive as though the customer never came; without the mileage reading
+   * the wear prediction for every future visit quietly degrades, and that loss
+   * is silent and permanent. These five writes are only meaningful together, so
+   * they commit together or not at all.
    */
-  await db.update(schema.vehicles)
-    .set({ currentMileage: mileage, mileageAsOf: now, updatedAt: now })
-    .where(eq(schema.vehicles.id, appointment.vehicleId))
+  let repairOrderId: string
+  try {
+    repairOrderId = await db.transaction(async (tx) => {
+      /*
+        Serialise RO numbering for this store.
 
+        The number comes from `max(ro_number) + 1`, which two advisors writing
+        up at the same moment both read before either has written — and the
+        second insert silently reuses the first's number. A transaction alone
+        does not prevent that; nothing conflicts, both are perfectly valid
+        inserts. This lock is per-store and released on commit, so two rooftops
+        never wait on each other.
+      */
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${storeId}))`)
+      const roNumber = await nextRoNumberScoped(tx, storeId)
+
+      const [ro] = await tx.insert(schema.repairOrders).values({
+        storeId,
+        appointmentId,
+        customerId,
+        vehicleId,
+        advisorId: appointment.advisorId,
+        roNumber,
+        status: 'OPEN',
+        mileageIn: mileage,
+        openedAt: now,
+      }).returning({ id: schema.repairOrders.id })
+      if (!ro) throw new AdvisorError('Could not open the repair order.')
+
+      // Selected menu items become approved lines — the customer authorised these
+      // at the podium. Anything the tech finds later comes in as RECOMMENDED.
+      if (opCodeIds.length > 0) {
+        const opCodes = await tx.select().from(schema.opCodes)
+          .where(and(eq(schema.opCodes.storeId, storeId), eq(schema.opCodes.isActive, true)))
+        const byId = new Map(opCodes.map((o) => [o.id, o]))
+
+        const values = opCodeIds
+          .map((id, index) => {
+            const op = byId.get(id)
+            if (!op) return null
+            return {
+              storeId,
+              repairOrderId: ro.id,
+              opCodeId: op.id,
+              lineNumber: index + 1,
+              description: op.description,
+              componentGroupKey: op.componentGroupKey,
+              payType: 'CUSTOMER_PAY' as const,
+              status: 'APPROVED' as const,
+              laborHours: op.laborHours ?? '0',
+              laborAmount: op.laborAmount ?? '0',
+              partsAmount: op.partsAmount ?? '0',
+              customerAmount: String(Number(op.laborAmount ?? 0) + Number(op.partsAmount ?? 0)),
+              complaint: concerns || null,
+              approvedAt: now,
+              approvedBy: 'Customer at write-up',
+            }
+          })
+          .filter((v): v is NonNullable<typeof v> => v !== null)
+
+        if (values.length > 0) await tx.insert(schema.roLines).values(values)
+      }
+
+      await tx.update(schema.appointments)
+        .set({ status: 'ARRIVED', arrivedAt: now, customerConcerns: concerns || appointment.customerConcerns, updatedAt: now })
+        .where(eq(schema.appointments.id, appointmentId))
+
+      await tx.insert(schema.mileageReadings).values({
+        storeId, vehicleId, mileage, recordedAt: now, source: 'WRITE_UP',
+        // Only populated on an accepted rollback. This row is the audit trail.
+        previousMileage: override ? (lastReadingRow?.mileage ?? null) : null,
+        overrideReason: override?.reasonCode ?? null,
+        overrideNote: override?.summary ?? null,
+        overrideByUserId: override ? user.id : null,
+        overrideAt: override ? now : null,
+      })
+
+      /**
+       * The vehicle record follows the reading, including downwards.
+       *
+       * Tempting to keep the higher number "just in case", but that would leave the
+       * vehicle claiming an odometer nobody can see on the cluster, and every
+       * coverage decision from here keys off it. If a cluster was replaced, the low
+       * number is the truth. The confirmation above is what makes it safe to trust:
+       * this only runs once somebody said so on the record.
+       *
+       * In the same transaction as the reading that justifies it, so the vehicle
+       * can never end up carrying an odometer with no record of where it came
+       * from — which on an accepted rollback is the audit trail itself.
+       */
+      await tx.update(schema.vehicles)
+        .set({ currentMileage: mileage, mileageAsOf: now, updatedAt: now })
+        .where(eq(schema.vehicles.id, vehicleId))
+
+      return ro.id
+    })
+  } catch (error) {
+    return failed(error, 'Could not open the repair order. Nothing was saved — try again.')
+  }
+
+  // After the commit. Revalidating a write that then rolled back would leave
+  // the drive showing a repair order that does not exist.
   revalidatePath('/advisor')
-  return { ok: true, repairOrderId: ro.id }
+  return { ok: true, repairOrderId }
 }
 
 /** Adds a technician recommendation to an open RO, ready for the sell call. */
@@ -233,26 +306,43 @@ export async function addRecommendation(
     .where(eq(schema.opCodes.id, opCodeId)).limit(1)
   if (!op) return { error: 'Operation not found.' }
 
-  const maxRows = await db
-    .select({ maxLine: sql<number>`coalesce(max(${schema.roLines.lineNumber}), 0)::int` })
-    .from(schema.roLines)
-    .where(eq(schema.roLines.repairOrderId, repairOrderId))
-  const maxLine = maxRows[0]?.maxLine ?? 0
+  /*
+    One insert, but the number on it is read first.
 
-  await db.insert(schema.roLines).values({
-    storeId: ro.storeId,
-    repairOrderId,
-    opCodeId: op.id,
-    lineNumber: maxLine + 1,
-    description: op.description,
-    componentGroupKey: op.componentGroupKey,
-    payType: 'CUSTOMER_PAY',
-    status: 'RECOMMENDED',
-    laborHours: op.laborHours ?? '0',
-    laborAmount: op.laborAmount ?? '0',
-    partsAmount: op.partsAmount ?? '0',
-    customerAmount: String(Number(op.laborAmount ?? 0) + Number(op.partsAmount ?? 0)),
-  })
+    `max(line_number) + 1` is a read-then-write, and a technician adding a
+    find while the advisor adds another reads the same maximum and writes the
+    same line number. Locking the parent repair order for the length of the
+    transaction makes the pair atomic against each other; the lock is released
+    on commit, and it is per-RO, so the rest of the drive is unaffected.
+  */
+  try {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT 1 FROM repair_orders WHERE id = ${repairOrderId} FOR UPDATE`)
+
+      const maxRows = await tx
+        .select({ maxLine: sql<number>`coalesce(max(${schema.roLines.lineNumber}), 0)::int` })
+        .from(schema.roLines)
+        .where(eq(schema.roLines.repairOrderId, repairOrderId))
+      const maxLine = maxRows[0]?.maxLine ?? 0
+
+      await tx.insert(schema.roLines).values({
+        storeId: ro.storeId,
+        repairOrderId,
+        opCodeId: op.id,
+        lineNumber: maxLine + 1,
+        description: op.description,
+        componentGroupKey: op.componentGroupKey,
+        payType: 'CUSTOMER_PAY',
+        status: 'RECOMMENDED',
+        laborHours: op.laborHours ?? '0',
+        laborAmount: op.laborAmount ?? '0',
+        partsAmount: op.partsAmount ?? '0',
+        customerAmount: String(Number(op.laborAmount ?? 0) + Number(op.partsAmount ?? 0)),
+      })
+    })
+  } catch (error) {
+    return failed(error, 'Could not add that recommendation. Nothing was saved — try again.')
+  }
 
   revalidatePath(`/advisor/ro/${repairOrderId}`)
   return { ok: true }
@@ -292,36 +382,56 @@ export async function recordLineDecision(
 
   const now = new Date()
 
-  if (decision === 'APPROVE') {
-    await db.update(schema.roLines).set({
-      status: 'APPROVED',
-      // Pay type is decided here, from the coverage answer the advisor saw.
-      payType: payType === 'WARRANTY' ? 'WARRANTY' : payType === 'INTERNAL' ? 'INTERNAL' : 'CUSTOMER_PAY',
-      customerAmount: customerAmount >= 0
-        ? customerAmount.toFixed(2)
-        : String(Number(line.laborAmount) + Number(line.partsAmount)),
-      approvedAt: now,
-      approvedBy: 'Customer — sell call',
-      updatedAt: now,
-    }).where(eq(schema.roLines.id, lineId))
-  } else {
-    await db.update(schema.roLines).set({
-      status: 'DECLINED', updatedAt: now,
-    }).where(eq(schema.roLines.id, lineId))
+  /*
+    The decline is the pair that matters.
 
-    await db.insert(schema.declinedServices).values({
-      storeId: ro.storeId,
-      repairOrderId: ro.id,
-      roLineId: line.id,
-      customerId: ro.customerId,
-      vehicleId: ro.vehicleId,
-      description: line.description,
-      componentGroupKey: line.componentGroupKey,
-      quotedAmount: String(Number(line.laborAmount) + Number(line.partsAmount)),
-      declinedAt: now,
-      declineReason: reason || null,
-      mileageAtDecline: ro.mileageIn,
+    Marking the line DECLINED and creating the `declined_services` record are
+    one decision written to two tables. If the second fails, the line reads as
+    declined and nothing ever chases it — the job goes quiet, which is the
+    single failure this product exists to prevent. It would also be invisible:
+    the RO looks exactly right, and the absence only shows up as a follow-up
+    list that is quietly shorter than it should be.
+
+    The approval is a single write and does not need this, but it goes through
+    the same path so there is one shape to read rather than two.
+  */
+  try {
+    await db.transaction(async (tx) => {
+      if (decision === 'APPROVE') {
+        await tx.update(schema.roLines).set({
+          status: 'APPROVED',
+          // Pay type is decided here, from the coverage answer the advisor saw.
+          payType: payType === 'WARRANTY' ? 'WARRANTY' : payType === 'INTERNAL' ? 'INTERNAL' : 'CUSTOMER_PAY',
+          customerAmount: customerAmount >= 0
+            ? customerAmount.toFixed(2)
+            : String(Number(line.laborAmount) + Number(line.partsAmount)),
+          approvedAt: now,
+          approvedBy: 'Customer — sell call',
+          updatedAt: now,
+        }).where(eq(schema.roLines.id, lineId))
+        return
+      }
+
+      await tx.update(schema.roLines).set({
+        status: 'DECLINED', updatedAt: now,
+      }).where(eq(schema.roLines.id, lineId))
+
+      await tx.insert(schema.declinedServices).values({
+        storeId: ro.storeId,
+        repairOrderId: ro.id,
+        roLineId: line.id,
+        customerId: ro.customerId,
+        vehicleId: ro.vehicleId,
+        description: line.description,
+        componentGroupKey: line.componentGroupKey,
+        quotedAmount: String(Number(line.laborAmount) + Number(line.partsAmount)),
+        declinedAt: now,
+        declineReason: reason || null,
+        mileageAtDecline: ro.mileageIn,
+      })
     })
+  } catch (error) {
+    return failed(error, 'Could not record that decision. Nothing was saved — try again.')
   }
 
   revalidatePath(`/advisor/ro/${ro.id}`)
@@ -363,85 +473,109 @@ export async function closeRepairOrder(
   )
 
   const now = new Date()
-  await db.update(schema.repairOrders).set({
-    status: 'CLOSED',
-    closedAt: now,
-    customerPayTotal: totals.customerPay.toFixed(2),
-    warrantyTotal: totals.warranty.toFixed(2),
-    internalTotal: totals.internal.toFixed(2),
-    laborGross: (totals.labor * 0.72).toFixed(2),
-    partsGross: (totals.parts * 0.4).toFixed(2),
-    hoursSold: totals.hours.toFixed(2),
-    updatedAt: now,
-  }).where(eq(schema.repairOrders.id, repairOrderId))
-
-  await db.update(schema.roLines)
-    .set({ status: 'COMPLETE', completedAt: now, updatedAt: now })
-    .where(and(eq(schema.roLines.repairOrderId, repairOrderId), eq(schema.roLines.status, 'APPROVED')))
-
-  if (ro.appointmentId) {
-    await db.update(schema.appointments)
-      .set({ status: 'DELIVERED', updatedAt: now })
-      .where(eq(schema.appointments.id, ro.appointmentId))
-  }
 
   /**
-   * Settle what this visit actually did.
+   * ---------------------------------------------------------------------------
+   * THE WHOLE CLOSE IS ONE ACT
+   * ---------------------------------------------------------------------------
+   * Six writes, and every pair of them has a way of being wrong on its own.
+   * Totals rolled onto the repair order while its lines stay APPROVED is a
+   * closed ticket the shop still shows as work outstanding. The customer
+   * aggregate recomputed from `status = 'CLOSED'` before the row is actually
+   * closed counts a visit that has not happened. Worst of the set: the
+   * reconciliation settles declined work and retires the BDC's chase, so a
+   * failure between those two leaves a customer being called about a job they
+   * paid for on the way out — the exact call this product promises to stop.
    *
-   * Scoped to this RO's vehicle, not the customer. A household with a truck and
-   * a car declines the same jobs on both, and selling a coolant flush on the
-   * Santa Fe must not quietly write off the one still owed on the Bronco.
+   * The aggregate at the end reads the repair order this transaction just
+   * wrote, which is another reason it belongs inside: outside, it would either
+   * read the old row or race the commit.
    */
-  // Passed the full line set, not `billable` — which states count as performed
-   // is the pure function's rule to own, and a line declined on this very RO
-   // must not be read as settling anything.
-  const soldGroups = soldComponentGroups(lines)
-  if (soldGroups.length > 0) {
-    await db.update(schema.declinedServices)
-      .set({ resolvedAt: now, resolvedByRoId: repairOrderId })
-      .where(and(
-        eq(schema.declinedServices.vehicleId, ro.vehicleId),
-        isNull(schema.declinedServices.resolvedAt),
-        inArray(schema.declinedServices.componentGroupKey, soldGroups),
-      ))
-
-    /*
-      Retire the chase, but record why.
-
-      SOLD_ELSEWHERE would be a lie — they bought it here. There is no outcome
-      for "the thing happened before anyone worked the task", so the outcome is
-      left null and the note carries the RO number. A BDC manager reviewing a
-      rep's completed list can see at a glance that this one closed itself.
-    */
-    await db.update(schema.cadenceTasks)
-      .set({
-        status: 'COMPLETED',
-        completedAt: now,
-        outcomeNotes: `Work performed on RO ${ro.roNumber}.`,
+  try {
+    await db.transaction(async (tx) => {
+      await tx.update(schema.repairOrders).set({
+        status: 'CLOSED',
+        closedAt: now,
+        customerPayTotal: totals.customerPay.toFixed(2),
+        warrantyTotal: totals.warranty.toFixed(2),
+        internalTotal: totals.internal.toFixed(2),
+        laborGross: (totals.labor * 0.72).toFixed(2),
+        partsGross: (totals.parts * 0.4).toFixed(2),
+        hoursSold: totals.hours.toFixed(2),
         updatedAt: now,
-      })
-      .where(and(
-        eq(schema.cadenceTasks.vehicleId, ro.vehicleId),
-        eq(schema.cadenceTasks.status, 'PENDING'),
-        inArray(schema.cadenceTasks.componentGroupKey, soldGroups),
-      ))
-  }
+      }).where(eq(schema.repairOrders.id, repairOrderId))
 
-  // Keep the customer aggregates true — the goodwill and loyalty logic reads them.
-  await db.execute(sql`
-    UPDATE customers c SET
-      visit_count    = agg.visits,
-      lifetime_spend = agg.spend,
-      first_visit_at = agg.first_at,
-      last_visit_at  = agg.last_at
-    FROM (
-      SELECT customer_id, count(*) AS visits, coalesce(sum(customer_pay_total),0) AS spend,
-             min(opened_at) AS first_at, max(opened_at) AS last_at
-      FROM repair_orders WHERE customer_id = ${ro.customerId} AND status = 'CLOSED'
-      GROUP BY customer_id
-    ) agg
-    WHERE c.id = agg.customer_id
-  `)
+      await tx.update(schema.roLines)
+        .set({ status: 'COMPLETE', completedAt: now, updatedAt: now })
+        .where(and(eq(schema.roLines.repairOrderId, repairOrderId), eq(schema.roLines.status, 'APPROVED')))
+
+      if (ro.appointmentId) {
+        await tx.update(schema.appointments)
+          .set({ status: 'DELIVERED', updatedAt: now })
+          .where(eq(schema.appointments.id, ro.appointmentId))
+      }
+
+      /**
+       * Settle what this visit actually did.
+       *
+       * Scoped to this RO's vehicle, not the customer. A household with a truck and
+       * a car declines the same jobs on both, and selling a coolant flush on the
+       * Santa Fe must not quietly write off the one still owed on the Bronco.
+       */
+      // Passed the full line set, not `billable` — which states count as performed
+      // is the pure function's rule to own, and a line declined on this very RO
+      // must not be read as settling anything.
+      const soldGroups = soldComponentGroups(lines)
+      if (soldGroups.length > 0) {
+        await tx.update(schema.declinedServices)
+          .set({ resolvedAt: now, resolvedByRoId: repairOrderId })
+          .where(and(
+            eq(schema.declinedServices.vehicleId, ro.vehicleId),
+            isNull(schema.declinedServices.resolvedAt),
+            inArray(schema.declinedServices.componentGroupKey, soldGroups),
+          ))
+
+        /*
+          Retire the chase, but record why.
+
+          SOLD_ELSEWHERE would be a lie — they bought it here. There is no outcome
+          for "the thing happened before anyone worked the task", so the outcome is
+          left null and the note carries the RO number. A BDC manager reviewing a
+          rep's completed list can see at a glance that this one closed itself.
+        */
+        await tx.update(schema.cadenceTasks)
+          .set({
+            status: 'COMPLETED',
+            completedAt: now,
+            outcomeNotes: `Work performed on RO ${ro.roNumber}.`,
+            updatedAt: now,
+          })
+          .where(and(
+            eq(schema.cadenceTasks.vehicleId, ro.vehicleId),
+            eq(schema.cadenceTasks.status, 'PENDING'),
+            inArray(schema.cadenceTasks.componentGroupKey, soldGroups),
+          ))
+      }
+
+      // Keep the customer aggregates true — the goodwill and loyalty logic reads them.
+      await tx.execute(sql`
+        UPDATE customers c SET
+          visit_count    = agg.visits,
+          lifetime_spend = agg.spend,
+          first_visit_at = agg.first_at,
+          last_visit_at  = agg.last_at
+        FROM (
+          SELECT customer_id, count(*) AS visits, coalesce(sum(customer_pay_total),0) AS spend,
+                 min(opened_at) AS first_at, max(opened_at) AS last_at
+          FROM repair_orders WHERE customer_id = ${ro.customerId} AND status = 'CLOSED'
+          GROUP BY customer_id
+        ) agg
+        WHERE c.id = agg.customer_id
+      `)
+    })
+  } catch (error) {
+    return failed(error, 'Could not close the repair order. Nothing was saved — try again.')
+  }
 
   revalidatePath('/advisor')
   revalidatePath(`/advisor/ro/${repairOrderId}`)
