@@ -1,6 +1,7 @@
 import 'server-only'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { idempotencyKey, type HandOffReceipt } from './handoff-record'
 import type { DmsPushResult, HandOffPayload } from './types'
 
@@ -37,7 +38,7 @@ export async function existingSuccess(
   storeId: string,
   payload: HandOffPayload,
 ): Promise<HandOffReceipt | null> {
-  const [row] = await getDb()
+  const [row] = await withCurrentUserScope((db) => db
     .select()
     .from(schema.dmsHandoffs)
     .where(
@@ -47,7 +48,7 @@ export async function existingSuccess(
         eq(schema.dmsHandoffs.status, 'SENT'),
       ),
     )
-    .limit(1)
+    .limit(1))
 
   return row ? toReceipt(row) : null
 }
@@ -72,7 +73,7 @@ export async function recordHandOff(input: {
   const key = idempotencyKey(input.payload)
   const status = input.result.ok ? 'SENT' : 'FAILED'
 
-  const [row] = await getDb()
+  const [row] = await withCurrentUserScope((db) => db
     .insert(schema.dmsHandoffs)
     .values({
       storeId: input.storeId,
@@ -104,7 +105,7 @@ export async function recordHandOff(input: {
         sentAt: input.result.ok ? now : null,
       },
     })
-    .returning()
+    .returning())
 
   return toReceipt(row!)
 }
@@ -120,7 +121,7 @@ export async function handoffsForAppointment(
   storeId: string,
   appointmentId: string,
 ): Promise<HandOffReceipt[]> {
-  const rows = await getDb()
+  const rows = await withCurrentUserScope((db) => db
     .select()
     .from(schema.dmsHandoffs)
     .where(
@@ -129,7 +130,7 @@ export async function handoffsForAppointment(
         eq(schema.dmsHandoffs.appointmentId, appointmentId),
       ),
     )
-    .orderBy(desc(schema.dmsHandoffs.createdAt))
+    .orderBy(desc(schema.dmsHandoffs.createdAt)))
 
   return rows.map(toReceipt)
 }

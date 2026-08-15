@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { addDays } from 'date-fns'
 import { eq } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { requireUser } from '@/lib/auth/session'
 
 export type Outcome =
@@ -41,15 +42,6 @@ export async function logOutcome(
 
   if (!taskId || !outcome) return { error: 'Missing task or outcome.' }
 
-  const db = getDb()
-
-  const [task] = await db
-    .select()
-    .from(schema.cadenceTasks)
-    .where(eq(schema.cadenceTasks.id, taskId))
-    .limit(1)
-  if (!task) return { error: 'Task not found.' }
-
   const now = new Date()
   const retryable = outcome === 'NO_ANSWER' || outcome === 'LEFT_VOICEMAIL'
 
@@ -69,9 +61,23 @@ export async function logOutcome(
    * calls made against appointments set, so a task that moves without its log
    * makes a rep look like they did less work than they did.
    */
+  let result: OutcomeState
   try {
-    await db.transaction(async (tx) => {
-      await tx
+    result = await withCurrentUserScope(async (db) => {
+      /*
+        The task lookup is inside the scope with the writes. Everything below
+        copies storeId, customerId and vehicleId off this row, so reading it
+        through a connection that could see another dealership's tasks was the
+        exposure — not the writes that followed it.
+      */
+      const [task] = await db
+        .select()
+        .from(schema.cadenceTasks)
+        .where(eq(schema.cadenceTasks.id, taskId))
+        .limit(1)
+      if (!task) return { error: 'Task not found.' }
+
+      await db
         .update(schema.cadenceTasks)
         .set(
           retryable
@@ -96,7 +102,7 @@ export async function logOutcome(
       // Log the attempt regardless of outcome — BDC performance is measured on
       // calls made against appointments set, and an unlogged call is an untracked
       // one.
-      await tx.insert(schema.callLogs).values({
+      await db.insert(schema.callLogs).values({
         storeId: task.storeId,
         customerId: task.customerId,
         vehicleId: task.vehicleId,
@@ -115,12 +121,12 @@ export async function logOutcome(
       if (outcome === 'DO_NOT_CONTACT') {
         // Honour it globally and immediately. The worklist also filters on this,
         // so any already-generated task for them disappears on the next render.
-        await tx
+        await db
           .update(schema.customers)
           .set({ doNotCall: true, updatedAt: now })
           .where(eq(schema.customers.id, task.customerId))
 
-        await tx.insert(schema.consentEvents).values({
+        await db.insert(schema.consentEvents).values({
           storeId: task.storeId,
           customerId: task.customerId,
           eventType: 'REVOKED',
@@ -132,21 +138,23 @@ export async function logOutcome(
       }
 
       if (notes) {
-        await tx.insert(schema.customerNotes).values({
+        await db.insert(schema.customerNotes).values({
           storeId: task.storeId,
           customerId: task.customerId,
           vehicleId: task.vehicleId,
           body: `[${outcome.replace(/_/g, ' ').toLowerCase()}] ${notes}`,
         })
       }
+
+      return { ok: true }
     })
   } catch (error) {
     console.error('[bdc] logOutcome rolled back:', error)
     return { error: 'Could not save that outcome. Nothing was recorded — try again.' }
   }
 
-  revalidatePath('/bdc')
-  return { ok: true }
+  if (result.ok) revalidatePath('/bdc')
+  return result
 }
 
 /** Pushes a task out without recording a contact attempt. */
@@ -158,11 +166,15 @@ export async function snoozeTask(_previous: OutcomeState, formData: FormData): P
   const days = Number(formData.get('days') ?? 7)
   if (!taskId) return { error: 'Missing task.' }
 
-  const db = getDb()
-  await db
+  /*
+    A single write, and scoped anyway — the id is the only thing this action is
+    given, and unscoped it would push out any task in any dealership. Under the
+    policy a task belonging to somebody else simply matches no row.
+  */
+  await withCurrentUserScope((db) => db
     .update(schema.cadenceTasks)
     .set({ dueAt: addDays(new Date(), Number.isFinite(days) ? days : 7), updatedAt: new Date() })
-    .where(eq(schema.cadenceTasks.id, taskId))
+    .where(eq(schema.cadenceTasks.id, taskId)))
 
   revalidatePath('/bdc')
   return { ok: true }

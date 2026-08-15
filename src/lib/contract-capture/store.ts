@@ -1,7 +1,8 @@
 import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { and, desc, eq, isNull } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { getSupabaseAdminClient } from '@/lib/supabase/admin'
 import { reviewExtraction } from './review'
 import { getVisionProvider } from './provider'
@@ -41,7 +42,6 @@ export async function captureContract(input: {
   mediaType: string
   context: ExtractionContext
 }): Promise<CaptureResult> {
-  const db = getDb()
   const supabase = getSupabaseAdminClient()
 
   const storageKey = `${input.storeId}/${input.vehicleId}/${randomUUID()}`
@@ -52,7 +52,17 @@ export async function captureContract(input: {
     .upload(storageKey, bytes, { contentType: input.mediaType, upsert: false })
   if (upload.error) throw new Error(`Could not store the photo: ${upload.error.message}`)
 
-  const [row] = await db
+  /*
+    Two separate scopes on purpose, and no transaction spanning them.
+
+    A vision-model call sits between the insert and the update below, and it
+    takes seconds. Holding a transaction — and with it the single pooled
+    connection — open across a network round trip to a third party is how one
+    slow provider stalls every other request on the instance. The row is
+    written PENDING_REVIEW first precisely so a failure in between leaves a
+    capture a human can still see and act on, rather than nothing at all.
+  */
+  const [row] = await withCurrentUserScope((db) => db
     .insert(schema.documentCaptures)
     .values({
       storeId: input.storeId,
@@ -63,7 +73,7 @@ export async function captureContract(input: {
       mediaType: input.mediaType,
       status: 'PENDING_REVIEW',
     })
-    .returning({ id: schema.documentCaptures.id })
+    .returning({ id: schema.documentCaptures.id }))
 
   const captureId = row!.id
 
@@ -82,14 +92,14 @@ export async function captureContract(input: {
     extraction = emptyExtraction()
   }
 
-  await db
+  await withCurrentUserScope((db) => db
     .update(schema.documentCaptures)
     .set({
       rawExtraction: extraction,
       extractionProvider: provider.name,
       extractionModel: provider.name === 'anthropic' ? 'claude-opus-5' : 'mock',
     })
-    .where(eq(schema.documentCaptures.id, captureId))
+    .where(eq(schema.documentCaptures.id, captureId)))
 
   return {
     captureId,
@@ -123,9 +133,16 @@ export async function confirmCapture(input: {
     deductibleAmount: number
   }
 }): Promise<{ contractId: string }> {
-  const db = getDb()
   const now = new Date()
 
+  /*
+    The contract and the capture that produced it, together. A contract with no
+    capture marked CONFIRMED leaves the photo sitting in the review queue for
+    somebody to approve a second time; a capture marked CONFIRMED with no
+    contract loses the coverage entirely, which is worse — every coverage
+    answer for that vehicle from then on is wrong in the customer's disfavour.
+  */
+  return withCurrentUserScope(async (db) => {
   const [contract] = await db
     .insert(schema.contracts)
     .values({
@@ -161,6 +178,7 @@ export async function confirmCapture(input: {
     .where(eq(schema.documentCaptures.id, input.captureId))
 
   return { contractId }
+  })
 }
 
 export async function rejectCapture(input: {
@@ -168,7 +186,7 @@ export async function rejectCapture(input: {
   reviewedByUserId: string
   reason: string
 }): Promise<void> {
-  await getDb()
+  await withCurrentUserScope((db) => db
     .update(schema.documentCaptures)
     .set({
       status: 'REJECTED',
@@ -176,13 +194,12 @@ export async function rejectCapture(input: {
       reviewNotes: input.reason,
       reviewedAt: new Date(),
     })
-    .where(eq(schema.documentCaptures.id, input.captureId))
+    .where(eq(schema.documentCaptures.id, input.captureId)))
 }
 
 /** Captures still waiting on a human, newest first. */
 export async function pendingCaptures(storeId: string, vehicleId: string) {
-  const db = getDb()
-  return db
+  return withCurrentUserScope((db) => db
     .select()
     .from(schema.documentCaptures)
     .where(
@@ -193,7 +210,7 @@ export async function pendingCaptures(storeId: string, vehicleId: string) {
         isNull(schema.documentCaptures.deletedAt),
       ),
     )
-    .orderBy(desc(schema.documentCaptures.capturedAt))
+    .orderBy(desc(schema.documentCaptures.capturedAt)))
 }
 
 /**

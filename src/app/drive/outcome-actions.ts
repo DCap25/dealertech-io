@@ -1,7 +1,8 @@
 'use server'
 
 import { and, eq, sql } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { getCurrentUser, getCurrentStore } from '@/lib/auth/session'
 import type { OpportunityOutcome } from '@/lib/performance'
 
@@ -47,8 +48,13 @@ export async function recordVisitOutcomes(
     const store = await getCurrentStore()
     if (!store) return { ok: false, error: 'No store configured.' }
 
-    const db = getDb()
-
+    /*
+      The appointment lookup and the upsert share a scope. The client sends
+      decisions keyed by appointment id and never identities, so this read is
+      what turns those ids into a customer and a vehicle — which makes it the
+      thing that must not resolve across a tenant boundary.
+    */
+    return await withCurrentUserScope(async (db) => {
     /**
      * The appointment is the authority for who the customer, vehicle and
      * advisor are — the client sends decisions, never identities.
@@ -124,6 +130,7 @@ export async function recordVisitOutcomes(
       })
 
     return { ok: true, recorded: rows.length }
+    })
   } catch (error) {
     // The advisor is mid-drive — never block finishing a visit on a write.
     const message = error instanceof Error ? error.message : 'Unknown error'

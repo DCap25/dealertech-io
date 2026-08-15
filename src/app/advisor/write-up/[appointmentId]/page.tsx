@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { eq, and, desc } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { money } from '../../../records-ui'
 import { WriteUpForm, type MenuItem } from './write-up-form'
@@ -27,15 +28,14 @@ export default async function WriteUpPage({
   const store = await getCurrentStore()
   if (!store) notFound()
 
-  const db = getDb()
   const sheets = await loadDriveDay(store.id, DAY(), DAY())
   const sheet = sheets.find((s) => s.appointment?.id === appointmentId)
   if (!sheet) notFound()
 
-  const opCodes = await db.select().from(schema.opCodes).where(and(
+  const opCodes = await withCurrentUserScope((db) => db.select().from(schema.opCodes).where(and(
     eq(schema.opCodes.storeId, store.id),
     eq(schema.opCodes.isActive, true),
-  ))
+  )))
 
   /**
    * Preselect what the prep sheet already found.
@@ -74,7 +74,7 @@ export default async function WriteUpPage({
    * form is already prefilled with it. Warning that an entry falls below a
    * projection would fire on most of the drive and mean nothing.
    */
-  const [lastReadingRow] = await db.select({
+  const [lastReadingRow] = await withCurrentUserScope((db) => db.select({
     mileage: schema.mileageReadings.mileage,
     recordedAt: schema.mileageReadings.recordedAt,
     source: schema.mileageReadings.source,
@@ -82,7 +82,7 @@ export default async function WriteUpPage({
     .from(schema.mileageReadings)
     .where(eq(schema.mileageReadings.vehicleId, sheet.vehicle.id))
     .orderBy(desc(schema.mileageReadings.recordedAt), desc(schema.mileageReadings.mileage))
-    .limit(1)
+    .limit(1))
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">

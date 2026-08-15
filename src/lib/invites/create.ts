@@ -1,6 +1,7 @@
 import 'server-only'
 import { and, eq, isNull } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { createInviteToken, inviteExpiryFrom, normaliseEmail, type InvitableRole } from './invite'
 
 /**
@@ -21,7 +22,12 @@ export async function createInvitation(params: {
   role: InvitableRole
   invitedByUserId: string | null
 }): Promise<{ token: string; email: string }> {
-  const db = getDb()
+  /*
+    Scoped, and it works for both callers. A service manager matches through
+    their own store; a platform admin provisioning a brand-new dealership has
+    no membership in it at all and matches through is_platform_admin(), which
+    the invitation policy already allows for exactly this case.
+  */
   const email = normaliseEmail(params.email)
   const now = new Date()
 
@@ -32,24 +38,28 @@ export async function createInvitation(params: {
     rather than colliding. Two working links for the same person is one more
     than anybody can keep track of.
   */
-  await db.update(schema.storeInvitations)
-    .set({ revokedAt: now, revokedByUserId: params.invitedByUserId })
-    .where(and(
-      eq(schema.storeInvitations.storeId, params.storeId),
-      eq(schema.storeInvitations.email, email),
-      isNull(schema.storeInvitations.acceptedAt),
-      isNull(schema.storeInvitations.revokedAt),
-    ))
-
   const { token, tokenHash } = createInviteToken()
 
-  await db.insert(schema.storeInvitations).values({
-    storeId: params.storeId,
-    email,
-    role: params.role,
-    tokenHash,
-    invitedByUserId: params.invitedByUserId,
-    expiresAt: inviteExpiryFrom(now),
+  // Revoke-then-issue is one act: a failure between them would leave the
+  // address with no working link and no new one either.
+  await withCurrentUserScope(async (db) => {
+    await db.update(schema.storeInvitations)
+      .set({ revokedAt: now, revokedByUserId: params.invitedByUserId })
+      .where(and(
+        eq(schema.storeInvitations.storeId, params.storeId),
+        eq(schema.storeInvitations.email, email),
+        isNull(schema.storeInvitations.acceptedAt),
+        isNull(schema.storeInvitations.revokedAt),
+      ))
+
+    await db.insert(schema.storeInvitations).values({
+      storeId: params.storeId,
+      email,
+      role: params.role,
+      tokenHash,
+      invitedByUserId: params.invitedByUserId,
+      expiresAt: inviteExpiryFrom(now),
+    })
   })
 
   return { token, email }

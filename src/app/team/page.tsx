@@ -1,6 +1,7 @@
 import { headers } from 'next/headers'
 import { and, desc, eq, isNull } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { INVITABLE_ROLES, inviteStatus } from '@/lib/invites/invite'
@@ -36,8 +37,12 @@ export default async function TeamPage() {
   */
   if (!canManageStaff(user.role)) notFound()
 
-  const db = getDb()
-  const [staff, invitations] = await Promise.all([
+  /*
+    Both reads in one scope. `Promise.all` inside it runs them sequentially —
+    a transaction is one connection — which is the documented cost of the
+    boundary and not worth splitting a roster screen over.
+  */
+  const [staff, invitations] = await withCurrentUserScope((db) => Promise.all([
     // Inactive members are loaded too — a manager needs to see who they took
     // off, both to confirm it happened and to put somebody back.
     db.select({
@@ -59,7 +64,7 @@ export default async function TeamPage() {
         isNull(schema.storeInvitations.revokedAt),
       ))
       .orderBy(desc(schema.storeInvitations.createdAt)),
-  ])
+  ]))
 
   // Built here rather than guessed in the browser, so the copied link is
   // correct behind a proxy or on a custom domain.

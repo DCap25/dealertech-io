@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { requireUser } from '@/lib/auth/session'
 import { captureContract, confirmCapture, rejectCapture } from '@/lib/contract-capture/store'
 import { reviewExtraction } from '@/lib/contract-capture/review'
@@ -28,7 +29,7 @@ export interface CaptureState {
  * document, which would defeat the only blocking check in the flow.
  */
 async function loadVehicle(storeId: string, vehicleId: string) {
-  const [vehicle] = await getDb()
+  const [vehicle] = await withCurrentUserScope((db) => db
     .select({
       id: schema.vehicles.id,
       vin: schema.vehicles.vin,
@@ -38,12 +39,12 @@ async function loadVehicle(storeId: string, vehicleId: string) {
     })
     .from(schema.vehicles)
     .where(and(eq(schema.vehicles.id, vehicleId), eq(schema.vehicles.storeId, storeId)))
-    .limit(1)
+    .limit(1))
   return vehicle ?? null
 }
 
 async function currentOwnerId(storeId: string, vehicleId: string): Promise<string | null> {
-  const [link] = await getDb()
+  const [link] = await withCurrentUserScope((db) => db
     .select({ customerId: schema.customerVehicles.customerId })
     .from(schema.customerVehicles)
     .where(
@@ -53,7 +54,7 @@ async function currentOwnerId(storeId: string, vehicleId: string): Promise<strin
         eq(schema.customerVehicles.isCurrent, true),
       ),
     )
-    .limit(1)
+    .limit(1))
   return link?.customerId ?? null
 }
 

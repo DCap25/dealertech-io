@@ -50,6 +50,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.prep_sheet_outcomes TO authentica
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.dms_handoffs        TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.document_captures   TO authenticated;
 
+-- Invitations are the awkward one. Their lifecycle straddles the boundary:
+-- creating and revoking are things a manager does inside their own store and
+-- belong under the policy, but ACCEPTING one is performed by somebody who has
+-- no store role yet — that is the entire point of an invitation — so no
+-- store-scoped policy can ever match for them. The grant covers the first two;
+-- acceptance stays on the privileged connection and is guarded by the token.
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.store_invitations   TO authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Who may change a roster.
 --

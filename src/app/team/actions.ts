@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { and, eq, isNull } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { requireUser } from '@/lib/auth/session'
 import { isInvitableRole, normaliseEmail } from '@/lib/invites/invite'
 import { createInvitation } from '@/lib/invites/create'
@@ -33,14 +34,14 @@ export interface InviteState {
  * one runs, the last manager may already have been removed by somebody else.
  */
 async function roster(storeId: string): Promise<RosterMember[]> {
-  const rows = await getDb()
+  const rows = await withCurrentUserScope((db) => db
     .select({
       userId: schema.userStoreRoles.userId,
       role: schema.userStoreRoles.role,
       isActive: schema.userStoreRoles.isActive,
     })
     .from(schema.userStoreRoles)
-    .where(eq(schema.userStoreRoles.storeId, storeId))
+    .where(eq(schema.userStoreRoles.storeId, storeId)))
   return rows as RosterMember[]
 }
 
@@ -59,8 +60,6 @@ export async function inviteStaff(
   if (!email || !email.includes('@')) return { error: 'Enter a work email address.' }
   if (!isInvitableRole(role)) return { error: 'Pick a role from the list.' }
 
-  const db = getDb()
-
   /*
     Already on staff here?
 
@@ -68,7 +67,7 @@ export async function inviteStaff(
     person legitimately holds accounts at two dealerships in a group, and
     refusing on that basis would block a real invitation.
   */
-  const existing = await db
+  const existing = await withCurrentUserScope((db) => db
     .select({ id: schema.users.id })
     .from(schema.users)
     .innerJoin(schema.userStoreRoles, eq(schema.userStoreRoles.userId, schema.users.id))
@@ -77,7 +76,7 @@ export async function inviteStaff(
       eq(schema.userStoreRoles.storeId, user.storeId),
       eq(schema.userStoreRoles.isActive, true),
     ))
-    .limit(1)
+    .limit(1))
 
   if (existing[0]) {
     return { error: `${email} already works at ${user.storeName}.` }
@@ -117,14 +116,14 @@ export async function removeStaff(
   const verdict = canRemove(await roster(user.storeId), user.id, targetUserId)
   if (!verdict.ok) return { error: verdict.reason }
 
-  await getDb().update(schema.userStoreRoles)
+  await withCurrentUserScope((db) => db.update(schema.userStoreRoles)
     .set({ isActive: false })
     .where(and(
       eq(schema.userStoreRoles.userId, targetUserId),
       // Scoped to this store: a manager at one rooftop must not be able to
       // remove somebody at another by posting their id.
       eq(schema.userStoreRoles.storeId, user.storeId),
-    ))
+    )))
 
   revalidatePath('/team')
   return { ok: 'Removed. Their history stays on the repair orders they wrote.' }
@@ -141,12 +140,12 @@ export async function restoreStaff(
   const verdict = canRestore(await roster(user.storeId), user.id, targetUserId)
   if (!verdict.ok) return { error: verdict.reason }
 
-  await getDb().update(schema.userStoreRoles)
+  await withCurrentUserScope((db) => db.update(schema.userStoreRoles)
     .set({ isActive: true })
     .where(and(
       eq(schema.userStoreRoles.userId, targetUserId),
       eq(schema.userStoreRoles.storeId, user.storeId),
-    ))
+    )))
 
   revalidatePath('/team')
   return { ok: 'Back on the roster.' }
@@ -167,12 +166,12 @@ export async function changeRole(
   )
   if (!verdict.ok) return { error: verdict.reason }
 
-  await getDb().update(schema.userStoreRoles)
+  await withCurrentUserScope((db) => db.update(schema.userStoreRoles)
     .set({ role: nextRole })
     .where(and(
       eq(schema.userStoreRoles.userId, targetUserId),
       eq(schema.userStoreRoles.storeId, user.storeId),
-    ))
+    )))
 
   revalidatePath('/team')
   return { ok: 'Role updated.' }
@@ -187,13 +186,13 @@ export async function revokeInvite(formData: FormData): Promise<void> {
 
   // Scoped to the caller's store, so an id from another dealership matches
   // nothing rather than revoking their invitation.
-  await getDb().update(schema.storeInvitations)
+  await withCurrentUserScope((db) => db.update(schema.storeInvitations)
     .set({ revokedAt: new Date(), revokedByUserId: user.id })
     .where(and(
       eq(schema.storeInvitations.id, id),
       eq(schema.storeInvitations.storeId, user.storeId),
       isNull(schema.storeInvitations.acceptedAt),
-    ))
+    )))
 
   revalidatePath('/team')
 }

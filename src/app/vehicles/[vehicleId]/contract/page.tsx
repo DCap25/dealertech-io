@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { and, eq } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
+import { withCurrentUserScope } from '@/db/scoped'
 import { requireUser } from '@/lib/auth/session'
 import { CaptureForm } from './capture-form'
 
@@ -16,7 +17,7 @@ export default async function ContractCapturePage({
   const user = await requireUser()
   const { vehicleId } = await params
 
-  const [vehicle] = await getDb()
+  const [vehicle] = await withCurrentUserScope((db) => db
     .select({
       id: schema.vehicles.id,
       vin: schema.vehicles.vin,
@@ -26,7 +27,7 @@ export default async function ContractCapturePage({
     })
     .from(schema.vehicles)
     .where(and(eq(schema.vehicles.id, vehicleId), eq(schema.vehicles.storeId, user.storeId)))
-    .limit(1)
+    .limit(1))
 
   if (!vehicle) notFound()
 
