@@ -1,8 +1,8 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/auth/session'
-import { safeRedirect } from '@/lib/auth/routes'
+import { landingPath, safeRedirect } from '@/lib/auth/routes'
 import { SignInForm } from './sign-in-form'
+import { signOut } from './actions'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Sign in' }
@@ -46,17 +46,80 @@ export default async function LoginPage({
   const requested = next ?? ''
 
   /*
-    Already signed in — no reason to show a form.
+    Already signed in.
 
-    Resolved from the session rather than from `getCurrentUser`, which requires
-    a dealership. DealerTech staff hold no store role, so that check said "not
-    signed in" and showed them a login form they had just used.
+    ---------------------------------------------------------------------------
+    WHY THIS RENDERS INSTEAD OF REDIRECTING
+    ---------------------------------------------------------------------------
+    This page used to send a signed-in visitor straight on — platform staff to
+    /admin, everyone else to wherever they were headed. Meanwhile
+    `requirePlatformAdmin` sends a visitor it cannot see a session for back to
+    /login. Two pages pointing at each other with nothing in between: the
+    moment they disagreed about whether a session exists — a token refreshing,
+    a cookie written a beat late — the browser flipped between /login and
+    /admin until it gave up. It is not a rare state either; it happens on the
+    hop straight after signing in, which is exactly when the token is newest.
+
+    So the destination is offered rather than taken. One click instead of
+    zero, and a disagreement becomes a page somebody can read and act on
+    rather than a URL bar strobing between two routes.
   */
   const session = await getSession()
-  if (session?.active) redirect(target)
-  if (session?.isPlatformAdmin) redirect('/admin')
-
   const showDemo = process.env.NODE_ENV !== 'production'
+
+  if (session) {
+    const destination = session.active ? target : landingPath({
+      hasStore: false,
+      isPlatformAdmin: session.isPlatformAdmin,
+    })
+
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-12">
+        <div>
+          <Link
+            href="/"
+            className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500 transition hover:text-neutral-900 dark:hover:text-white"
+          >
+            DealerTech.io
+          </Link>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight">You are signed in</h1>
+          <p className="mt-1.5 text-sm text-neutral-600 dark:text-neutral-400">
+            {session.email}
+            {session.active
+              ? ` · ${session.active.storeName}`
+              : session.isPlatformAdmin
+                ? ' · DealerTech staff'
+                : ''}
+          </p>
+        </div>
+
+        <Link
+          href={destination}
+          className="mt-8 rounded-xl bg-neutral-900 px-5 py-3.5 text-center text-sm font-bold text-white transition active:scale-[0.99] dark:bg-white dark:text-neutral-900"
+        >
+          {session.active ? 'Go to your drive' : 'Open the console'}
+        </Link>
+
+        {/* Signing in as somebody else has to be reachable from here — this is
+            the page you land on when you meant to. */}
+        <form action={signOut} className="mt-3">
+          <button
+            type="submit"
+            className="w-full rounded-xl border border-[var(--border)] px-5 py-3 text-sm font-semibold transition hover:border-neutral-900 dark:hover:border-neutral-300"
+          >
+            Sign in as someone else
+          </button>
+        </form>
+
+        {!session.active && !session.isPlatformAdmin && (
+          <p className="mt-8 text-xs leading-relaxed text-neutral-500">
+            This account has no dealership attached yet, so there is nothing to show you. Ask your
+            service manager to add your store role.
+          </p>
+        )}
+      </main>
+    )
+  }
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-12">
