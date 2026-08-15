@@ -38,6 +38,8 @@ const advisorA = randomUUID()
 const advisorB = randomUUID()
 /** Authenticated, but assigned to no store at all. */
 const orphanUser = randomUUID()
+/** Store A's service manager — the only role that may change a roster. */
+const managerA = randomUUID()
 const customerA = randomUUID()
 const customerB = randomUUID()
 const vehicleA = randomUUID()
@@ -85,9 +87,13 @@ describe.skipIf(!reachable)('row-level security — tenant isolation', () => {
       (${advisorB}, 'b@example.com', 'Advisor B'),
       (${orphanUser}, 'orphan@example.com', 'No Store')`
 
+    await sql`INSERT INTO users (id, email, full_name) VALUES
+      (${managerA}, 'manager-a@example.com', 'Manager A')`
+
     await sql`INSERT INTO user_store_roles (user_id, store_id, role) VALUES
       (${advisorA}, ${storeA}, 'ADVISOR'),
-      (${advisorB}, ${storeB}, 'ADVISOR')`
+      (${advisorB}, ${storeB}, 'ADVISOR'),
+      (${managerA}, ${storeA}, 'SERVICE_MANAGER')`
 
     await sql`INSERT INTO customers (id, store_id, first_name, last_name, mobile_phone) VALUES
       (${customerA}, ${storeA}, 'Alice', 'Anderson', '5550000001'),
@@ -226,6 +232,111 @@ describe.skipIf(!reachable)('row-level security — tenant isolation', () => {
 
     const [row] = await sql`SELECT action FROM audit_log WHERE id = ${id}`
     expect(row?.action).toBe('VIEW')
+  })
+
+  // ---------------------------------------------------------------- writes
+  /*
+    The read tests above have existed since 0001. These are new, and they are
+    the ones that matter for the change they accompany: reads were already
+    running on the scoped connection, while every server action still wrote
+    through the privileged one. Moving those writes across is only safe if the
+    policies stop them at the tenant boundary, so that is asserted here rather
+    than assumed from the fact that the SELECT rules work.
+
+    Note the two different failure modes. An INSERT that violates WITH CHECK
+    RAISES. An UPDATE or DELETE that no row satisfies simply affects nothing —
+    no error, no rows, which is the quieter and more dangerous of the two and
+    the reason each of these checks the other store's data afterwards.
+  */
+  it('refuses to insert a row belonging to another store', async () => {
+    await expect(
+      asUser(advisorA, (tx) => tx`
+        INSERT INTO customers (store_id, first_name, last_name)
+        VALUES (${storeB}, 'Smuggled', 'Row')`),
+    ).rejects.toThrow(/row-level security/i)
+  })
+
+  it('lets an advisor insert into their own store', async () => {
+    const id = randomUUID()
+    await asUser(advisorA, (tx) => tx`
+      INSERT INTO customers (id, store_id, first_name, last_name)
+      VALUES (${id}, ${storeA}, 'Legit', 'Row')`)
+
+    const [row] = await sql`SELECT store_id FROM customers WHERE id = ${id}`
+    expect(row?.store_id).toBe(storeA)
+    await sql`DELETE FROM customers WHERE id = ${id}`
+  })
+
+  it('changes nothing when updating another store row', async () => {
+    await asUser(advisorA, (tx) => tx`
+      UPDATE customers SET last_name = 'Tampered' WHERE id = ${customerB}`)
+
+    // Checked as superuser: the point is what the other tenant's row says now.
+    const [row] = await sql`SELECT last_name FROM customers WHERE id = ${customerB}`
+    expect(row?.last_name).toBe('Baker')
+  })
+
+  it('changes nothing when deleting another store row', async () => {
+    await asUser(advisorA, (tx) => tx`DELETE FROM vehicles WHERE id = ${vehicleB}`)
+    const rows = await sql`SELECT id FROM vehicles WHERE id = ${vehicleB}`
+    expect(rows).toHaveLength(1)
+  })
+
+  it('stops a repair order being written against another store vehicle', async () => {
+    // The shape of openRepairOrder, aimed across the boundary.
+    await expect(
+      asUser(advisorA, (tx) => tx`
+        INSERT INTO repair_orders (store_id, customer_id, vehicle_id, ro_number, status, mileage_in, opened_at)
+        VALUES (${storeB}, ${customerB}, ${vehicleB}, 'X1', 'OPEN', 1000, now())`),
+    ).rejects.toThrow(/row-level security/i)
+  })
+
+  // -------------------------------------------------------------- roster
+  it('lets a service manager change their own store roster', async () => {
+    const newcomer = randomUUID()
+    await sql`INSERT INTO users (id, email, full_name)
+              VALUES (${newcomer}, ${`new-${newcomer}@example.com`}, 'Newcomer')`
+
+    await asUser(managerA, (tx) => tx`
+      INSERT INTO user_store_roles (user_id, store_id, role)
+      VALUES (${newcomer}, ${storeA}, 'ADVISOR')`)
+
+    const rows = await sql`SELECT role FROM user_store_roles WHERE user_id = ${newcomer}`
+    expect(rows).toHaveLength(1)
+
+    await sql`DELETE FROM user_store_roles WHERE user_id = ${newcomer}`
+    await sql`DELETE FROM users WHERE id = ${newcomer}`
+  })
+
+  it('refuses a manager the roster of a store they do not work at', async () => {
+    await expect(
+      asUser(managerA, (tx) => tx`
+        INSERT INTO user_store_roles (user_id, store_id, role)
+        VALUES (${advisorA}, ${storeB}, 'ADVISOR')`),
+    ).rejects.toThrow(/row-level security/i)
+  })
+
+  it('refuses an advisor the roster of their own store', async () => {
+    /*
+      The escalation this closes: without a role check an advisor could promote
+      themselves, because the row they would be writing is inside their own
+      tenant and every store-scoped policy would wave it through.
+    */
+    await expect(
+      asUser(advisorA, (tx) => tx`
+        INSERT INTO user_store_roles (user_id, store_id, role)
+        VALUES (${orphanUser}, ${storeA}, 'SERVICE_MANAGER')`),
+    ).rejects.toThrow(/row-level security/i)
+  })
+
+  it('leaves an advisor unable to promote themselves', async () => {
+    await asUser(advisorA, (tx) => tx`
+      UPDATE user_store_roles SET role = 'SERVICE_MANAGER'
+      WHERE user_id = ${advisorA} AND store_id = ${storeA}`)
+
+    const [row] = await sql`
+      SELECT role FROM user_store_roles WHERE user_id = ${advisorA} AND store_id = ${storeA}`
+    expect(row?.role).toBe('ADVISOR')
   })
 
   // ------------------------------------------------------------- anon role
