@@ -1,5 +1,6 @@
 import 'server-only'
 import { sql } from 'drizzle-orm'
+import { redirect } from 'next/navigation'
 import { getDb } from './client'
 
 /**
@@ -94,15 +95,33 @@ export async function withUserScope<T>(
  * the conversion does not ripple into every call site, and means a loader
  * cannot be called with one user's id while serving another's request.
  *
- * Redirects to sign-in if there is no session, which is the correct outcome for
- * anything that reads a dealership's data.
+ * ---------------------------------------------------------------------------
+ * IDENTITY, NOT MEMBERSHIP
+ * ---------------------------------------------------------------------------
+ * This used to call `requireUser()`, which demands a dealership role. What RLS
+ * actually needs is a user id to put in `auth.uid()`; the policies decide the
+ * rest, and some of them — the platform ones — are written for accounts that
+ * deliberately hold no dealership role at all.
+ *
+ * The effect was that /admin admitted a DealerTech account through
+ * `requirePlatformAdmin()` and then threw it out again three lines later, when
+ * its own loaders asked for a store role it is not supposed to have. The
+ * console redirected to /login, /login sent it back to the console, and the
+ * browser bounced between them. It looked like a session problem and it was a
+ * permission model problem: two guards on one page disagreeing about what kind
+ * of account is allowed to be there.
+ *
+ * Still redirects when there is no session at all, which is the right outcome
+ * for anything reading a dealership's data.
  */
 export async function withCurrentUserScope<T>(
   work: (tx: ScopedDb) => Promise<T>,
 ): Promise<T> {
-  const { requireUser } = await import('@/lib/auth/session')
-  const user = await requireUser()
-  return withUserScope(user.id, work)
+  // Imported lazily to keep this module free of a cycle back through auth.
+  const { getSession } = await import('@/lib/auth/session')
+  const session = await getSession()
+  if (!session) redirect('/login')
+  return withUserScope(session.id, work)
 }
 
 /**

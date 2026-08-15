@@ -81,12 +81,50 @@ export interface Session {
   isPlatformAdmin: boolean
 }
 
+/**
+ * Was this a real "you are not signed in", or did we just fail to ask?
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE DIFFERENCE MATTERS
+ * ---------------------------------------------------------------------------
+ * `getUser()` is a network call to Supabase, and every request makes two of
+ * them — once in the proxy to refresh the token, once here. Treating any
+ * failure as "signed out" meant a single slow or dropped call signed the user
+ * out for that one render. Intermittently. On a page whose response to being
+ * signed out is to redirect somewhere, which redirects back.
+ *
+ * That is what an infinite bounce between /login and /admin actually was: the
+ * same cookies answering "yes" and "no" on alternating requests. It showed up
+ * hardest right after signing in, when the proxy is most likely to be rotating
+ * the token at the same moment.
+ *
+ * A 4xx is Supabase telling us the token is no good, and that is a real answer.
+ * Anything else — no status, a timeout, a 5xx — is our failure to ask, and the
+ * honest response is to ask again rather than to log somebody out.
+ */
+function isRealRejection(status: number | undefined): boolean {
+  return typeof status === 'number' && status >= 400 && status < 500
+}
+
 export const getSession = cache(async (): Promise<Session | null> => {
   const supabase = await getSupabaseServerClient()
 
   // getUser() revalidates the token with Supabase. getSession() only decodes
   // the cookie, which a client could have tampered with.
-  const { data, error } = await supabase.auth.getUser()
+  let { data, error } = await supabase.auth.getUser()
+
+  if (error && !isRealRejection(error.status)) {
+    // One retry, immediately. The failure this covers is a blip, not an
+    // outage; a second round trip is cheaper than a bogus sign-out, and if
+    // Supabase is genuinely down the second one fails too and we fall through.
+    ;({ data, error } = await supabase.auth.getUser())
+    if (error) {
+      console.warn(
+        `[auth] could not verify the session (status ${error.status ?? 'none'}): ${error.message}`,
+      )
+    }
+  }
+
   if (error || !data.user) return null
 
   const db = getDb()

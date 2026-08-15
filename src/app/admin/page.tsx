@@ -1,6 +1,6 @@
-import Link from 'next/link'
 import { headers } from 'next/headers'
 import { requirePlatformAdmin } from '@/lib/auth/session'
+import { signOut } from '@/app/login/actions'
 import { loadLeads, loadRecentJobRuns, loadTenants } from '@/lib/platform/load'
 import { knownMakes } from '@/lib/warranty'
 import { ProvisionForm } from './provision-form'
@@ -84,10 +84,26 @@ export default async function AdminPage() {
         <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
           DealerTech · Platform
         </p>
-        <p className="text-sm text-neutral-500">
-          {session.name}
-          <Link href="/auth/sign-out" className="ml-3 hover:underline">Sign out</Link>
-        </p>
+        {/*
+          A form, not a link.
+
+          This was a link to /auth/sign-out, and that route does not exist — so
+          the only way out of the console 404'd, and DealerTech staff had no way
+          to sign out at all. UserBadge, which carries the sign-out button
+          everywhere else, resolves through getCurrentUser() and returns null
+          for an account with no dealership, so it was never an option here.
+
+          Posting the action also keeps signing out off a GET, where a prefetch
+          or a crawler can trip it.
+        */}
+        <div className="flex items-center gap-3 text-sm text-neutral-500">
+          <span>{session.name}</span>
+          <form action={signOut}>
+            <button type="submit" className="touch-target rounded-lg px-2 py-1 hover:underline">
+              Sign out
+            </button>
+          </form>
+        </div>
       </div>
 
       <h1 className="mt-3 text-3xl font-bold tracking-tight">Operations</h1>

@@ -100,14 +100,15 @@ export default async function LoginPage({
           {session.active ? 'Go to your drive' : 'Open the console'}
         </Link>
 
-        {/* Signing in as somebody else has to be reachable from here — this is
-            the page you land on when you meant to. */}
+        {/* Says what it does. "Sign in as someone else" described the intent
+            and hid the mechanism, so somebody looking for the way out did not
+            recognise it as the way out. */}
         <form action={signOut} className="mt-3">
           <button
             type="submit"
             className="w-full rounded-xl border border-[var(--border)] px-5 py-3 text-sm font-semibold transition hover:border-neutral-900 dark:hover:border-neutral-300"
           >
-            Sign in as someone else
+            Sign out
           </button>
         </form>
 
