@@ -358,7 +358,7 @@ export function Tablet() {
 
 function Centre({ children }: { children: React.ReactNode }) {
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center bg-[var(--background)] px-6 text-center">
+    <main className="flex flex-1 flex-col items-center justify-center bg-[var(--background)] px-6 text-center">
       {children}
     </main>
   )

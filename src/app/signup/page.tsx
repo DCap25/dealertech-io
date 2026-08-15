@@ -14,7 +14,7 @@ export default async function SignUpPage() {
   if (user) redirect('/drive')
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center px-6 py-12">
+    <main className="mx-auto flex flex-1 max-w-lg flex-col justify-center px-6 py-12">
       <Link
         href="/"
         className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500 transition hover:text-neutral-900 dark:hover:text-white"

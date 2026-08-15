@@ -474,6 +474,15 @@ export default function HomePage() {
           Recall data comes from NHTSA by make, model and year, not by VIN. Figures shown in product
           previews on this page are illustrative.
         </p>
+        {/*
+          Inline rather than from a layout. This page sits directly under the
+          root layout, which every other surface shares, and it already ends in
+          a footer of its own — a second one stacked underneath would be the
+          only page on the site with two.
+        */}
+        <p className="mx-auto mt-6 max-w-6xl text-xs text-[var(--ink-soft)]">
+          Copyright © DealerTech.io
+        </p>
       </footer>
     </div>
   )

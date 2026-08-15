@@ -74,7 +74,7 @@ export default async function LoginPage({
     })
 
     return (
-      <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-12">
+      <main className="mx-auto flex flex-1 max-w-md flex-col justify-center px-6 py-12">
         <div>
           <Link
             href="/"
@@ -123,7 +123,7 @@ export default async function LoginPage({
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-12">
+    <main className="mx-auto flex flex-1 max-w-md flex-col justify-center px-6 py-12">
       <div>
         {/* A way back out. Someone who lands here by mistake, or who wanted
             the demo rather than the workspace, should not be stuck. */}
