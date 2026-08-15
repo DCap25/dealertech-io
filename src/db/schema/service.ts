@@ -1,6 +1,6 @@
 import {
   pgTable, uuid, text, timestamp, boolean, integer, numeric, index, unique,
-  uniqueIndex,
+  uniqueIndex, jsonb,
 } from 'drizzle-orm/pg-core'
 import { stores, users } from './tenancy'
 import { customers, vehicles } from './customers'
@@ -32,6 +32,41 @@ export const opCodes = pgTable(
     unique('op_codes_store_code_unique').on(t.storeId, t.code),
     index('op_codes_store_idx').on(t.storeId),
   ],
+)
+
+/**
+ * What the morning price sync did, per store per run.
+ *
+ * A job that rewrites quoted prices unattended has to leave a record — both to
+ * answer "the brake job was $618 yesterday" and so a refusal is visible
+ * somewhere other than a log nobody reads.
+ */
+export const pricingSyncRuns = pgTable(
+  'pricing_sync_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    storeId: uuid('store_id').notNull().references(() => stores.id, { onDelete: 'cascade' }),
+
+    /** OK | REFUSED | SKIPPED. */
+    status: text('status').notNull(),
+    vendor: text('vendor').notNull(),
+
+    createdCount: integer('created_count').notNull().default(0),
+    updatedCount: integer('updated_count').notNull().default(0),
+    deactivatedCount: integer('deactivated_count').notNull().default(0),
+    reactivatedCount: integer('reactivated_count').notNull().default(0),
+    /** Withheld as implausible. Non-zero means somebody should look. */
+    quarantinedCount: integer('quarantined_count').notNull().default(0),
+    unchangedCount: integer('unchanged_count').notNull().default(0),
+
+    summary: text('summary').notNull(),
+    /** Before/after for every price that moved. */
+    detail: jsonb('detail'),
+
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [index('pricing_sync_runs_store_idx').on(t.storeId, t.startedAt)],
 )
 
 export const appointments = pgTable(

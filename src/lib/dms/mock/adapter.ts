@@ -4,7 +4,8 @@ import { getDb, schema } from '@/db/client'
 import type { DmsAdapter } from '../adapter'
 import type {
   DateRange, DmsCapabilities, DmsCoverage, DmsCoverageProduct, DmsCustomer, DmsDriveBundle,
-  DmsPushResult, DmsVehicle, DmsVehicleDetail, FollowUpOutcomePayload, HandOffPayload,
+  DmsPriceBookEntry, DmsPushResult, DmsVehicle, DmsVehicleDetail, FollowUpOutcomePayload,
+  HandOffPayload,
 } from '../types'
 import { emptyBundle } from '../map'
 import { applyCoverageScenario, isCoverageScenario, type CoverageScenario } from './scenarios'
@@ -29,6 +30,7 @@ const CAPABILITIES: DmsCapabilities = {
   canPullCoverages: true,
   canPullInspections: true,
   canPullServiceHistory: true,
+  canPullPriceBook: true,
   canPushHandOff: true,
   canPushFollowUpOutcome: true,
   // Honest: a real integration would set this true. Nothing here leaves the
@@ -348,6 +350,45 @@ export class MockDmsAdapter implements DmsAdapter {
     }
 
     return applyCoverageScenario(bundle, this.scenario, range.from)
+  }
+
+  /**
+   * The store's priced operations.
+   *
+   * Returns what is already on file, so a sync against the mock is a truthful
+   * no-op: the pipeline runs end to end and reports nothing moved, which is
+   * exactly what a morning with no price changes should look like.
+   *
+   * `DMS_PRICE_DRIFT` nudges a few prices so the sync has something to do —
+   * for demonstrating the feature and for exercising the guards. Deliberately
+   * opt-in: a mock that quietly changed prices every morning would make the
+   * seeded demo unreproducible.
+   */
+  async pullPriceBook(storeId: string): Promise<DmsPriceBookEntry[] | null> {
+    const rows = await getDb()
+      .select()
+      .from(schema.opCodes)
+      .where(and(eq(schema.opCodes.storeId, storeId), eq(schema.opCodes.isActive, true)))
+      // Ordered so the simulated drift below is reproducible. Without it the
+      // row order varies between calls, so two runs bumped two different sets
+      // of five codes and the demo data crept upward instead of settling.
+      .orderBy(schema.opCodes.code)
+
+    const drift = process.env.DMS_PRICE_DRIFT === '1'
+
+    return rows.map((o, i) => {
+      const labor = o.laborAmount === null ? null : num(o.laborAmount)
+      const parts = o.partsAmount === null ? null : num(o.partsAmount)
+      // Every fifth code up by 4%, rounded to the dollar the way a real book is.
+      const bump = drift && i % 5 === 0
+      return {
+        code: o.code,
+        description: o.description,
+        laborHours: o.laborHours === null ? null : num(o.laborHours),
+        laborAmount: bump && labor !== null ? Math.round(labor * 1.04) : labor,
+        partsAmount: parts,
+      }
+    })
   }
 
   async pullVehicleDetail(storeId: string, vehicleId: string): Promise<DmsVehicleDetail | null> {

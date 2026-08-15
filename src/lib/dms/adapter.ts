@@ -1,6 +1,6 @@
 import type {
-  DateRange, DmsCapabilities, DmsDriveBundle, DmsId, DmsPushResult, DmsVehicleDetail,
-  FollowUpOutcomePayload, HandOffPayload,
+  DateRange, DmsCapabilities, DmsDriveBundle, DmsId, DmsPriceBookEntry, DmsPushResult,
+  DmsVehicleDetail, FollowUpOutcomePayload, HandOffPayload,
 } from './types'
 
 /**
@@ -47,6 +47,17 @@ export interface DmsAdapter {
 
   /** One vehicle in full, for a record page rather than a drive. */
   pullVehicleDetail(storeId: string, vehicleId: DmsId): Promise<DmsVehicleDetail | null>
+
+  /**
+   * The dealership's priced operation list, for the morning sync.
+   *
+   * Return `null` — not an empty array — when the integration has no price
+   * book endpoint. The two mean opposite things: an empty array says "this
+   * dealership prices nothing", which is what an expired credential also looks
+   * like, and the sync refuses to act on it. `null` says "do not ask me this",
+   * and the sync skips the store without raising anything.
+   */
+  pullPriceBook(storeId: string): Promise<DmsPriceBookEntry[] | null>
 
   /**
    * Purchased protection products for a vehicle.

@@ -11,6 +11,13 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/invite/J2wwmzr0HwYtP6lGL8gssSdFWq1ihxde')).toBe(true)
   })
 
+  it('lets a scheduler reach the cron endpoints', () => {
+    // A job firing at six in the morning has no session. Leaving these to
+    // deny-by-default sent Netlify's cron to the sign-in page and the sync
+    // silently never ran. The shared secret in the handler is the guard.
+    expect(isPublicPath('/api/cron/pricing')).toBe(true)
+  })
+
   it('does not open anything that merely starts with those words', () => {
     // Prefix matching on a bare startsWith would make /signups-report and
     // /invitees public too.

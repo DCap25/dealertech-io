@@ -38,6 +38,16 @@ const PUBLIC_PREFIXES = [
    */
   '/present',
   '/api/device',
+  /**
+   * Scheduled jobs.
+   *
+   * Public only in the routing sense. Every handler under here authenticates a
+   * shared secret and refuses outright when one is not configured — but a
+   * scheduler firing at six in the morning has no session cookie, so leaving
+   * this to deny-by-default meant Netlify's cron got a redirect to the sign-in
+   * page and the job silently never ran.
+   */
+  '/api/cron',
 ]
 
 /** Never gated: static assets, framework internals, health checks. */

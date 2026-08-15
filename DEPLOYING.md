@@ -28,6 +28,28 @@ exists in your local `.env.local`.
 | `DMS_ADAPTER` | `mock` | |
 | `DMS_MOCK_SCENARIO` | `AS_SEEDED` | |
 | `ANTHROPIC_API_KEY` | optional | Leave unset and the Co-Pilot runs its mock provider. |
+| `CRON_SECRET` | you generate it | Any long random string. Authenticates the scheduled price sync. **Without it the sync refuses every request and never runs** — it fails closed on purpose. |
+
+### The morning price sync
+
+`netlify/functions/pricing-sync.mts` runs at 11:00 UTC daily and POSTs to
+`/api/cron/pricing`, which pulls each store's priced operations from the DMS and
+brings the local book into line. Both it and `npm run pricing:sync` call the
+same code, so the scheduled path is the one you can test by hand.
+
+Two things to know about it:
+
+- It **refuses** a pull that returns nothing, or that is missing more than a
+  fifth of the operations on file. Both are what a half-finished or
+  unauthenticated pull looks like, and the safe response is to leave yesterday's
+  prices alone. A refusal is recorded in `pricing_sync_runs`, not swallowed.
+- A price that moves by more than a factor of ten is **held back** rather than
+  applied, because that is a units error rather than a price change. Everything
+  else in the same batch still applies.
+
+Generate the secret with something like `openssl rand -base64 32` and set the
+same value on the site and, if you run the job by hand against production, in
+your shell.
 
 ### DATABASE_URL must be the transaction pooler
 

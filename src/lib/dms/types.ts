@@ -329,8 +329,33 @@ export interface DmsCapabilities {
   canPullCoverages: boolean
   canPullInspections: boolean
   canPullServiceHistory: boolean
+  /**
+   * The dealership's priced operation list.
+   *
+   * Not universal. Some integrations expose the labour guide and op-code
+   * pricing; others only expose transactional data, and for those the price
+   * book is maintained here instead. Saying so honestly is what stops the
+   * nightly sync from looking broken on an integration that was never going
+   * to answer.
+   */
+  canPullPriceBook: boolean
   canPushHandOff: boolean
   canPushFollowUpOutcome: boolean
   /** True when writes go somewhere real rather than to a local log. */
   writesArePersisted: boolean
+}
+
+/**
+ * One priced operation as the DMS lists it.
+ *
+ * Deliberately narrow. Component mapping, whether something counts as
+ * maintenance, and how it is presented are ours — the DMS is the authority on
+ * the code, its description and what it costs, and nothing else.
+ */
+export interface DmsPriceBookEntry {
+  code: string
+  description: string
+  laborHours: number | null
+  laborAmount: number | null
+  partsAmount: number | null
 }
