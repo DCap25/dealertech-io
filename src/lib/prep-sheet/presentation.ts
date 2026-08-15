@@ -299,7 +299,15 @@ export function estimateGross(amount: number): number {
 
 // ===========================================================================
 
-export type OpportunityDecision = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'SKIPPED'
+/**
+ * Where a line stands with the customer.
+ *
+ * CALL_ME is the customer's own answer and is neither an approval nor a
+ * refusal. SKIPPED is the advisor's — they ran out of time or judged it not
+ * worth raising — and means nobody was asked, which is a different thing again.
+ */
+export type OpportunityDecision =
+  | 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CALL_ME' | 'SKIPPED'
 
 export interface RunningTotals {
   /** Everything still on the table, plus everything already accepted. */

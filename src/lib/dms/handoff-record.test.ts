@@ -28,6 +28,8 @@ function payload(over: Partial<HandOffPayload> = {}): HandOffPayload {
     mileage: 29_517,
     accepted: [line()],
     declined: [],
+    deferred: [],
+    authorization: null,
     note: 'whatever',
     createdAt: new Date('2026-08-12T08:14:00'),
     ...over,

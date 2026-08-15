@@ -171,6 +171,64 @@ export async function authoriseLinkSession(
   return { ...session, status: 'AUTHORIZED', authorizedAt: now, authorizedName: name.trim() }
 }
 
+/**
+ * The most recent authorisation on a visit, if the customer gave one.
+ *
+ * Read from the presentation the customer actually answered, never taken from
+ * a page — this is the field that makes a claim about a person and ends up in
+ * a permanent DMS comment. No authorised presentation means null, and the note
+ * then simply does not assert one.
+ *
+ * The amount is recomputed from the frozen snapshot rather than trusted from
+ * anywhere, because "they agreed to $618" is only meaningful alongside $618
+ * being the number that was on their screen.
+ */
+export async function latestAuthorization(
+  storeId: string,
+  appointmentId: string,
+): Promise<{
+  name: string
+  at: Date
+  channel: string
+  authorisedAmount: number
+} | null> {
+  const [row] = await getDb()
+    .select({
+      channel: schema.presentationSessions.channel,
+      authorizedAt: schema.presentationSessions.authorizedAt,
+      authorizedName: schema.presentationSessions.authorizedName,
+      authorizedSnapshot: schema.presentationSessions.authorizedSnapshot,
+    })
+    .from(schema.presentationSessions)
+    .where(and(
+      eq(schema.presentationSessions.storeId, storeId),
+      eq(schema.presentationSessions.appointmentId, appointmentId),
+      sql`${schema.presentationSessions.authorizedAt} is not null`,
+    ))
+    .orderBy(desc(schema.presentationSessions.authorizedAt))
+    .limit(1)
+
+  if (!row?.authorizedAt) return null
+
+  const frozen = row.authorizedSnapshot as {
+    snapshot?: DeviceSnapshot
+    decisions?: Record<string, string>
+  } | null
+
+  const items = frozen?.snapshot?.tiers.flatMap((t) => t.items) ?? []
+  const decisions = frozen?.decisions ?? {}
+  const authorisedAmount = items
+    .filter((i) => decisions[i.id] === 'ACCEPTED')
+    .reduce((sum, i) => sum + i.customerOutOfPocket, 0)
+
+  return {
+    name: row.authorizedName ?? 'the customer',
+    at: row.authorizedAt,
+    channel: row.channel,
+    authorisedAmount,
+  }
+}
+
 /** Every presentation on a visit, oldest first. What the advisor view reads. */
 export async function presentationsForVisit(storeId: string, appointmentId: string) {
   return getDb()

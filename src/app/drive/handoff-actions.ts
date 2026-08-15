@@ -10,6 +10,8 @@ import {
   describeReceipt, provenanceNote, withProvenance,
   type DecisionSource, type HandOffReceipt,
 } from '@/lib/dms/handoff-record'
+import { withAuthorization } from '@/lib/dms/authorization-note'
+import { latestAuthorization } from '@/lib/presentation/link-store'
 import { existingSuccess, handoffsForAppointment, recordHandOff } from '@/lib/dms/handoff-store'
 import type { HandOffPayload } from '@/lib/dms/types'
 
@@ -82,17 +84,29 @@ export async function pushHandOffForVisit(
     // the rebuilt sheet.
     const safeDecisions: Record<string, OpportunityDecision> = {}
     for (const [id, value] of Object.entries(decisions)) {
-      if (value === 'ACCEPTED' || value === 'DECLINED' || value === 'SKIPPED') {
+      if (value === 'ACCEPTED' || value === 'DECLINED' || value === 'CALL_ME' || value === 'SKIPPED') {
         safeDecisions[id] = value
       }
     }
+
+    /**
+     * The authorisation, read from the record rather than taken from the page.
+     *
+     * This is the one field on the hand-off that makes a claim about the
+     * customer — "they confirmed this, at this time, for this amount" — and it
+     * ends up in a permanent comment somebody may rely on in a dispute. So it
+     * comes from the presentation the customer actually answered, and if there
+     * is no such presentation it is null and the note simply does not make the
+     * claim. A client cannot assert it.
+     */
+    const authorization = await latestAuthorization(store.id, appointmentId)
 
     const safeSources: Record<string, DecisionSource> = {}
     for (const [id, value] of Object.entries(sources)) {
       if (value === 'ADVISOR' || value === 'CUSTOMER') safeSources[id] = value
     }
 
-    const built = buildHandOffPayload(sheet, safeDecisions)
+    const built = buildHandOffPayload(sheet, safeDecisions, new Date(), authorization)
 
     /**
      * Who chose each line.
@@ -109,7 +123,10 @@ export async function pushHandOffForVisit(
 
     const payload: HandOffPayload = {
       ...built,
-      note: withProvenance(built.note, provenanceNote(safeSources, acceptedIds, deviceName)),
+      note: withAuthorization(
+        withProvenance(built.note, provenanceNote(safeSources, acceptedIds, deviceName)),
+        authorization,
+      ),
     }
 
     /**

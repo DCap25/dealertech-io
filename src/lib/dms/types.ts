@@ -274,6 +274,36 @@ export interface HandOffPayload {
   accepted: HandOffLine[]
   /** Lines they turned down, so the DMS records the offer was made. */
   declined: HandOffLine[]
+  /**
+   * Lines they asked to be called about.
+   *
+   * Neither approved nor refused, and folding them into either would be wrong
+   * in an expensive direction: as approvals they authorise work nobody agreed
+   * to, as declines they bury the warmest lead on the ticket. They reach the
+   * DMS as their own group so whoever picks the ticket up next knows a phone
+   * call is owed.
+   */
+  deferred: HandOffLine[]
+  /**
+   * Who agreed to this, and when.
+   *
+   * Present only when the customer answered on a screen of their own — a
+   * tablet at the podium or a link on their phone. Absent when the advisor
+   * recorded the answers on their behalf, which is a materially different
+   * claim and should not be dressed up as the same one.
+   *
+   * Deliberately narrow: a record of what was shown and what was answered,
+   * not a substitute for the repair order the dealership prints and the DMS
+   * owns.
+   */
+  authorization: {
+    name: string
+    at: Date
+    /** TABLET or LINK. Where they were when they answered. */
+    channel: string
+    /** What they agreed to, at the price they were shown. */
+    authorisedAmount: number
+  } | null
   /** Free-text block, already formatted for a comment field. */
   note: string
   createdAt: Date

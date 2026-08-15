@@ -57,6 +57,24 @@ export function idempotencyKey(payload: HandOffPayload): string {
     ...payload.accepted.map(signature).sort(),
     'DECLINED',
     ...payload.declined.map(signature).sort(),
+    'DEFERRED',
+    ...payload.deferred.map(signature).sort(),
+    /*
+      The authorisation is part of the identity.
+
+      An advisor pushing the same lines twice is one hand-off. The same lines
+      pushed once as the advisor's own record and again after the customer
+      authorised them on their phone are two different claims about who agreed
+      to the work, and collapsing them would lose the one that matters.
+    */
+    'AUTHORIZATION',
+    payload.authorization
+      ? [
+          payload.authorization.name,
+          payload.authorization.at.toISOString(),
+          payload.authorization.channel,
+        ].join('|')
+      : '',
   ].join('\n')
 
   return createHash('sha256').update(body).digest('hex')

@@ -229,6 +229,21 @@ export function buildHandoffNote(
     for (const o of accepted) out.push(buildHandoffLine(o))
   }
 
+  /*
+    Placed above declines, and worded as an instruction.
+
+    This is the one group on the ticket that needs somebody to do something.
+    Below the declines it reads as a footnote; a decline is closed business and
+    a call-me is an open promise, so it goes where it will be seen first.
+  */
+  const deferred = sheet.opportunities.filter((o) => decisions[o.id] === 'CALL_ME')
+  if (deferred.length > 0) {
+    out.push('', 'CUSTOMER ASKED TO BE CALLED — do not start, do not close out')
+    for (const o of deferred) {
+      out.push(`  ${o.title} — ${money(o.estimatedAmount)}`)
+    }
+  }
+
   if (declined.length > 0) {
     out.push('', 'DECLINED — logged for follow-up')
     for (const o of declined) {
@@ -293,8 +308,13 @@ export function buildHandOffPayload(
   sheet: PrepSheet,
   decisions: Record<string, OpportunityDecision>,
   asOf: Date = new Date(),
+  authorization: HandOffPayload['authorization'] = null,
 ): HandOffPayload {
   return {
+    authorization,
+    deferred: sheet.opportunities
+      .filter((o) => decisions[o.id] === 'CALL_ME')
+      .map(toHandOffLine),
     appointmentId: sheet.appointment?.id ?? null,
     // We never create repair orders; the DMS owns that number.
     repairOrderId: null,
