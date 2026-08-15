@@ -1,6 +1,9 @@
 import Link from 'next/link'
+import { headers } from 'next/headers'
 import { requirePlatformAdmin } from '@/lib/auth/session'
 import { loadLeads, loadRecentJobRuns, loadTenants } from '@/lib/platform/load'
+import { knownMakes } from '@/lib/warranty'
+import { ProvisionForm } from './provision-form'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Platform' }
@@ -13,10 +16,36 @@ function ago(d: Date | null): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-/** A sync older than this is not "recent", it is "not running". */
+/**
+ * A sync older than this is not "recent", it is "not running".
+ *
+ * Thirty-six hours rather than twenty-four, so a job that slips by an hour and
+ * a clock change in the same week do not both raise an alarm.
+ */
 const STALE_HOURS = 36
 
-function SyncBadge({ at, status }: { at: Date | null; status: string | null }) {
+/**
+ * Has this dealership been around long enough to have been synced?
+ *
+ * A store provisioned twenty minutes ago has not missed anything — the next
+ * scheduled run has simply not happened yet. Flagging it red anyway is how a
+ * status column stops being read: the first thing every new tenant does is
+ * light up as a problem, and people learn that the colour means nothing.
+ */
+function awaitingFirstSync(createdAt: Date, lastSyncAt: Date | null): boolean {
+  return !lastSyncAt && Date.now() - createdAt.getTime() < STALE_HOURS * 3_600_000
+}
+
+function SyncBadge({ at, status, createdAt }: {
+  at: Date | null; status: string | null; createdAt: Date
+}) {
+  if (awaitingFirstSync(createdAt, at)) {
+    return (
+      <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+        awaiting first sync
+      </span>
+    )
+  }
   const stale = !at || Date.now() - at.getTime() > STALE_HOURS * 3_600_000
   const tone = !at || stale || status !== 'OK'
     ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200'
@@ -36,9 +65,17 @@ export default async function AdminPage() {
     loadRecentJobRuns(10),
   ])
 
+  // Built server-side so the copied invitation link is right behind a proxy
+  // or on a custom domain rather than whatever the browser happens to think.
+  const host = (await headers()).get('host') ?? ''
+  const protocol = host.startsWith('localhost') || host.startsWith('127.') ? 'http' : 'https'
+  const origin = `${protocol}://${host}`
+  const makes = knownMakes()
+
   const uncontacted = leads.filter((l) => !l.contacted)
   const needAttention = tenants.filter(
-    (t) => !t.lastSyncAt || t.lastSyncStatus !== 'OK',
+    (t) => !awaitingFirstSync(t.createdAt, t.lastSyncAt)
+      && (!t.lastSyncAt || t.lastSyncStatus !== "OK"),
   )
 
   return (
@@ -102,7 +139,7 @@ export default async function AdminPage() {
                 <div className="flex items-center gap-4 text-xs text-neutral-500">
                   <span>{t.staffCount} staff</span>
                   {t.pendingInvites > 0 && <span>{t.pendingInvites} invited</span>}
-                  <SyncBadge at={t.lastSyncAt} status={t.lastSyncStatus} />
+                  <SyncBadge at={t.lastSyncAt} status={t.lastSyncStatus} createdAt={t.createdAt} />
                 </div>
               </li>
             ))}
@@ -142,6 +179,13 @@ export default async function AdminPage() {
                       “{l.message}”
                     </p>
                   )}
+                  <ProvisionForm
+                    leadId={l.id}
+                    dealershipName={l.dealershipName}
+                    email={l.email}
+                    makes={makes}
+                    origin={origin}
+                  />
                 </div>
                 <span className="shrink-0 text-xs text-neutral-500">{ago(l.createdAt)}</span>
               </li>

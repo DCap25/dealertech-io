@@ -41,6 +41,52 @@ export function slugify(name: string, suffix: string): string {
   return `${base || 'dealership'}-${suffix}`
 }
 
+/** The dealership itself, with nobody in it yet. */
+export interface NewStore {
+  dealershipName: string
+  franchiseMake: string | null
+  state: string | null
+  laborRate: number
+}
+
+/**
+ * Stand up an organisation and its first rooftop.
+ *
+ * Split out from `provisionTenant` because the two ways a dealership arrives
+ * differ only in who the first account belongs to. Self-serve creates the
+ * administrator immediately from a password they just chose; sales-led creates
+ * nobody and sends an invitation instead, because the person who signs the
+ * contract is rarely the person sitting at the keyboard when it is set up.
+ *
+ * `suffix` disambiguates the slug. Two dealerships genuinely called "Hill
+ * Country BMW" is normal in a franchise network, and a check-then-insert loop
+ * for the next free name is a race waiting to happen.
+ */
+export async function createStore(
+  input: NewStore,
+  suffix: string,
+): Promise<{ organizationId: string; storeId: string }> {
+  const db = getDb()
+
+  const [org] = await db.insert(schema.organizations).values({
+    name: input.dealershipName,
+    slug: slugify(input.dealershipName, suffix),
+  }).returning({ id: schema.organizations.id })
+  if (!org) throw new Error('organization insert returned nothing')
+
+  const [store] = await db.insert(schema.stores).values({
+    organizationId: org.id,
+    name: input.dealershipName,
+    slug: slugify(input.dealershipName, suffix),
+    franchiseMake: input.franchiseMake,
+    state: input.state,
+    laborRate: input.laborRate.toFixed(2),
+  }).returning({ id: schema.stores.id })
+  if (!store) throw new Error('store insert returned nothing')
+
+  return { organizationId: org.id, storeId: store.id }
+}
+
 /**
  * Create the org, the rooftop and the first administrator.
  *
@@ -76,21 +122,7 @@ export async function provisionTenant(
   const suffix = userId.slice(0, 8)
 
   try {
-    const [org] = await db.insert(schema.organizations).values({
-      name: input.dealershipName,
-      slug: slugify(input.dealershipName, suffix),
-    }).returning({ id: schema.organizations.id })
-    if (!org) throw new Error('organization insert returned nothing')
-
-    const [store] = await db.insert(schema.stores).values({
-      organizationId: org.id,
-      name: input.dealershipName,
-      slug: slugify(input.dealershipName, suffix),
-      franchiseMake: input.franchiseMake,
-      state: input.state,
-      laborRate: input.laborRate.toFixed(2),
-    }).returning({ id: schema.stores.id })
-    if (!store) throw new Error('store insert returned nothing')
+    const store = await createStore(input, suffix).then((r) => ({ id: r.storeId }))
 
     await db.insert(schema.users).values({
       id: userId, email, fullName: input.adminName || email,

@@ -4,9 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { and, eq, isNull } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { requireUser } from '@/lib/auth/session'
-import {
-  createInviteToken, inviteExpiryFrom, isInvitableRole, normaliseEmail,
-} from '@/lib/invites/invite'
+import { isInvitableRole, normaliseEmail } from '@/lib/invites/invite'
+import { createInvitation } from '@/lib/invites/create'
 
 export interface InviteState {
   error?: string
@@ -66,32 +65,11 @@ export async function inviteStaff(
     return { error: `${email} already works at ${user.storeName}.` }
   }
 
-  const { token, tokenHash } = createInviteToken()
-  const now = new Date()
-
-  /*
-    Re-inviting replaces the pending link rather than adding a second one.
-
-    A partial unique index enforces one live invitation per address per store,
-    so this revokes first instead of colliding. Two working links for the same
-    person is one more than anybody can keep track of.
-  */
-  await db.update(schema.storeInvitations)
-    .set({ revokedAt: now, revokedByUserId: user.id })
-    .where(and(
-      eq(schema.storeInvitations.storeId, user.storeId),
-      eq(schema.storeInvitations.email, email),
-      isNull(schema.storeInvitations.acceptedAt),
-      isNull(schema.storeInvitations.revokedAt),
-    ))
-
-  await db.insert(schema.storeInvitations).values({
+  const { token } = await createInvitation({
     storeId: user.storeId,
     email,
     role,
-    tokenHash,
     invitedByUserId: user.id,
-    expiresAt: inviteExpiryFrom(now),
   })
 
   revalidatePath('/team')
