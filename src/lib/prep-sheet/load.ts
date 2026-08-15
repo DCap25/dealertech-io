@@ -1,6 +1,6 @@
 import 'server-only'
 import { eq } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { toPrepSheetInputs, type StoreProfile } from '@/lib/dms'
 import { getDmsAdapter } from '@/lib/dms/registry'

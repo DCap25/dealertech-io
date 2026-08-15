@@ -1,5 +1,5 @@
 import { differenceInCalendarDays } from 'date-fns'
-import type { Contract, PrepaidEntitlement } from '@/lib/coverage'
+import type { Contract } from '@/lib/coverage'
 import type { TermStatus } from '@/lib/warranty'
 import type { Opportunity, PrepSheet } from './types'
 

@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
 import { computeWarrantySnapshot, type WarrantySnapshot } from '@/lib/warranty'
 import { reconcileOdometer } from '@/lib/odometer/reconcile'
 import { withUserScope } from '@/db/scoped'

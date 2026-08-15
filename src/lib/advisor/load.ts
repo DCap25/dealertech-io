@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
 import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import { evaluateCoverage, type Contract, type CoverageDetermination, type PrepaidEntitlement } from '@/lib/coverage'
 import { computeWarrantySnapshot, type WarrantySnapshot } from '@/lib/warranty'

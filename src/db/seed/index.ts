@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { eq, sql } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import { getDb, schema } from '../client'
 import { chance, int, isoDate, makeVin, pick, reseed, rnd, sample, stableId, daysAgo, daysFrom } from './random'

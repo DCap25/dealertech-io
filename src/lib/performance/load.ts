@@ -1,6 +1,6 @@
 import 'server-only'
 import { and, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
 import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import type { OpportunityOutcome, OutcomeRecord, SoldLineRecord } from './types'
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useActionState, useState } from 'react'
 import { changeRole, removeStaff, restoreStaff, type RosterState } from './actions'
 import { INVITABLE_ROLES } from '@/lib/invites/invite'
 
@@ -38,8 +38,18 @@ export function StaffRow({ member }: { member: StaffMember }) {
     React keeps this component mounted across a remove and a later put-back,
     so without this the restored row would come back already asking whether to
     remove them again.
+
+    Adjusted during render rather than in an effect. An effect would paint the
+    restored row once with the stale confirmation still showing and then
+    correct it, which is a visible flash on the one control where a
+    misremembered "are you sure?" is worst. React re-runs this component
+    immediately on the setState below, before anything reaches the screen.
   */
-  useEffect(() => { setConfirming(false) }, [member.isActive])
+  const [wasActive, setWasActive] = useState(member.isActive)
+  if (wasActive !== member.isActive) {
+    setWasActive(member.isActive)
+    setConfirming(false)
+  }
 
   return (
     <li className="p-3">

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   formatReading, sceneAt, statusOf, totalDurationMs, type Explainer, type Reading,
 } from '@/lib/explainer'
@@ -15,6 +15,18 @@ import { Diagram } from './diagrams'
  * the tablet in the first place.
  */
 
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'
+
+function subscribeToReducedMotion(onChange: () => void): () => void {
+  const query = window.matchMedia(REDUCED_MOTION)
+  query.addEventListener('change', onChange)
+  return () => query.removeEventListener('change', onChange)
+}
+
+function readReducedMotion(): boolean {
+  return window.matchMedia(REDUCED_MOTION).matches
+}
+
 export function ExplainerPlayer({
   explainer,
   reading,
@@ -27,22 +39,36 @@ export function ExplainerPlayer({
   const total = totalDurationMs(explainer)
   const [elapsed, setElapsed] = useState(0)
   const [playing, setPlaying] = useState(true)
-  const reducedMotion = useRef(false)
+  /** Bumped by Replay, so the animation effect can tell a restart from a resume. */
+  const [runId, setRunId] = useState(0)
 
-  useEffect(() => {
-    /**
-     * Someone who has asked their system not to animate things gets the whole
-     * explanation as text, at the end state of the diagram, immediately. The
-     * information is the point; the motion is a delivery mechanism.
-     */
-    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
-    reducedMotion.current = query.matches
-    if (query.matches) {
-      elapsedBeforePause.current = total
-      setElapsed(total)
-      setPlaying(false)
-    }
-  }, [total])
+  /**
+   * Someone who has asked their system not to animate things gets the whole
+   * explanation as text, at the end state of the diagram, immediately. The
+   * information is the point; the motion is a delivery mechanism.
+   *
+   * Subscribed to rather than sampled once into state. It is a browser store
+   * and this is how React reads one — which also means changing the setting
+   * while the dialog is open is honoured, instead of being ignored until it is
+   * reopened. The server snapshot is `false` because the server cannot know,
+   * and briefly animating for somebody who wanted stillness is a kinder wrong
+   * answer than freezing the diagram for somebody who wanted the animation.
+   */
+  const reducedMotion = useSyncExternalStore(
+    subscribeToReducedMotion,
+    readReducedMotion,
+    () => false,
+  )
+
+  /*
+    Derived, not stored.
+
+    Holding this in state meant an effect had to write it on mount, which is
+    one painted frame of animation for a person who asked for none — and it is
+    what the setState-in-effect rule is pointing at.
+  */
+  const shownElapsed = reducedMotion ? total : elapsed
+  const isPlaying = playing && !reducedMotion
 
   /**
    * Driven by the wall clock, not by counting ticks.
@@ -56,9 +82,24 @@ export function ExplainerPlayer({
    */
   const startedAt = useRef(0)
   const elapsedBeforePause = useRef(0)
+  const runIdSeen = useRef(0)
 
   useEffect(() => {
-    if (!playing) return
+    if (!isPlaying) return
+
+    /*
+      Replay is a new run, not a resume, so the clock starts from zero.
+
+      Done here rather than in the click handler: `elapsedBeforePause` is this
+      effect's own bookkeeping, and reaching into it from outside is both what
+      the immutability rule objects to and a real ordering hazard — the effect's
+      cleanup writes to it too, and which of the two lands last depended on
+      whether the animation happened to be running at the time.
+    */
+    if (runIdSeen.current !== runId) {
+      runIdSeen.current = runId
+      elapsedBeforePause.current = 0
+    }
 
     startedAt.current = performance.now()
     let frame = 0
@@ -84,7 +125,7 @@ export function ExplainerPlayer({
         elapsedBeforePause.current + (performance.now() - startedAt.current),
       )
     }
-  }, [playing, total])
+  }, [isPlaying, total, runId])
 
   // Escape closes, because a tablet in a customer's hands may be paired with a
   // keyboard at the podium.
@@ -96,13 +137,13 @@ export function ExplainerPlayer({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const { caption, progress, done, index } = sceneAt(explainer, elapsed)
+  const { caption, progress, done, index } = sceneAt(explainer, shownElapsed)
   const status = statusOf(explainer, reading)
 
   const replay = () => {
-    elapsedBeforePause.current = 0
     setElapsed(0)
     setPlaying(true)
+    setRunId((n) => n + 1)
   }
 
   return (
@@ -201,7 +242,7 @@ export function ExplainerPlayer({
             onClick={done ? replay : () => setPlaying((p) => !p)}
             className="touch-target rounded-xl bg-neutral-900 px-5 py-3 text-sm font-bold text-white dark:bg-white dark:text-neutral-900"
           >
-            {done ? 'Play again' : playing ? 'Pause' : 'Play'}
+            {done ? 'Play again' : isPlaying ? 'Pause' : 'Play'}
           </button>
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--border)]">
             <div
@@ -210,7 +251,7 @@ export function ExplainerPlayer({
             />
           </div>
           <span className="w-12 text-right text-xs tabular-nums text-neutral-500">
-            {Math.ceil((total - elapsed) / 1000)}s
+            {Math.ceil((total - shownElapsed) / 1000)}s
           </span>
         </div>
       </div>

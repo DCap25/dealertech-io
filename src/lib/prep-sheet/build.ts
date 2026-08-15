@@ -1,5 +1,5 @@
 import { differenceInCalendarDays, differenceInCalendarMonths } from 'date-fns'
-import { evaluateCoverage, type Payer } from '@/lib/coverage'
+import { evaluateCoverage } from '@/lib/coverage'
 import { computeWarrantySnapshot } from '@/lib/warranty'
 import { getComponentGroup } from '@/lib/taxonomy'
 import { predictWorstCorner, predictWear, TIRE_THRESHOLDS, BRAKE_THRESHOLDS, type WearReading } from './wear'

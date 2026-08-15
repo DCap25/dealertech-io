@@ -1,5 +1,5 @@
 import { and, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
 import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import { displayDetail } from '@/lib/cadence/run'
 

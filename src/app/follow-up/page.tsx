@@ -3,10 +3,9 @@ import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { Card } from '@/components/ui/primitives'
 import { loadWorklist } from '@/lib/cadence/worklist'
 import {
-  filterItems, groupByUrgency, ownerFrom, summarize, triggerMeta,
+  filterItems, groupByUrgency, ownerFrom, summarize,
   type FollowUpItem, type FollowUpOwner,
 } from '@/lib/follow-up/view'
-import type { CadenceTrigger } from '@/lib/cadence'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { FollowUpCard } from './follow-up-card'
 import { demoDayEnd } from '@/lib/demo-day'

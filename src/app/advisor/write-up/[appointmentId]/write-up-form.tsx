@@ -92,13 +92,24 @@ export function WriteUpForm({
 
   const isRollback = warning !== null
 
-  // A corrected number invalidates the explanation given for the old one.
-  useEffect(() => {
+  /*
+    A corrected number invalidates the explanation given for the old one.
+
+    Adjusted during render rather than in an effect. An effect clears these one
+    paint late, so an advisor who fixes a mistyped odometer sees the old
+    reason code still sitting under a reading it no longer explains — and this
+    is the field that becomes the audit record for overriding a rollback
+    warning, so a stale value showing for even a frame is the wrong thing to be
+    relaxed about.
+  */
+  const [lastStatus, setLastStatus] = useState(live.status)
+  if (lastStatus !== live.status) {
+    setLastStatus(live.status)
     if (live.status === 'OK') {
       setReasonCode('')
       setOverrideNote('')
     }
-  }, [live.status])
+  }
 
   // Navigating in an effect, not during render. Calling router.push() in the
   // render body updates the Router while this component is rendering, which

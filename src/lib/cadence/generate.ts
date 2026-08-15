@@ -1,7 +1,7 @@
 import { addDays, differenceInCalendarDays } from 'date-fns'
 import { computeWarrantySnapshot } from '@/lib/warranty'
 import type {
-  CadenceContext, CadenceRule, CadenceVehicle, ExistingTask, GeneratedTask,
+  CadenceContext, CadenceRule, ExistingTask, GeneratedTask,
 } from './types'
 
 /**

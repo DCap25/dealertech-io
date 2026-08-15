@@ -1,6 +1,6 @@
 import 'server-only'
 import { and, eq, gte, inArray, isNotNull, lt } from 'drizzle-orm'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
 import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import type { Period } from '@/lib/performance'
 import type {

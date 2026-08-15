@@ -8,9 +8,34 @@ import { ProvisionForm } from './provision-form'
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Platform' }
 
-function ago(d: Date | null): string {
+/**
+ * The wall clock, and deliberately not `demoNow()`.
+ *
+ * Every dealership-facing surface runs on the frozen demo day so a screenshot
+ * taken today still matches the app next month. This console does not: it
+ * watches real infrastructure — when a sync actually ran, when a tenant
+ * actually signed up — and staleness measured against a fixed date in the past
+ * would eventually report every healthy job as overdue.
+ *
+ * Hoisted out of the component because reading a clock is a request-scoped
+ * input like the session or the headers, not part of rendering. Same shape as
+ * the `const DAY = () => demoNow()` every other page uses.
+ */
+const nowMs = () => Date.now()
+
+/**
+ * Every relative time on this page is measured from one instant.
+ *
+ * `now` is taken once when the page renders and threaded down rather than each
+ * helper reading the clock for itself. Two badges rendered a millisecond apart
+ * disagreeing is not a bug anybody would ever notice, but a page that reads the
+ * clock in four places is one where "36 hours" quietly means four different
+ * things — and it is the reason the linter objects to calling Date.now() during
+ * a render at all.
+ */
+function ago(d: Date | null, now: number): string {
   if (!d) return 'never'
-  const hours = Math.floor((Date.now() - d.getTime()) / 3_600_000)
+  const hours = Math.floor((now - d.getTime()) / 3_600_000)
   if (hours < 1) return 'just now'
   if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
@@ -32,33 +57,35 @@ const STALE_HOURS = 36
  * status column stops being read: the first thing every new tenant does is
  * light up as a problem, and people learn that the colour means nothing.
  */
-function awaitingFirstSync(createdAt: Date, lastSyncAt: Date | null): boolean {
-  return !lastSyncAt && Date.now() - createdAt.getTime() < STALE_HOURS * 3_600_000
+function awaitingFirstSync(createdAt: Date, lastSyncAt: Date | null, now: number): boolean {
+  return !lastSyncAt && now - createdAt.getTime() < STALE_HOURS * 3_600_000
 }
 
-function SyncBadge({ at, status, createdAt }: {
-  at: Date | null; status: string | null; createdAt: Date
+function SyncBadge({ at, status, createdAt, now }: {
+  at: Date | null; status: string | null; createdAt: Date; now: number
 }) {
-  if (awaitingFirstSync(createdAt, at)) {
+  if (awaitingFirstSync(createdAt, at, now)) {
     return (
       <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
         awaiting first sync
       </span>
     )
   }
-  const stale = !at || Date.now() - at.getTime() > STALE_HOURS * 3_600_000
+  const stale = !at || now - at.getTime() > STALE_HOURS * 3_600_000
   const tone = !at || stale || status !== 'OK'
     ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200'
     : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
   return (
     <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${tone}`}>
-      {!at ? 'never synced' : stale ? `stale · ${ago(at)}` : status === 'OK' ? ago(at) : status}
+      {!at ? 'never synced' : stale ? `stale · ${ago(at, now)}` : status === 'OK' ? ago(at, now) : status}
     </span>
   )
 }
 
 export default async function AdminPage() {
   const session = await requirePlatformAdmin()
+  // One instant for the whole page. See the notes on `nowMs` and `ago`.
+  const now = nowMs()
   const [tenants, leads, runs] = await Promise.all([
     loadTenants(),
     loadLeads(20),
@@ -74,7 +101,7 @@ export default async function AdminPage() {
 
   const uncontacted = leads.filter((l) => !l.contacted)
   const needAttention = tenants.filter(
-    (t) => !awaitingFirstSync(t.createdAt, t.lastSyncAt)
+    (t) => !awaitingFirstSync(t.createdAt, t.lastSyncAt, now)
       && (!t.lastSyncAt || t.lastSyncStatus !== "OK"),
   )
 
@@ -155,7 +182,7 @@ export default async function AdminPage() {
                 <div className="flex items-center gap-4 text-xs text-neutral-500">
                   <span>{t.staffCount} staff</span>
                   {t.pendingInvites > 0 && <span>{t.pendingInvites} invited</span>}
-                  <SyncBadge at={t.lastSyncAt} status={t.lastSyncStatus} createdAt={t.createdAt} />
+                  <SyncBadge at={t.lastSyncAt} status={t.lastSyncStatus} createdAt={t.createdAt} now={now} />
                 </div>
               </li>
             ))}
@@ -203,7 +230,7 @@ export default async function AdminPage() {
                     origin={origin}
                   />
                 </div>
-                <span className="shrink-0 text-xs text-neutral-500">{ago(l.createdAt)}</span>
+                <span className="shrink-0 text-xs text-neutral-500">{ago(l.createdAt, now)}</span>
               </li>
             ))}
           </ul>
@@ -233,7 +260,7 @@ export default async function AdminPage() {
                   <span className={r.status === 'OK' ? 'text-neutral-500' : 'font-medium text-rose-700 dark:text-rose-400'}>
                     {r.status}
                   </span>
-                  <span className="text-neutral-500">{ago(r.startedAt)}</span>
+                  <span className="text-neutral-500">{ago(r.startedAt, now)}</span>
                 </div>
               </li>
             ))}

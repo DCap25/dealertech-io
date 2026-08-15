@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
-import { AlertList, CoverageChips, money, PayerBadge, timeOf, UrgencyBadge } from './ui'
+import { CoverageChips, money, PayerBadge, timeOf, UrgencyBadge } from './ui'
 import { demoNow } from '@/lib/demo-day'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
 

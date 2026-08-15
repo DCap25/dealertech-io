@@ -13,7 +13,7 @@
  * silently doing nothing.
  */
 
-export default async () => {
+const pricingSync = async () => {
   const base = process.env.URL ?? process.env.DEPLOY_PRIME_URL
   const secret = process.env.CRON_SECRET
 
@@ -39,6 +39,8 @@ export default async () => {
   console.log(`pricing sync: ${body}`)
   return new Response(body, { status: 200 })
 }
+
+export default pricingSync
 
 /**
  * 11:00 UTC — a little after 6am in Central time through the summer, 5am in

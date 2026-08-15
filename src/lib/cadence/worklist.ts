@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm'
 import { addDays } from 'date-fns'
-import { getDb, schema } from '@/db/client'
+import { schema } from '@/db/client'
 import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import { displayDetail } from './run'
 import type { CadenceTrigger } from './types'
