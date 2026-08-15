@@ -54,7 +54,10 @@ export function CustomerMenu({
   }
 
   return (
-    <main className="min-h-dvh bg-[var(--background)] pb-40">
+    <main className={`min-h-dvh bg-[var(--background)] ${
+      // Room for the fixed confirm bar, and none reserved when there is no bar.
+      !isDone && snapshot.itemCount > 0 ? 'pb-40' : 'pb-12'
+    }`}>
       <div className="mx-auto max-w-3xl px-5 py-8 sm:px-6">
         {isDone && (
           <div className="mb-6 rounded-2xl border border-emerald-300 bg-emerald-50 p-5 dark:border-emerald-800 dark:bg-emerald-950">
@@ -84,7 +87,16 @@ export function CustomerMenu({
         </p>
       </div>
 
-      {!isDone && (
+      {/*
+        Nothing to answer means nothing to send.
+
+        An empty list still rendered "0 of 0 answered", a £0 total and a button
+        asking the customer to type their name and confirm it. Confirming an
+        empty list is not a thing anybody means to do, and being asked to sign
+        for nothing is the kind of small wrongness that makes a person doubt
+        the rest of the screen.
+      */}
+      {!isDone && snapshot.itemCount > 0 && (
         <div className="fixed inset-x-0 bottom-0 border-t border-[var(--border)] bg-[var(--background)]/95 px-5 py-4 backdrop-blur sm:px-6">
           <div className="mx-auto max-w-3xl">
             <div className="flex items-baseline justify-between gap-4">

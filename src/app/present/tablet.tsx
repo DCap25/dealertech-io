@@ -1,9 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ExplainerPlayer } from '@/components/explainer/explainer-player'
-import { explainerFor } from '@/lib/explainer'
-import type { DeviceItem, DeviceSnapshot } from '@/lib/pairing/snapshot'
+import { ServiceMenu } from '@/components/present/service-menu'
+import type { DeviceSnapshot } from '@/lib/pairing/snapshot'
 
 /**
  * The customer tablet.
@@ -43,15 +42,9 @@ async function call(action: string, token: string | null, extra: object = {}) {
   return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) }
 }
 
-const TIER_ACCENT: Record<string, string> = {
-  NOW: 'border-l-rose-500',
-  SOON: 'border-l-amber-500',
-  PLANNED: 'border-l-neutral-300 dark:border-l-neutral-600',
-}
 
 export function Tablet() {
   const [state, setState] = useState<State>({ phase: 'LOADING' })
-  const [explaining, setExplaining] = useState<DeviceItem | null>(null)
   const tokenRef = useRef<string | null>(null)
 
   /** Local decisions, so a tap feels instant while the post is in flight. */
@@ -86,8 +79,13 @@ export function Tablet() {
         decisions: (data.session.decisions ?? {}) as Record<string, string>,
       })
     } else {
+      /*
+        The advisor took the menu back. Clearing the pending taps matters — a
+        tap still in flight when the session ends must not be replayed onto
+        whatever is presented next. The explainer closes on its own now: it
+        lives inside ServiceMenu, which unmounts with the menu.
+      */
       setPending({})
-      setExplaining(null)
       setState({ phase: 'IDLE', deviceName: data.deviceName ?? null })
     }
   }, [])
@@ -174,165 +172,34 @@ export function Tablet() {
   return (
     <main className="min-h-dvh bg-[var(--background)] pb-32">
       <div className="mx-auto max-w-3xl px-5 py-8 sm:px-6">
-        <header className="border-b border-[var(--border)] pb-5">
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500">
-            Recommended service
-          </p>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight">{snapshot.vehicleLabel}</h1>
-          <p className="mt-1 text-neutral-600 dark:text-neutral-400">
-            {snapshot.customerName} · {snapshot.mileage.toLocaleString()} miles
-          </p>
-        </header>
+        {/*
+          The menu itself is the shared component, not a copy.
 
-        {snapshot.coveredTotal > 0 && (
-          <div className="mt-5 rounded-2xl border border-emerald-300 bg-emerald-50 p-5 dark:border-emerald-800 dark:bg-emerald-950">
-            <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">
-              Coverage you already own pays for
-            </p>
-            <p className="mt-1 text-4xl font-bold tabular-nums text-emerald-900 dark:text-emerald-100">
-              {money(snapshot.coveredTotal)}
-            </p>
-          </div>
-        )}
-
-        {snapshot.tiers.map((group) => (
-          <section key={group.tier} className="mt-8">
-            <h2 className="text-xl font-bold tracking-tight">{group.title}</h2>
-            <p className="mt-0.5 text-sm text-neutral-500">{group.blurb}</p>
-
-            <ul className="mt-3 space-y-3">
-              {group.items.map((item) => {
-                const decision = decisions[item.id]
-                const savings = Math.max(0, item.fullAmount - item.customerOutOfPocket)
-                return (
-                  <li
-                    key={item.id}
-                    className={`rounded-2xl border border-l-4 p-5 ${TIER_ACCENT[group.tier]} ${
-                      decision === 'ACCEPTED'
-                        ? 'border-emerald-400 bg-emerald-50/60 dark:border-emerald-700 dark:bg-emerald-950/40'
-                        : decision === 'CALL_ME'
-                          ? 'border-sky-400 bg-sky-50/60 dark:border-sky-700 dark:bg-sky-950/40'
-                          : decision === 'DECLINED'
-                            ? 'border-[var(--border)] bg-[var(--surface-muted)] opacity-70'
-                            : 'border-[var(--border)] bg-[var(--surface)]'
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-lg font-bold">{item.title}</h3>
-                        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-                          {item.detail}
-                        </p>
-                        {item.badges.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {item.badges.map((b) => (
-                              <span
-                                key={b.label}
-                                className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                  b.tone === 'SAFETY'
-                                    ? 'bg-rose-600 text-white'
-                                    : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200'
-                                }`}
-                              >
-                                {b.label}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-2xl font-bold tabular-nums">
-                          {item.customerOutOfPocket === 0 ? 'No charge' : money(item.customerOutOfPocket)}
-                        </p>
-                        {savings > 0 && (
-                          <p className="text-sm text-neutral-500 line-through tabular-nums">
-                            {money(item.fullAmount)}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      {item.explainerKey && explainerFor(item.explainerKey) && (
-                        <button
-                          type="button"
-                          onClick={() => setExplaining(item)}
-                          className="touch-target inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold"
-                        >
-                          <span aria-hidden>▶</span> Show me why
-                        </button>
-                      )}
-                      {/*
-                        Three answers, and "not today" sits first and looks
-                        exactly as tappable as "yes".
-
-                        This is the screen the whole product is judged on. A
-                        customer who arrives expecting to be talked into
-                        something reads a buried decline instantly, and once
-                        they have read it they discount the brake warning too.
-                        The middle option is the one they actually want most
-                        often and no menu ever offers.
-                      */}
-                      <div className="ml-auto flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => decide(item.id, decision === 'DECLINED' ? 'PENDING' : 'DECLINED')}
-                          aria-pressed={decision === 'DECLINED'}
-                          className={`touch-target rounded-xl border px-4 py-2.5 text-sm font-semibold ${
-                            decision === 'DECLINED'
-                              ? 'border-neutral-900 bg-neutral-900 text-white dark:border-neutral-100 dark:bg-neutral-100 dark:text-neutral-900'
-                              : 'border-[var(--border)]'
-                          }`}
-                        >
-                          Not today
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => decide(item.id, decision === 'CALL_ME' ? 'PENDING' : 'CALL_ME')}
-                          aria-pressed={decision === 'CALL_ME'}
-                          className={`touch-target rounded-xl border px-4 py-2.5 text-sm font-semibold ${
-                            decision === 'CALL_ME'
-                              ? 'border-sky-600 bg-sky-600 text-white'
-                              : 'border-[var(--border)]'
-                          }`}
-                        >
-                          Call me about this
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => decide(item.id, decision === 'ACCEPTED' ? 'PENDING' : 'ACCEPTED')}
-                          aria-pressed={decision === 'ACCEPTED'}
-                          className={`touch-target rounded-xl border px-5 py-2.5 text-sm font-bold ${
-                            decision === 'ACCEPTED'
-                              ? 'border-emerald-600 bg-emerald-600 text-white'
-                              : 'border-[var(--border)]'
-                          }`}
-                        >
-                          Yes
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          </section>
-        ))}
-
-        <p className="mt-6 text-xs leading-relaxed text-neutral-500">
-          Choosing here tells your advisor what you would like done — they will confirm the work and
-          the final price with you before anything starts. Prices are estimates until parts are
-          confirmed.
-        </p>
+          This screen used to render its own — header, coverage banner, cards,
+          and its own three answer buttons — which meant the tablet and the
+          phone link were two implementations of the one screen the product is
+          judged on. They had already drifted once. Now the paired tablet, the
+          link on a customer's phone and the advisor's own preview are the same
+          component with different shells around it, so a change to how a
+          customer is asked lands everywhere or nowhere.
+        */}
+        <ServiceMenu snapshot={snapshot} decisions={decisions} onDecide={decide} />
       </div>
 
+      {/*
+        The running total stays here rather than moving into the shared
+        component. The three surfaces genuinely differ at the bottom of the
+        screen: the tablet has no submit because the advisor is standing next
+        to it, the phone needs a name and a send button, and the advisor's
+        preview needs a way back out. Only the menu is the same.
+      */}
       <div className="fixed inset-x-0 bottom-0 border-t border-[var(--border)] bg-[var(--background)]/95 px-5 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-3xl items-baseline justify-between gap-4">
           <span className="text-sm font-semibold">
             You have said yes to {acceptedCount} of {snapshot.itemCount}
             {/*
               Counted separately and never folded into the total. A call-me is
-              not money on the ticket and showing it as such would be the
+              not money on the ticket, and showing it as such would be the
               advisor quietly counting a maybe as a yes.
             */}
             {callMeCount > 0 && (
@@ -344,14 +211,6 @@ export function Tablet() {
           <span className="text-3xl font-bold tabular-nums">{money(acceptedTotal)}</span>
         </div>
       </div>
-
-      {explaining?.explainerKey && explainerFor(explaining.explainerKey) && (
-        <ExplainerPlayer
-          explainer={explainerFor(explaining.explainerKey)!}
-          reading={explaining.reading}
-          onClose={() => setExplaining(null)}
-        />
-      )}
     </main>
   )
 }
