@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
+import { recordAudit } from '@/lib/audit/record'
 import { getSupabaseAdminClient } from '@/lib/supabase/admin'
 import { reviewExtraction } from './review'
 import { getVisionProvider } from './provider'
@@ -176,6 +177,34 @@ export async function confirmCapture(input: {
       reviewedAt: now,
     })
     .where(eq(schema.documentCaptures.id, input.captureId))
+
+    /*
+      Coverage arriving from a photograph, confirmed by a person.
+
+      This is the entry that matters most in this file: from here on the
+      coverage engine will answer "covered" for this vehicle on the strength of
+      four fields somebody read off an image and accepted. If a customer is
+      later told a repair is covered and the administrator disagrees, this row
+      is who accepted what, and when.
+    */
+    await recordAudit(db, {
+      action: 'CONTRACT_CONFIRMED',
+      entityType: 'contracts',
+      entityId: contractId,
+      storeId: input.storeId,
+      userId: input.reviewedByUserId,
+      changes: {
+        captureId: input.captureId,
+        vehicleId: input.vehicleId,
+        adminCompany: input.values.adminCompany,
+        productType: input.values.productType,
+        contractNumber: input.values.contractNumber,
+        expirationDate: input.values.expirationDate,
+        termMonths: input.values.termMonths,
+        termMiles: input.values.termMiles,
+        deductibleAmount: input.values.deductibleAmount,
+      },
+    })
 
   return { contractId }
   })

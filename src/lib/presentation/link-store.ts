@@ -3,6 +3,7 @@
 // server — it imports the privileged database client.
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+import { recordAudit } from '@/lib/audit/record'
 import { sanitizeDecisions, type Decision } from './decisions'
 import {
   createLinkToken, hashLinkToken, linkExpiryFrom, linkStatus,
@@ -155,19 +156,62 @@ export async function authoriseLinkSession(
   const session = await linkSessionFromToken(token, now)
   if (!session || session.status !== 'OPEN') return session
 
-  await getDb().update(schema.presentationSessions)
-    .set({
-      authorizedAt: now,
-      authorizedName: name.trim(),
-      authorizedSnapshot: {
-        snapshot: session.snapshot,
-        decisions: session.decisions,
+  /*
+    Privileged, and a transaction anyway.
+
+    The person doing this has no account — that is the whole point of a link
+    sent to a phone — so there is no session to scope to and `withUserScope`
+    has no subject to offer. The token is the authority, and it was checked
+    above.
+
+    The audit row goes in the same transaction as the authorisation it
+    describes, so the log cannot claim a customer confirmed something the
+    session does not show as authorised.
+  */
+  await getDb().transaction(async (tx) => {
+    await tx.update(schema.presentationSessions)
+      .set({
+        authorizedAt: now,
         authorizedName: name.trim(),
-        authorizedAt: now.toISOString(),
+        authorizedSnapshot: {
+          snapshot: session.snapshot,
+          decisions: session.decisions,
+          authorizedName: name.trim(),
+          authorizedAt: now.toISOString(),
+        },
+        lastActivityAt: now,
+      })
+      .where(eq(schema.presentationSessions.id, session.id))
+
+    /*
+      `userId` is null and must stay null. A customer authorised this, not a
+      member of staff, and attributing it to the advisor who sent the link
+      would be a false statement in the one record that exists to prevent them.
+
+      The name is what they typed, which is the point of the event. The token
+      is not here and never should be — it is a live bearer credential and this
+      table is append-only.
+    */
+    const items = session.snapshot.tiers.flatMap((t) => t.items)
+    const accepted = items.filter((i) => session.decisions[i.id] === 'ACCEPTED')
+
+    await recordAudit(tx, {
+      action: 'MENU_AUTHORISED',
+      entityType: 'presentation_sessions',
+      entityId: session.id,
+      storeId: session.storeId,
+      userId: null,
+      changes: {
+        authorizedName: name.trim(),
+        appointmentId: session.appointmentId,
+        itemsPresented: items.length,
+        itemsAccepted: accepted.length,
+        acceptedAmount: accepted
+          .filter((i) => i.priceConfirmed)
+          .reduce((s, i) => s + i.customerOutOfPocket, 0),
       },
-      lastActivityAt: now,
     })
-    .where(eq(schema.presentationSessions.id, session.id))
+  })
 
   return { ...session, status: 'AUTHORIZED', authorizedAt: now, authorizedName: name.trim() }
 }

@@ -8,6 +8,7 @@ import { nextRoNumberScoped } from '@/lib/advisor/load'
 import { requireUser } from '@/lib/auth/session'
 import { soldComponentGroups } from '@/lib/reconcile/sold-work'
 import { checkOdometer, overrideSummary, validateOverride } from '@/lib/odometer/check'
+import { recordAudit } from '@/lib/audit/record'
 
 export interface ActionState {
   ok?: boolean
@@ -269,6 +270,33 @@ export async function openRepairOrder(
         overrideAt: override ? now : null,
       })
 
+      /*
+        Only when an override actually happened. A normal reading is not an
+        event — every write-up records one, and a log where the interesting
+        row is one in five hundred is a log nobody scrolls through.
+
+        The reading row already carries the reason and the note; this is the
+        entry that puts it in one place with everything else somebody did,
+        which is where you look when the question is about a person rather
+        than about a vehicle.
+      */
+      if (override) {
+        await recordAudit(db, {
+          action: 'ODOMETER_ROLLBACK_OVERRIDDEN',
+          entityType: 'vehicles',
+          entityId: vehicleId,
+          storeId,
+          userId: user.id,
+          changes: {
+            previousMileage: lastReadingRow?.mileage ?? null,
+            enteredMileage: mileage,
+            reasonCode: override.reasonCode,
+            note: override.summary,
+            repairOrderId: ro.id,
+          },
+        })
+      }
+
       /**
        * The vehicle record follows the reading, including downwards.
        *
@@ -472,7 +500,9 @@ export async function closeRepairOrder(
 ): Promise<ActionState> {
   // A server action is a POST endpoint whether or not a page ever
   // rendered, so the guard belongs here and not only in the middleware.
-  await requireUser()
+  // Captured, not discarded: closing an RO is the money event, and the audit
+  // row is worth nothing without the person who did it.
+  const closedBy = await requireUser()
   const repairOrderId = String(formData.get('repairOrderId') ?? '')
   if (!repairOrderId) return { error: 'Missing repair order.' }
 
@@ -601,6 +631,28 @@ export async function closeRepairOrder(
         ) agg
         WHERE c.id = agg.customer_id
       `)
+
+      /*
+        The money event. Totals rather than line detail — the lines are still
+        on the RO and always will be, so copying them here would duplicate a
+        record that cannot drift while adding one that can.
+      */
+      await recordAudit(db, {
+        action: 'REPAIR_ORDER_CLOSED',
+        entityType: 'repair_orders',
+        entityId: repairOrderId,
+        storeId: ro.storeId,
+        userId: closedBy.id,
+        changes: {
+          roNumber: ro.roNumber,
+          customerPay: totals.customerPay.toFixed(2),
+          warranty: totals.warranty.toFixed(2),
+          internal: totals.internal.toFixed(2),
+          hoursSold: totals.hours.toFixed(2),
+          linesCompleted: billable.length,
+          declinesSettled: soldGroups.length,
+        },
+      })
 
       return { ok: true }
     })

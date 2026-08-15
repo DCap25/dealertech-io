@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { and, eq, isNull } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
+import { recordAudit } from '@/lib/audit/record'
 import { requireUser } from '@/lib/auth/session'
 import { isInvitableRole, normaliseEmail } from '@/lib/invites/invite'
 import { createInvitation } from '@/lib/invites/create'
@@ -89,6 +90,21 @@ export async function inviteStaff(
     invitedByUserId: user.id,
   })
 
+  /*
+    The address and role, never the token. The link is a bearer credential and
+    this table is append-only and permanent — a token written here stays valid
+    and readable for as long as the log does. `sanitiseChanges` would redact it
+    anyway; not passing it is the belt to that brace.
+  */
+  await withCurrentUserScope((db) => recordAudit(db, {
+    action: 'STAFF_INVITED',
+    entityType: 'store_invitations',
+    entityId: null,
+    storeId: user.storeId,
+    userId: user.id,
+    changes: { email, role },
+  }))
+
   revalidatePath('/team')
   return { link: `/invite/${token}`, invitedEmail: email }
 }
@@ -116,14 +132,25 @@ export async function removeStaff(
   const verdict = canRemove(await roster(user.storeId), user.id, targetUserId)
   if (!verdict.ok) return { error: verdict.reason }
 
-  await withCurrentUserScope((db) => db.update(schema.userStoreRoles)
-    .set({ isActive: false })
-    .where(and(
-      eq(schema.userStoreRoles.userId, targetUserId),
-      // Scoped to this store: a manager at one rooftop must not be able to
-      // remove somebody at another by posting their id.
-      eq(schema.userStoreRoles.storeId, user.storeId),
-    )))
+  await withCurrentUserScope(async (db) => {
+    await db.update(schema.userStoreRoles)
+      .set({ isActive: false })
+      .where(and(
+        eq(schema.userStoreRoles.userId, targetUserId),
+        // Scoped to this store: a manager at one rooftop must not be able to
+        // remove somebody at another by posting their id.
+        eq(schema.userStoreRoles.storeId, user.storeId),
+      ))
+
+    await recordAudit(db, {
+      action: 'STAFF_REMOVED',
+      entityType: 'user_store_roles',
+      entityId: targetUserId,
+      storeId: user.storeId,
+      userId: user.id,
+      changes: { isActive: { from: true, to: false } },
+    })
+  })
 
   revalidatePath('/team')
   return { ok: 'Removed. Their history stays on the repair orders they wrote.' }
@@ -140,12 +167,23 @@ export async function restoreStaff(
   const verdict = canRestore(await roster(user.storeId), user.id, targetUserId)
   if (!verdict.ok) return { error: verdict.reason }
 
-  await withCurrentUserScope((db) => db.update(schema.userStoreRoles)
-    .set({ isActive: true })
-    .where(and(
-      eq(schema.userStoreRoles.userId, targetUserId),
-      eq(schema.userStoreRoles.storeId, user.storeId),
-    )))
+  await withCurrentUserScope(async (db) => {
+    await db.update(schema.userStoreRoles)
+      .set({ isActive: true })
+      .where(and(
+        eq(schema.userStoreRoles.userId, targetUserId),
+        eq(schema.userStoreRoles.storeId, user.storeId),
+      ))
+
+    await recordAudit(db, {
+      action: 'STAFF_RESTORED',
+      entityType: 'user_store_roles',
+      entityId: targetUserId,
+      storeId: user.storeId,
+      userId: user.id,
+      changes: { isActive: { from: false, to: true } },
+    })
+  })
 
   revalidatePath('/team')
   return { ok: 'Back on the roster.' }
@@ -166,12 +204,31 @@ export async function changeRole(
   )
   if (!verdict.ok) return { error: verdict.reason }
 
-  await withCurrentUserScope((db) => db.update(schema.userStoreRoles)
-    .set({ role: nextRole })
-    .where(and(
-      eq(schema.userStoreRoles.userId, targetUserId),
-      eq(schema.userStoreRoles.storeId, user.storeId),
-    )))
+  const previousRole = (await roster(user.storeId))
+    .find((m) => m.userId === targetUserId)?.role ?? null
+
+  await withCurrentUserScope(async (db) => {
+    await db.update(schema.userStoreRoles)
+      .set({ role: nextRole })
+      .where(and(
+        eq(schema.userStoreRoles.userId, targetUserId),
+        eq(schema.userStoreRoles.storeId, user.storeId),
+      ))
+
+    /*
+      Both sides recorded. "Became a service manager" is only meaningful next
+      to what they were before it, and the row itself keeps no history — the
+      previous role is gone the moment this update lands.
+    */
+    await recordAudit(db, {
+      action: 'STAFF_ROLE_CHANGED',
+      entityType: 'user_store_roles',
+      entityId: targetUserId,
+      storeId: user.storeId,
+      userId: user.id,
+      changes: { role: { from: previousRole, to: nextRole } },
+    })
+  })
 
   revalidatePath('/team')
   return { ok: 'Role updated.' }
@@ -186,13 +243,23 @@ export async function revokeInvite(formData: FormData): Promise<void> {
 
   // Scoped to the caller's store, so an id from another dealership matches
   // nothing rather than revoking their invitation.
-  await withCurrentUserScope((db) => db.update(schema.storeInvitations)
-    .set({ revokedAt: new Date(), revokedByUserId: user.id })
-    .where(and(
-      eq(schema.storeInvitations.id, id),
-      eq(schema.storeInvitations.storeId, user.storeId),
-      isNull(schema.storeInvitations.acceptedAt),
-    )))
+  await withCurrentUserScope(async (db) => {
+    await db.update(schema.storeInvitations)
+      .set({ revokedAt: new Date(), revokedByUserId: user.id })
+      .where(and(
+        eq(schema.storeInvitations.id, id),
+        eq(schema.storeInvitations.storeId, user.storeId),
+        isNull(schema.storeInvitations.acceptedAt),
+      ))
+
+    await recordAudit(db, {
+      action: 'STAFF_INVITE_REVOKED',
+      entityType: 'store_invitations',
+      entityId: id,
+      storeId: user.storeId,
+      userId: user.id,
+    })
+  })
 
   revalidatePath('/team')
 }

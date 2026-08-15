@@ -2,6 +2,7 @@ import 'server-only'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
+import { recordAudit } from '@/lib/audit/record'
 import { idempotencyKey, type HandOffReceipt } from './handoff-record'
 import type { DmsPushResult, HandOffPayload } from './types'
 
@@ -73,7 +74,8 @@ export async function recordHandOff(input: {
   const key = idempotencyKey(input.payload)
   const status = input.result.ok ? 'SENT' : 'FAILED'
 
-  const [row] = await withCurrentUserScope((db) => db
+  const [row] = await withCurrentUserScope(async (db) => {
+    const inserted = await db
     .insert(schema.dmsHandoffs)
     .values({
       storeId: input.storeId,
@@ -105,7 +107,38 @@ export async function recordHandOff(input: {
         sentAt: input.result.ok ? now : null,
       },
     })
-    .returning())
+    .returning()
+
+    /*
+      What we told the DMS, and whether it took it.
+
+      Worth a row of its own even though dms_handoffs already stores the
+      payload: that table is keyed by idempotency and gets UPDATED on a retry,
+      so the attempt that failed at 8am is overwritten by the one that
+      succeeded at 9. The audit entry is per attempt and never changes, which
+      is what "we pushed this and it was rejected" needs to survive on.
+
+      Counts and refs only — the payload itself is on the hand-off row.
+    */
+    await recordAudit(db, {
+      action: 'DMS_HANDOFF_PUSHED',
+      entityType: 'dms_handoffs',
+      entityId: inserted[0]?.id ?? null,
+      storeId: input.storeId,
+      userId: input.advisorId,
+      changes: {
+        vendor: input.vendor,
+        appointmentId: input.appointmentId,
+        accepted: input.payload.accepted.length,
+        ok: input.result.ok,
+        writesPersisted: input.persisted,
+        externalRef: input.result.externalRef,
+        message: input.result.message,
+      },
+    })
+
+    return inserted
+  })
 
   return toReceipt(row!)
 }
