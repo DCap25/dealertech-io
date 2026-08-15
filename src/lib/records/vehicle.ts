@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { computeWarrantySnapshot, type WarrantySnapshot } from '@/lib/warranty'
+import { reconcileOdometer } from '@/lib/odometer/reconcile'
 import {
   predictWorstCorner, predictWear, TIRE_THRESHOLDS, BRAKE_THRESHOLDS,
   type InspectionSnapshot, type WearPrediction, type WearReading,
@@ -34,7 +35,16 @@ export interface VehicleRecord {
   isHybridOrEv: boolean
   licensePlate: string | null
   inServiceDate: Date | null
+  /**
+   * The odometer this record is reasoned from.
+   *
+   * Reconciled against the vehicle's own reading history, so it is not always
+   * the number on the vehicle row — see `odometerNote`, which is set precisely
+   * when the two disagree.
+   */
   currentMileage: number | null
+  /** Set when the vehicle row's odometer was contradicted by its own history. */
+  odometerNote: string | null
   avgMilesPerDay: number | null
 
   owner: { id: string; name: string; isOriginalOwner: boolean; soldByStore: boolean } | null
@@ -210,11 +220,38 @@ export async function loadVehicleRecord(
     }
   }
 
+  /**
+   * Reconcile the odometer before anything is decided from it.
+   *
+   * The same rule the drive uses, on stronger evidence: this page already loads
+   * the vehicle's whole reading series, so a stale odometer on the vehicle row
+   * is provable from the rows right next to it. Warranty is computed from the
+   * result, because a vehicle row reading 50,000 while its own readings show
+   * 92,000 would otherwise show factory coverage that expired 42,000 miles ago.
+   */
+  const odometer = reconcileOdometer(vehicle.currentMileage, [
+    ...mileageRows.map((m) => ({
+      mileage: m.mileage,
+      source: 'an odometer reading',
+      recordedAt: m.recordedAt,
+    })),
+    ...roRows.map((r) => ({
+      mileage: r.mileageOut ?? r.mileageIn ?? 0,
+      source: 'a closed repair order',
+      recordedAt: r.closedAt ?? r.openedAt,
+    })),
+    ...declineRows.map((d) => ({
+      mileage: d.mileageAtDecline ?? 0,
+      source: 'work declined at an earlier visit',
+      recordedAt: d.declinedAt,
+    })),
+  ])
+
   const warranty = computeWarrantySnapshot({
     make: vehicle.make,
     modelYear: vehicle.modelYear,
     inServiceDate: vehicle.inServiceDate ? new Date(vehicle.inServiceDate) : new Date(vehicle.modelYear, 0, 1),
-    currentMileage: vehicle.currentMileage ?? 0,
+    currentMileage: odometer.mileage,
     asOf,
     isOriginalOwner: ownership[0]?.isOriginalOwner ?? false,
     isHybridOrEv: vehicle.isHybridOrEv,
@@ -238,7 +275,8 @@ export async function loadVehicleRecord(
     isHybridOrEv: vehicle.isHybridOrEv,
     licensePlate: vehicle.licensePlate,
     inServiceDate: vehicle.inServiceDate ? new Date(vehicle.inServiceDate) : null,
-    currentMileage: vehicle.currentMileage,
+    currentMileage: odometer.mileage,
+    odometerNote: odometer.correction?.message ?? null,
     avgMilesPerDay,
 
     owner: owner

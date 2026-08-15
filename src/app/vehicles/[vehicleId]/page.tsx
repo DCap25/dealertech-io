@@ -183,6 +183,21 @@ export default async function VehiclePage({
         </div>
       )}
 
+      {/*
+        Says which odometer this page is reasoning from when that is not the one
+        on the vehicle row. Every warranty figure below is computed from it, so
+        correcting it silently would leave the page confidently telling someone
+        about coverage they may not have.
+      */}
+      {v.odometerNote && (
+        <div className="mt-5 rounded-lg border border-amber-400 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
+          <p className="text-xs font-bold uppercase tracking-widest text-amber-900 dark:text-amber-200">
+            Odometer on the vehicle record disagrees with its own history
+          </p>
+          <p className="mt-1 text-sm text-amber-950 dark:text-amber-100">{v.odometerNote}</p>
+        </div>
+      )}
+
       <div className="mt-6 grid gap-5 lg:grid-cols-[1fr_20rem]">
         <div className="space-y-5">
           <Panel title="Wear trends">
