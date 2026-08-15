@@ -11,7 +11,7 @@ import { getCurrentUser } from '@/lib/auth/session'
  * are not allowed reads as a broken promise. Managers get the extra link;
  * nobody else knows it exists.
  */
-export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up' | 'customers' | 'manager' | 'scorecard' }) {
+export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' }) {
   const user = await getCurrentUser()
   const isManager = user?.role === 'SERVICE_MANAGER' || user?.role === 'ADMIN'
 
@@ -23,6 +23,11 @@ export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up
     { key: 'follow-up', href: '/follow-up', label: 'Follow-ups' },
     { key: 'customers', href: '/customers', label: 'Customers' },
     { key: 'scorecard', href: '/advisor/scorecard', label: 'My scorecard' },
+    // Last, and managers only. Adding staff is a rare, deliberate act — it
+    // should not sit between two things an advisor uses every hour.
+    ...(isManager
+      ? [{ key: 'team' as const, href: '/team', label: 'Team' }]
+      : []),
   ]
 
   return (

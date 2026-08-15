@@ -13,6 +13,21 @@ const PUBLIC_PREFIXES = [
   '/auth', // callback + sign-out handlers
   '/demo', // the marketing demo surface
   /**
+   * Getting an account in the first place.
+   *
+   * Both are reached by definition without a session — a prospect starting a
+   * trial has none, and an advisor holding an invitation link does not have one
+   * yet either. Gating `/invite` was not a theoretical problem: deny-by-default
+   * silently turned every invitation into a redirect to a sign-in page for an
+   * account that does not exist, which is a dead end with no way out of it.
+   *
+   * Neither is unauthenticated in the sense of unguarded. `/signup` creates
+   * only a brand-new tenant, and `/invite/<token>` shows nothing without 32
+   * random bytes and grants only the role that was named when it was issued.
+   */
+  '/signup',
+  '/invite',
+  /**
    * The customer tablet. Not public in the sense of open — every action on
    * /api/device is authenticated by the device's own bearer token, and /present
    * shows nothing at all until a tablet has been claimed by an advisor.

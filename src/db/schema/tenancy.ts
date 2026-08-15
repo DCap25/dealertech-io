@@ -99,6 +99,40 @@ export const userStoreRoles = pgTable(
 )
 
 /**
+ * Staff invitations.
+ *
+ * A bearer credential: the link is enough to create an account with a named
+ * role at a named store. Only the token's SHA-256 is kept, so this table is
+ * useless to anyone who reads it — see `src/lib/invites/invite.ts`.
+ */
+export const storeInvitations = pgTable(
+  'store_invitations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    storeId: uuid('store_id').notNull().references(() => stores.id, { onDelete: 'cascade' }),
+
+    /** Lowercased. Checked on acceptance so a forwarded link is not silently redeemable. */
+    email: text('email').notNull(),
+    role: userRoleEnum('role').notNull(),
+    tokenHash: text('token_hash').notNull(),
+
+    invitedByUserId: uuid('invited_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    acceptedByUserId: uuid('accepted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedByUserId: uuid('revoked_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('store_invitations_token_hash').on(t.tokenHash),
+    index('store_invitations_store_idx').on(t.storeId, t.createdAt),
+  ],
+)
+
+/**
  * Append-only access log. Required under the FTC Safeguards Rule, which treats
  * dealerships as financial institutions and expects monitored access to
  * customer information.

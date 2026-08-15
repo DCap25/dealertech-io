@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest'
 import { isPublicPath, safeRedirect } from './routes'
 
 describe('isPublicPath', () => {
+  it('lets someone reach an invitation or a trial without an account', () => {
+    // Both are reached by definition with no session. Gating them turned every
+    // invitation link into a redirect to a sign-in page for an account that
+    // does not exist yet — a dead end with no way out.
+    expect(isPublicPath('/signup')).toBe(true)
+    expect(isPublicPath('/invite')).toBe(true)
+    expect(isPublicPath('/invite/J2wwmzr0HwYtP6lGL8gssSdFWq1ihxde')).toBe(true)
+  })
+
+  it('does not open anything that merely starts with those words', () => {
+    // Prefix matching on a bare startsWith would make /signups-report and
+    // /invitees public too.
+    expect(isPublicPath('/signup-admin')).toBe(false)
+    expect(isPublicPath('/invitees')).toBe(false)
+  })
+
   it('lets the marketing site and sign-in through', () => {
     expect(isPublicPath('/')).toBe(true)
     expect(isPublicPath('/login')).toBe(true)
