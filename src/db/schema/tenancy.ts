@@ -44,6 +44,20 @@ export const stores = pgTable(
     partsTaxRate: numeric('parts_tax_rate', { precision: 6, scale: 5 }).notNull().default('0'),
     laborTaxRate: numeric('labor_tax_rate', { precision: 6, scale: 5 }).notNull().default('0'),
 
+    /**
+     * How far a price may move after the customer authorised it before they
+     * have to be asked again.
+     *
+     * Both must be cleared for an increase to pass — either alone is a
+     * loophole. Defaults to zero and zero, meaning any real increase requires
+     * asking again, because the rule is state law and varies; a dealership
+     * sets these with their own advice.
+     */
+    reauthThresholdPercent: numeric('reauth_threshold_percent', { precision: 5, scale: 2 })
+      .notNull().default('0'),
+    reauthThresholdAmount: numeric('reauth_threshold_amount', { precision: 10, scale: 2 })
+      .notNull().default('0'),
+
     /** Quiet hours for outbound messaging, local time. TCPA safe harbour is 8am-9pm. */
     quietHoursStart: integer('quiet_hours_start').notNull().default(8),
     quietHoursEnd: integer('quiet_hours_end').notNull().default(21),

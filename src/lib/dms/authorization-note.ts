@@ -73,6 +73,40 @@ export function authorizationNote(
   ].join('\n')
 }
 
+/**
+ * The block that goes on when the price moved after they agreed.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS REPLACES THE AUTHORISATION RATHER THAN JOINING IT
+ * ---------------------------------------------------------------------------
+ * An authorisation block saying "$84 approved" on a ticket that now totals $95
+ * is not a partial truth, it is a false one — and it is false in the permanent
+ * record, in the customer's favour to dispute and the dealership's to lose. So
+ * when prices have drifted past what the store allows, the claim comes off
+ * entirely and this goes on instead.
+ *
+ * The hand-off itself still sends. An advisor needs to record the work
+ * somewhere, and refusing the whole push would leave them with nothing and a
+ * customer waiting.
+ */
+export function repriceWarningNote(input: {
+  authorisedTotal: number
+  currentTotal: number
+  increase: number
+  worst: { title: string; was: number; now: number } | null
+}): string {
+  return [
+    'PRICE CHANGED SINCE THE CUSTOMER AGREED — do not start this work',
+    `  They authorised ${money(input.authorisedTotal)}. It now totals ${money(input.currentTotal)},`,
+    `  an increase of ${money(input.increase)}.`,
+    ...(input.worst
+      ? [`  Largest movement: ${input.worst.title}, ${money(input.worst.was)} to ${money(input.worst.now)}.`]
+      : []),
+    '  The earlier authorisation does not cover this amount. Speak to the customer',
+    '  and record their answer before the work is carried out.',
+  ].join('\n')
+}
+
 /** Appends the authorisation block to a note, if there is one. */
 export function withAuthorization(
   note: string,

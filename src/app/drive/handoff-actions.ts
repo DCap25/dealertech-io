@@ -10,8 +10,9 @@ import {
   describeReceipt, provenanceNote, withProvenance,
   type DecisionSource, type HandOffReceipt,
 } from '@/lib/dms/handoff-record'
-import { withAuthorization } from '@/lib/dms/authorization-note'
-import { latestAuthorization } from '@/lib/presentation/link-store'
+import { repriceWarningNote, withAuthorization } from '@/lib/dms/authorization-note'
+import { latestAuthorization, repriceSinceAuthorisation } from '@/lib/presentation/link-store'
+import { needsReauthorisation } from '@/lib/presentation/reprice'
 import { existingSuccess, handoffsForAppointment, recordHandOff } from '@/lib/dms/handoff-store'
 import type { HandOffPayload } from '@/lib/dms/types'
 
@@ -99,7 +100,30 @@ export async function pushHandOffForVisit(
      * is no such presentation it is null and the note simply does not make the
      * claim. A client cannot assert it.
      */
-    const authorization = await latestAuthorization(store.id, appointmentId)
+    const claimed = await latestAuthorization(store.id, appointmentId)
+
+    /**
+     * Has the price moved since they agreed?
+     *
+     * Compared against the same lines on today's sheet. If it has drifted past
+     * what this store allows, the authorisation claim comes OFF the hand-off
+     * and a warning goes on in its place — "$84 approved" on a ticket that now
+     * totals $95 is false in the permanent record, and false in the direction
+     * that costs the dealership the argument.
+     *
+     * The push still goes. An advisor needs the work recorded somewhere, and
+     * refusing it entirely would leave them with nothing and a customer
+     * waiting.
+     */
+    const drift = await repriceSinceAuthorisation(
+      store.id,
+      appointmentId,
+      sheet.opportunities.map((o) => ({
+        id: o.id, title: o.title, customerPrice: o.customerOutOfPocket,
+      })),
+    )
+    const priceMoved = drift ? needsReauthorisation(drift) : false
+    const authorization = priceMoved ? null : claimed
 
     const safeSources: Record<string, DecisionSource> = {}
     for (const [id, value] of Object.entries(sources)) {
@@ -123,10 +147,28 @@ export async function pushHandOffForVisit(
 
     const payload: HandOffPayload = {
       ...built,
-      note: withAuthorization(
-        withProvenance(built.note, provenanceNote(safeSources, acceptedIds, deviceName)),
-        authorization,
-      ),
+      note: [
+        withAuthorization(
+          withProvenance(built.note, provenanceNote(safeSources, acceptedIds, deviceName)),
+          authorization,
+        ),
+        // Above nothing and below everything: it is the last thing read before
+        // somebody picks the ticket up and starts.
+        ...(priceMoved && drift
+          ? [repriceWarningNote({
+              authorisedTotal: drift.authorisedTotal,
+              currentTotal: drift.currentTotal,
+              increase: drift.increase,
+              worst: drift.increases[0]
+                ? {
+                    title: drift.increases[0].title,
+                    was: drift.increases[0].was,
+                    now: drift.increases[0].now,
+                  }
+                : null,
+            })]
+          : []),
+      ].join('\n\n'),
     }
 
     /**

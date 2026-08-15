@@ -9,6 +9,7 @@ import {
   type LinkStatus,
 } from './link'
 import type { DeviceSnapshot } from '@/lib/pairing/snapshot'
+import { comparePrices, type PricedLine, type RepriceReport } from './reprice'
 
 /**
  * Menu links: creating them, reading them, and recording what came back.
@@ -227,6 +228,75 @@ export async function latestAuthorization(
     channel: row.channel,
     authorisedAmount,
   }
+}
+
+/**
+ * Has anything moved since the customer said yes?
+ *
+ * Compares the frozen authorised prices against what the same lines cost on
+ * today's sheet. Returns null when there is no authorisation to compare
+ * against — an advisor who recorded the answers themselves has nobody's
+ * agreement to have broken.
+ *
+ * The threshold comes from the store, because the rule is state law and
+ * varies. Its default is strict.
+ */
+export async function repriceSinceAuthorisation(
+  storeId: string,
+  appointmentId: string,
+  currentLines: PricedLine[],
+): Promise<RepriceReport | null> {
+  const db = getDb()
+
+  const [row] = await db
+    .select({
+      authorizedAt: schema.presentationSessions.authorizedAt,
+      authorizedSnapshot: schema.presentationSessions.authorizedSnapshot,
+    })
+    .from(schema.presentationSessions)
+    .where(and(
+      eq(schema.presentationSessions.storeId, storeId),
+      eq(schema.presentationSessions.appointmentId, appointmentId),
+      sql`${schema.presentationSessions.authorizedAt} is not null`,
+    ))
+    .orderBy(desc(schema.presentationSessions.authorizedAt))
+    .limit(1)
+
+  if (!row?.authorizedAt) return null
+
+  const frozen = row.authorizedSnapshot as {
+    snapshot?: DeviceSnapshot
+    decisions?: Record<string, string>
+  } | null
+
+  const decisions = frozen?.decisions ?? {}
+  /*
+    Only what they actually approved.
+
+    A line they declined or asked to be called about was never agreed to at any
+    price, so its price moving is not a broken agreement — it is just a
+    different number on a recommendation nobody accepted.
+  */
+  const authorisedLines: PricedLine[] = (frozen?.snapshot?.tiers ?? [])
+    .flatMap((t) => t.items)
+    .filter((i) => decisions[i.id] === 'ACCEPTED')
+    .map((i) => ({ id: i.id, title: i.title, customerPrice: i.customerOutOfPocket }))
+
+  if (authorisedLines.length === 0) return null
+
+  const [store] = await db
+    .select({
+      percent: schema.stores.reauthThresholdPercent,
+      amount: schema.stores.reauthThresholdAmount,
+    })
+    .from(schema.stores)
+    .where(eq(schema.stores.id, storeId))
+    .limit(1)
+
+  return comparePrices(authorisedLines, currentLines, {
+    percent: Number(store?.percent ?? 0),
+    amount: Number(store?.amount ?? 0),
+  })
 }
 
 /** Every presentation on a visit, oldest first. What the advisor view reads. */
