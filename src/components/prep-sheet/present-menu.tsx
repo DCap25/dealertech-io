@@ -66,7 +66,11 @@ export function PresentMenu({
 
   const shown = menu.items.map((i) => i.opportunity)
   const accepted = shown.filter((o) => decisions[o.id] === 'ACCEPTED')
-  const acceptedTotal = accepted.reduce((s, o) => s + o.customerOutOfPocket, 0)
+  // Unpriced lines count as chosen but add nothing — we do not know what they
+  // cost, which is why the customer is shown "price to be confirmed".
+  const acceptedTotal = accepted
+    .filter((o) => o.priceSource !== 'ESTIMATE')
+    .reduce((s, o) => s + o.customerOutOfPocket, 0)
   const customerTotal = menu.customerTotal
   const coveredTotal = menu.coveredTotal
 
@@ -155,14 +159,30 @@ export function PresentMenu({
                             </div>
                           )}
                         </div>
+                        {/*
+                          No number where the dealership has no price on file.
+                          This screen gets physically turned around, so it is
+                          as customer-facing as the tablet.
+                        */}
                         <div className="shrink-0 text-right">
-                          <p className="text-2xl font-bold tabular-nums">
-                            {o.customerOutOfPocket === 0 ? 'No charge' : money(o.customerOutOfPocket)}
-                          </p>
-                          {savings > 0 && (
-                            <p className="text-sm text-neutral-500 line-through tabular-nums">
-                              {money(o.estimatedAmount)}
-                            </p>
+                          {o.priceSource === 'ESTIMATE' ? (
+                            <>
+                              <p className="text-lg font-bold">Price to be confirmed</p>
+                              <p className="text-sm text-neutral-500">
+                                Your advisor will tell you before any work starts
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-2xl font-bold tabular-nums">
+                                {o.customerOutOfPocket === 0 ? 'No charge' : money(o.customerOutOfPocket)}
+                              </p>
+                              {savings > 0 && (
+                                <p className="text-sm text-neutral-500 line-through tabular-nums">
+                                  {money(o.estimatedAmount)}
+                                </p>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>

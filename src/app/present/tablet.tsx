@@ -162,9 +162,11 @@ export function Tablet() {
 
   const { snapshot } = state
   const decisions = { ...state.decisions, ...pending }
+  // An unpriced line adds nothing: we do not know what it costs, which is why
+  // it reads "price to be confirmed" rather than carrying our estimate.
   const acceptedTotal = snapshot.tiers
     .flatMap((t) => t.items)
-    .filter((i) => decisions[i.id] === 'ACCEPTED')
+    .filter((i) => decisions[i.id] === 'ACCEPTED' && i.priceConfirmed !== false)
     .reduce((s, i) => s + i.customerOutOfPocket, 0)
   const acceptedCount = Object.values(decisions).filter((d) => d === 'ACCEPTED').length
   const callMeCount = Object.values(decisions).filter((d) => d === 'CALL_ME').length

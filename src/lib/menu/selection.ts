@@ -114,6 +114,20 @@ export function defaultSelection(
   const items = presentableItems(opportunities)
     .filter((i) => !skipped.has(i.opportunity.id))
     .filter((i) => !i.opportunity.unverified)
+    /*
+      Nothing the dealership cannot bill at that price.
+
+      A price the store has no op code for is our estimate, and the whole
+      reason the price book is pulled every morning is that we must not quote a
+      number the DMS will not charge. Showing a customer $84 and invoicing $106
+      is the argument this product exists to prevent, and it does not matter
+      that our figure was reasonable.
+
+      The recommendation is not thrown away — it stays on the advisor's sheet,
+      marked, so they can map the op code or price it themselves. It simply
+      does not go in front of a customer as a number by default.
+    */
+    .filter((i) => i.opportunity.priceSource !== 'ESTIMATE')
 
   // Ranked the way the prep sheet ranked them, tier first. The engine already
   // decided what matters most; the advisor is editing that, not redoing it.
@@ -203,11 +217,22 @@ export function buildMenu(
     tiers,
     items,
     excluded,
-    customerTotal: items.reduce((s, i) => s + i.opportunity.customerOutOfPocket, 0),
-    coveredTotal: items.reduce(
-      (s, i) => s + Math.max(0, i.opportunity.estimatedAmount - i.opportunity.customerOutOfPocket),
-      0,
-    ),
+    /*
+      Totals count only what the dealership can actually bill at that price.
+
+      An item priced from our own estimate reads "price to be confirmed" to the
+      customer, so adding our figure into the total underneath it would put the
+      unhonourable number straight back on the screen by another route.
+    */
+    customerTotal: items
+      .filter((i) => i.opportunity.priceSource !== 'ESTIMATE')
+      .reduce((s, i) => s + i.opportunity.customerOutOfPocket, 0),
+    coveredTotal: items
+      .filter((i) => i.opportunity.priceSource !== 'ESTIMATE')
+      .reduce(
+        (s, i) => s + Math.max(0, i.opportunity.estimatedAmount - i.opportunity.customerOutOfPocket),
+        0,
+      ),
     isEmpty: items.length === 0,
   }
 }

@@ -96,15 +96,26 @@ export function PrintableMenu({
                       <p className="font-bold">{o.title}</p>
                       <p className="text-[9pt] leading-snug">{customerDetail(o)}</p>
                     </td>
+                    {/*
+                      A printed price is the hardest to walk back — the
+                      customer keeps the paper. Where the dealership has no
+                      price on file, it says so rather than printing ours.
+                    */}
                     <td className="py-2 text-right align-top tabular-nums">
-                      <p className="font-bold">
-                        {o.customerOutOfPocket === 0 ? 'No charge' : money(o.customerOutOfPocket)}
-                      </p>
-                      {savings > 0 && (
-                        <p className="text-[9pt]">
-                          <span className="line-through">{money(o.estimatedAmount)}</span> before
-                          coverage
-                        </p>
+                      {o.priceSource === 'ESTIMATE' ? (
+                        <p className="font-bold">Price to be confirmed</p>
+                      ) : (
+                        <>
+                          <p className="font-bold">
+                            {o.customerOutOfPocket === 0 ? 'No charge' : money(o.customerOutOfPocket)}
+                          </p>
+                          {savings > 0 && (
+                            <p className="text-[9pt]">
+                              <span className="line-through">{money(o.estimatedAmount)}</span> before
+                              coverage
+                            </p>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>

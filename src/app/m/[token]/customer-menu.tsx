@@ -31,8 +31,18 @@ export function CustomerMenu({
   const [, startSaving] = useTransition()
   const [state, formAction, pending] = useActionState(authorise, INITIAL)
 
+  /*
+    An unpriced line counts as answered but adds nothing to the total.
+
+    We do not know what it costs — that is the whole reason it says "price to
+    be confirmed" — so adding our estimate into the running figure would put
+    the same unhonourable number back on screen by another route.
+  */
   const items = snapshot.tiers.flatMap((t) =>
-    t.items.map((i) => ({ id: i.id, customerPrice: i.customerOutOfPocket })))
+    t.items.map((i) => ({
+      id: i.id,
+      customerPrice: i.priceConfirmed === false ? 0 : i.customerOutOfPocket,
+    })))
   const totals = totalDecisions(items, decisions)
   const answered = totals.accepted + totals.declined + totals.callMe
   const isDone = Boolean(authorized) || state.done

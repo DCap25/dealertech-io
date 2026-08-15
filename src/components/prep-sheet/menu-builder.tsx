@@ -145,12 +145,31 @@ export function MenuBuilder({
                           <div className="min-w-0 flex-1">
                             <p className="font-bold leading-snug">{o.title}</p>
                             <p className="mt-0.5 text-xs text-neutral-500">{customerDetail(o)}</p>
+                            {/*
+                              Said on the advisor's side only, and only when it
+                              is a problem. A price the store has no op code for
+                              is our estimate, and quoting a number the DMS will
+                              not charge is what the morning price pull exists to
+                              prevent — so it stays off the customer menu until
+                              somebody maps the code.
+                            */}
+                            {o.priceSource === 'ESTIMATE' && (
+                              <p className="mt-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                                No op code for this — the figure is our estimate, not your price.
+                                Map it before quoting.
+                              </p>
+                            )}
                           </div>
 
                           <div className="shrink-0 text-right">
                             <p className="font-bold tabular-nums">
                               {o.customerOutOfPocket === 0 ? 'No charge' : money(o.customerOutOfPocket)}
                             </p>
+                            {o.priceSource === 'ESTIMATE' && (
+                              <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                                estimate
+                              </p>
+                            )}
                             {on && (
                               <div className="mt-1.5 flex justify-end gap-1">
                                 <button

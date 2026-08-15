@@ -39,6 +39,18 @@ export interface DeviceItem {
   explainerKey: string | null
   /** This vehicle's own measurement, if one was taken. */
   reading: Reading | null
+  /**
+   * False when the dealership has no op code for this and the figure is our
+   * estimate.
+   *
+   * The customer is shown "price to be confirmed" rather than the number. We
+   * pull the store's price book every morning precisely so a quoted price is
+   * one the DMS will honour, and showing $84 against an invoice of $106 is the
+   * argument this product exists to prevent. An unpriced line reaching a
+   * customer at all takes a deliberate tick from the advisor; it must not also
+   * carry a number nobody can stand behind.
+   */
+  priceConfirmed: boolean
 }
 
 export interface DeviceTier {
@@ -103,6 +115,7 @@ export function buildDeviceSnapshot(
           detail: customerDetail(o),
           customerOutOfPocket: o.customerOutOfPocket,
           fullAmount: o.estimatedAmount,
+          priceConfirmed: o.priceSource !== 'ESTIMATE',
           badges: easyYesReasons(o)
             .filter((r) => r.tone === 'COVERED' || r.tone === 'SAFETY')
             .map((r) => ({ label: r.label, tone: r.tone as 'COVERED' | 'SAFETY' })),

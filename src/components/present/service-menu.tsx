@@ -130,13 +130,34 @@ export function ServiceMenu({
                       )}
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-2xl font-bold tabular-nums">
-                        {item.customerOutOfPocket === 0 ? 'No charge' : money(item.customerOutOfPocket)}
-                      </p>
-                      {savings > 0 && (
-                        <p className="text-sm text-neutral-500 line-through tabular-nums">
-                          {money(item.fullAmount)}
-                        </p>
+                      {/*
+                        No number when the dealership has no price on file.
+
+                        The price book is pulled every morning so that what a
+                        customer is quoted is what the invoice will say. Where
+                        we do not have that, saying so is the only honest
+                        option — showing our estimate and billing something
+                        else is precisely the experience this product exists to
+                        replace.
+                      */}
+                      {item.priceConfirmed === false ? (
+                        <>
+                          <p className="text-lg font-bold">Price to be confirmed</p>
+                          <p className="text-sm text-neutral-500">
+                            Your advisor will tell you before any work starts
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-2xl font-bold tabular-nums">
+                            {item.customerOutOfPocket === 0 ? 'No charge' : money(item.customerOutOfPocket)}
+                          </p>
+                          {savings > 0 && (
+                            <p className="text-sm text-neutral-500 line-through tabular-nums">
+                              {money(item.fullAmount)}
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>

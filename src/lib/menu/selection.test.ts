@@ -66,6 +66,28 @@ describe('defaultSelection', () => {
     expect(selection.includedIds).toEqual(['safety', 'high', 'high2', 'low'])
   })
 
+  it('keeps a price the dealership cannot bill off the customer menu', () => {
+    // The reason the price book is pulled every morning: quoting $84 and
+    // invoicing $106 is the argument this product exists to prevent, and it
+    // does not matter that our estimate was reasonable.
+    const unpriced = opp({ id: 'guessed', urgency: 'HIGH', priceSource: 'ESTIMATE' })
+    const selection = defaultSelection([...ALL, unpriced])
+    expect(selection.includedIds).not.toContain('guessed')
+  })
+
+  it('keeps a price that came from the store', () => {
+    const priced = opp({ id: 'real', urgency: 'HIGH', priceSource: 'STORE' })
+    expect(defaultSelection([priced]).includedIds).toContain('real')
+  })
+
+  it('does not exclude items from an integration with no price book at all', () => {
+    // priceSource is absent when nothing was resolved either way. Treating
+    // that as "unpriced" would empty the menu on every integration that has
+    // no price book endpoint.
+    const noBook = opp({ id: 'nobook', urgency: 'HIGH' })
+    expect(defaultSelection([noBook]).includedIds).toContain('nobook')
+  })
+
   it('still offers them in the builder for the advisor to tick', () => {
     // Off by default is not hidden. The advisor sees it, asks the customer,
     // and adds it — which is the conversation the flag exists to force.
