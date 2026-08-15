@@ -19,9 +19,10 @@ export async function generateMetadata({
   params: Promise<{ vehicleId: string }>
 }) {
   const { vehicleId } = await params
+  const user = await requireUser()
   const store = await getCurrentStore()
   if (!store) return { title: 'Vehicle' }
-  const record = await loadVehicleRecord(store.id, vehicleId, AS_OF())
+  const record = await loadVehicleRecord(user.id, store.id, vehicleId, AS_OF())
   return { title: record ? `${record.label}` : 'Vehicle' }
 }
 
@@ -118,12 +119,12 @@ export default async function VehiclePage({
   // Enforced here, not only in the middleware. The middleware is a separate
   // deploy artifact on the host, and this page must not serve a dealership
   // to an anonymous request even if it never runs.
-  await requireUser()
+  const user = await requireUser()
   const { vehicleId } = await params
   const store = await getCurrentStore()
   if (!store) notFound()
 
-  const v = await loadVehicleRecord(store.id, vehicleId, AS_OF())
+  const v = await loadVehicleRecord(user.id, store.id, vehicleId, AS_OF())
   if (!v) notFound()
 
   const terms = [v.warranty.basic, v.warranty.powertrain, v.warranty.emissionsLong,

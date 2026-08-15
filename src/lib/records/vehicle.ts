@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { computeWarrantySnapshot, type WarrantySnapshot } from '@/lib/warranty'
 import { reconcileOdometer } from '@/lib/odometer/reconcile'
+import { withUserScope } from '@/db/scoped'
 import {
   predictWorstCorner, predictWear, TIRE_THRESHOLDS, BRAKE_THRESHOLDS,
   type InspectionSnapshot, type WearPrediction, type WearReading,
@@ -116,12 +117,33 @@ export interface VehicleRecord {
   mileageHistory: { mileage: number; recordedAt: Date }[]
 }
 
+/**
+ * One vehicle, everything known about it.
+ *
+ * Runs under the signed-in user's row-level security rather than the
+ * privileged connection. The `storeId` filters below are still there and still
+ * correct — RLS is underneath them, so a future edit that drops one returns
+ * nothing instead of another dealership's vehicle.
+ *
+ * The queries below are written with Promise.all and now share one connection,
+ * so they run in sequence. That is the cost of the guarantee; on a record page
+ * it is worth it.
+ */
 export async function loadVehicleRecord(
+  userId: string,
   storeId: string,
   vehicleId: string,
   asOf: Date = new Date(),
 ): Promise<VehicleRecord | null> {
-  const db = getDb()
+  return withUserScope(userId, (db) => loadWithin(db, storeId, vehicleId, asOf))
+}
+
+async function loadWithin(
+  db: Parameters<Parameters<typeof withUserScope>[1]>[0],
+  storeId: string,
+  vehicleId: string,
+  asOf: Date,
+): Promise<VehicleRecord | null> {
 
   const [vehicle] = await db
     .select()
