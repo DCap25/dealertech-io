@@ -2,6 +2,9 @@ import { buildMenu, TIER_COPY, type MenuSelection } from '@/lib/menu/selection'
 import { customerDetail, easyYesReasons } from '@/lib/prep-sheet/presentation'
 import { explainerFor, worstReadingFor, type Reading } from '@/lib/explainer'
 import type { PrepSheet } from '@/lib/prep-sheet'
+import {
+  sanitizeDecisions as sanitizeAnswers, type Decision,
+} from '@/lib/presentation/decisions'
 
 /**
  * What actually travels to a customer tablet.
@@ -111,7 +114,14 @@ export function buildDeviceSnapshot(
   }
 }
 
-export type DeviceDecision = 'ACCEPTED' | 'DECLINED' | 'PENDING'
+/**
+ * The answers a customer can give.
+ *
+ * Re-exported from the presentation module so the tablet and a link-delivered
+ * menu cannot drift apart on what an answer even is — they are the same
+ * conversation arriving by different routes.
+ */
+export type DeviceDecision = Decision
 
 /**
  * Decisions coming back from a tablet.
@@ -125,16 +135,8 @@ export function sanitizeDecisions(
   snapshot: DeviceSnapshot,
   incoming: unknown,
 ): Record<string, DeviceDecision> {
-  const allowed = new Set(snapshot.tiers.flatMap((t) => t.items.map((i) => i.id)))
-  const out: Record<string, DeviceDecision> = {}
-
-  if (!incoming || typeof incoming !== 'object') return out
-
-  for (const [id, value] of Object.entries(incoming as Record<string, unknown>)) {
-    if (!allowed.has(id)) continue
-    if (value === 'ACCEPTED' || value === 'DECLINED' || value === 'PENDING') {
-      out[id] = value
-    }
-  }
-  return out
+  return sanitizeAnswers(
+    snapshot.tiers.flatMap((t) => t.items.map((i) => i.id)),
+    incoming,
+  )
 }

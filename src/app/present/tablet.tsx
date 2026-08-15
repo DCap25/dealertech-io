@@ -167,6 +167,7 @@ export function Tablet() {
     .filter((i) => decisions[i.id] === 'ACCEPTED')
     .reduce((s, i) => s + i.customerOutOfPocket, 0)
   const acceptedCount = Object.values(decisions).filter((d) => d === 'ACCEPTED').length
+  const callMeCount = Object.values(decisions).filter((d) => d === 'CALL_ME').length
 
   return (
     <main className="min-h-dvh bg-[var(--background)] pb-32">
@@ -207,9 +208,11 @@ export function Tablet() {
                     className={`rounded-2xl border border-l-4 p-5 ${TIER_ACCENT[group.tier]} ${
                       decision === 'ACCEPTED'
                         ? 'border-emerald-400 bg-emerald-50/60 dark:border-emerald-700 dark:bg-emerald-950/40'
-                        : decision === 'DECLINED'
-                          ? 'border-[var(--border)] bg-[var(--surface-muted)] opacity-70'
-                          : 'border-[var(--border)] bg-[var(--surface)]'
+                        : decision === 'CALL_ME'
+                          ? 'border-sky-400 bg-sky-50/60 dark:border-sky-700 dark:bg-sky-950/40'
+                          : decision === 'DECLINED'
+                            ? 'border-[var(--border)] bg-[var(--surface-muted)] opacity-70'
+                            : 'border-[var(--border)] bg-[var(--surface)]'
                     }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -257,7 +260,18 @@ export function Tablet() {
                           <span aria-hidden>▶</span> Show me why
                         </button>
                       )}
-                      <div className="ml-auto flex gap-2">
+                      {/*
+                        Three answers, and "not today" sits first and looks
+                        exactly as tappable as "yes".
+
+                        This is the screen the whole product is judged on. A
+                        customer who arrives expecting to be talked into
+                        something reads a buried decline instantly, and once
+                        they have read it they discount the brake warning too.
+                        The middle option is the one they actually want most
+                        often and no menu ever offers.
+                      */}
+                      <div className="ml-auto flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => decide(item.id, decision === 'DECLINED' ? 'PENDING' : 'DECLINED')}
@@ -269,6 +283,18 @@ export function Tablet() {
                           }`}
                         >
                           Not today
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => decide(item.id, decision === 'CALL_ME' ? 'PENDING' : 'CALL_ME')}
+                          aria-pressed={decision === 'CALL_ME'}
+                          className={`touch-target rounded-xl border px-4 py-2.5 text-sm font-semibold ${
+                            decision === 'CALL_ME'
+                              ? 'border-sky-600 bg-sky-600 text-white'
+                              : 'border-[var(--border)]'
+                          }`}
+                        >
+                          Call me about this
                         </button>
                         <button
                           type="button"
@@ -302,6 +328,16 @@ export function Tablet() {
         <div className="mx-auto flex max-w-3xl items-baseline justify-between gap-4">
           <span className="text-sm font-semibold">
             You have said yes to {acceptedCount} of {snapshot.itemCount}
+            {/*
+              Counted separately and never folded into the total. A call-me is
+              not money on the ticket and showing it as such would be the
+              advisor quietly counting a maybe as a yes.
+            */}
+            {callMeCount > 0 && (
+              <span className="ml-2 font-normal text-sky-700 dark:text-sky-400">
+                · {callMeCount} to talk through
+              </span>
+            )}
           </span>
           <span className="text-3xl font-bold tabular-nums">{money(acceptedTotal)}</span>
         </div>

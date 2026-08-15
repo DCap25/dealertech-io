@@ -1,4 +1,6 @@
-import { pgEnum, pgTable, uuid, text, timestamp, jsonb, index, unique } from 'drizzle-orm/pg-core'
+import {
+  pgEnum, pgTable, uuid, text, timestamp, jsonb, index, integer, unique,
+} from 'drizzle-orm/pg-core'
 import { stores, users } from './tenancy'
 import { appointments } from './service'
 
@@ -65,9 +67,24 @@ export const presentationSessions = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     storeId: uuid('store_id').notNull().references(() => stores.id, { onDelete: 'cascade' }),
-    deviceId: uuid('device_id').notNull().references(() => pairedDevices.id, { onDelete: 'cascade' }),
+    /** Null for a link presentation — those belong to a person, not a device. */
+    deviceId: uuid('device_id').references(() => pairedDevices.id, { onDelete: 'cascade' }),
     appointmentId: uuid('appointment_id').references(() => appointments.id, { onDelete: 'set null' }),
     advisorId: uuid('advisor_id').references(() => users.id, { onDelete: 'set null' }),
+
+    /** TABLET | LINK | PRINT. How this menu reached the customer. */
+    channel: text('channel').notNull().default('TABLET'),
+    /**
+     * Which conversation this was on the visit.
+     *
+     * 1 at write-up, 2 after the technician's inspection. A visit has more
+     * than one, and the second is where most of the money is.
+     */
+    sequence: integer('sequence').notNull().default(1),
+
+    /** SHA-256 only. The link shows a customer's history and prices. */
+    accessTokenHash: text('access_token_hash'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
 
     /**
      * The frozen menu the advisor approved, already stripped of everything a
@@ -84,9 +101,25 @@ export const presentationSessions = pgTable(
     /** Bumped on every customer tap, so the advisor can see they are engaged. */
     lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp('ended_at', { withTimezone: true }),
+
+    /**
+     * The authorisation record.
+     *
+     * What was shown, at what price, what they answered, and when — frozen at
+     * the moment they authorised it, while `decisions` above keeps moving.
+     *
+     * Deliberately narrow about what it claims. This is evidence of the
+     * conversation, not a replacement for the repair order the dealership
+     * prints and the DMS owns. Two authorisation artifacts that can disagree
+     * would be worse than one.
+     */
+    authorizedAt: timestamp('authorized_at', { withTimezone: true }),
+    authorizedName: text('authorized_name'),
+    authorizedSnapshot: jsonb('authorized_snapshot'),
   },
   (t) => [
     index('presentation_sessions_device_idx').on(t.deviceId, t.status),
     index('presentation_sessions_store_idx').on(t.storeId, t.status, t.startedAt),
+    index('presentation_sessions_visit_idx').on(t.appointmentId, t.sequence),
   ],
 )
