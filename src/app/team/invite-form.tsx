@@ -87,7 +87,9 @@ export function InviteForm({ origin }: { origin: string }) {
               onClick={() => {
                 void navigator.clipboard.writeText(fullLink).then(() => setCopied(true))
               }}
-              className="shrink-0 rounded-md bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 dark:bg-emerald-200 dark:text-emerald-950"
+              // Primary-button treatment rather than a deep tint of the panel
+              // colour, which has twice rendered as invisible white-on-pale.
+              className="shrink-0 rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-neutral-700 dark:bg-white dark:text-neutral-900"
             >
               {copied ? 'Copied' : 'Copy'}
             </button>
