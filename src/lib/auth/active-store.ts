@@ -11,7 +11,29 @@
  * plumbing stays where it belongs.
  */
 
-export type StaffRole = 'ADVISOR' | 'BDC' | 'SERVICE_MANAGER' | 'TECHNICIAN' | 'ADMIN'
+/**
+ * Every role the database can actually hold.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS LIST IS THE FULL ONE
+ * ---------------------------------------------------------------------------
+ * It used to name five of the nine values in the `user_role` enum, and the
+ * session cast rows to it — which meant a FIXED_OPS_DIRECTOR, DISPATCHER,
+ * PARTS or CASHIER account carried a role string the type said was impossible.
+ *
+ * That was not harmless. It made `user.role === 'FIXED_OPS_DIRECTOR'` a
+ * compile error, so `WorkspaceNav` could not express the check it wanted and
+ * approximated it as "service manager or admin" instead. The result: a fixed
+ * ops director — often the only manager-ish account at a rooftop in a group —
+ * could open /team and /manager but saw no links to either. A narrow type
+ * produced a real navigation bug by making the correct code unwritable.
+ *
+ * Kept in step with `user_role` in src/db/schema/enums.ts and with the wider
+ * list in src/lib/team/roster.ts.
+ */
+export type StaffRole =
+  | 'ADVISOR' | 'BDC' | 'TECHNICIAN' | 'DISPATCHER' | 'PARTS' | 'CASHIER'
+  | 'SERVICE_MANAGER' | 'FIXED_OPS_DIRECTOR' | 'ADMIN'
 
 /** One rooftop this person works at, and what they are there. */
 export interface StoreMembership {

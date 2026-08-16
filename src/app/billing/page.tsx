@@ -1,5 +1,5 @@
-import Link from 'next/link'
 import { and, count, eq } from 'drizzle-orm'
+import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { requireUser } from '@/lib/auth/session'
@@ -94,9 +94,9 @@ export default async function BillingPage({
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
-      <Link href="/drive" className="text-sm text-neutral-500 hover:underline">
-        ← Today&rsquo;s drive
-      </Link>
+      <div className="flex justify-end">
+        <WorkspaceNav current="billing" />
+      </div>
 
       <h1 className="mt-3 text-3xl font-bold tracking-tight">Billing</h1>
       <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">

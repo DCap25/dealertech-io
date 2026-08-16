@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { UserBadge } from '@/components/auth/user-badge'
 import { StoreSwitcher } from '@/components/auth/store-switcher'
 import { getCurrentUser } from '@/lib/auth/session'
+import { canManageStaff } from '@/lib/team/roster'
 
 /**
  * The links across the top of every workspace surface.
@@ -11,9 +12,17 @@ import { getCurrentUser } from '@/lib/auth/session'
  * are not allowed reads as a broken promise. Managers get the extra link;
  * nobody else knows it exists.
  */
-export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' }) {
+export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' | 'billing' }) {
   const user = await getCurrentUser()
-  const isManager = user?.role === 'SERVICE_MANAGER' || user?.role === 'ADMIN'
+  /*
+    The same predicate the pages and the actions use.
+
+    Hand-rolled as `SERVICE_MANAGER || ADMIN` until now, which quietly omitted
+    FIXED_OPS_DIRECTOR — so the one account a dealer group often has at a
+    rooftop could reach /team and /manager and saw no links to either. The nav
+    and the page it links to must not disagree about who counts as a manager.
+  */
+  const isManager = user ? canManageStaff(user.role) : false
 
   const links: { key: NonNullable<typeof current>; href: string; label: string }[] = [
     { key: 'drive', href: '/drive', label: 'Today’s drive' },
@@ -26,7 +35,17 @@ export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up
     // Last, and managers only. Adding staff is a rare, deliberate act — it
     // should not sit between two things an advisor uses every hour.
     ...(isManager
-      ? [{ key: 'team' as const, href: '/team', label: 'Team' }]
+      ? [
+          { key: 'team' as const, href: '/team', label: 'Team' },
+          /*
+            Billing sits at the very end, and only for the people who can act
+            on it. An advisor has no business seeing what the dealership pays,
+            and a link they can open only to be told they may not change
+            anything reads as a broken promise — the same argument that keeps
+            "Department" off their nav.
+          */
+          { key: 'billing' as const, href: '/billing', label: 'Billing' },
+        ]
       : []),
   ]
 
