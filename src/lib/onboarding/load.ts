@@ -1,6 +1,6 @@
 import 'server-only'
 import { and, count, eq, inArray, isNull, min } from 'drizzle-orm'
-import { schema } from '@/db/client'
+import { getDb, schema } from '@/db/client'
 import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import { progress, type OnboardingProgress, type StoreSignals } from './steps'
 
@@ -117,5 +117,109 @@ export async function loadProgress(storeId: string): Promise<OnboardingProgress 
   return withCurrentUserScope(async (db) => {
     const signals = await loadSignals(db, storeId)
     return signals ? progress(signals) : null
+  })
+}
+
+/**
+ * The same checklist, for DealerTech staff looking at somebody else's rooftop.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS CANNOT USE THE SCOPED CONNECTION
+ * ---------------------------------------------------------------------------
+ * A platform admin holds no role at the dealership they are looking at — that
+ * is the whole of migration 0016 — so under their own row-level security the
+ * op codes, the declines, the roster and the presentations are all invisible.
+ * `loadSignals` run as them returns zero for every one of those and the
+ * console reports "0 of 8 steps, never presented" for every tenant, forever.
+ *
+ * That is worse than showing nothing. It renders plausibly, it is wrong in the
+ * same direction every time, and the number it gets wrong is the one the
+ * console exists to surface — a tenant that never activated looks identical to
+ * a tenant that did.
+ *
+ * ---------------------------------------------------------------------------
+ * COUNTING IS NOT READING, AND THE DIFFERENCE IS ENFORCED HERE
+ * ---------------------------------------------------------------------------
+ * So this runs privileged, and every value it returns is an integer or a
+ * single timestamp. No customer, vehicle, decline or menu ever crosses out of
+ * this function — the queries select `count(*)` and `min(started_at)` and
+ * nothing else, and there is no shape in which a row could.
+ *
+ * That is the line 0016 actually draws. It withholds a dealership's records
+ * from platform staff; it does not require us to be unable to tell whether a
+ * tenant is using the product. If a future change here starts selecting
+ * columns rather than aggregates, it has stopped being this function and
+ * belongs behind a support-access grant instead.
+ */
+export async function loadProgressForPlatform(storeId: string): Promise<OnboardingProgress | null> {
+  const db = getDb()
+
+  const [store] = await db
+    .select({
+      createdAt: schema.stores.createdAt,
+      laborRate: schema.stores.laborRate,
+      partsTaxRate: schema.stores.partsTaxRate,
+      laborTaxRate: schema.stores.laborTaxRate,
+    })
+    .from(schema.stores)
+    .where(eq(schema.stores.id, storeId))
+    .limit(1)
+
+  if (!store) return null
+
+  const [staff] = await db.select({ n: count() }).from(schema.userStoreRoles)
+    .where(and(
+      eq(schema.userStoreRoles.storeId, storeId),
+      eq(schema.userStoreRoles.isActive, true),
+    )) as [{ n: number }]
+
+  const [invites] = await db.select({ n: count() }).from(schema.storeInvitations)
+    .where(and(
+      eq(schema.storeInvitations.storeId, storeId),
+      isNull(schema.storeInvitations.acceptedAt),
+      isNull(schema.storeInvitations.revokedAt),
+    )) as [{ n: number }]
+
+  const [opCodes] = await db.select({ n: count() }).from(schema.opCodes)
+    .where(and(eq(schema.opCodes.storeId, storeId), eq(schema.opCodes.isActive, true))) as [{ n: number }]
+
+  const [declines] = await db.select({ n: count() }).from(schema.declinedServices)
+    .where(eq(schema.declinedServices.storeId, storeId)) as [{ n: number }]
+
+  const [imports] = await db.select({ n: count() }).from(schema.importBatches)
+    .where(and(
+      eq(schema.importBatches.storeId, storeId),
+      inArray(schema.importBatches.status, ['SUCCESS', 'PARTIAL']),
+    )) as [{ n: number }]
+
+  const [presentations] = await db
+    .select({ n: count(), first: min(schema.presentationSessions.startedAt) })
+    .from(schema.presentationSessions)
+    .where(eq(schema.presentationSessions.storeId, storeId)) as [{ n: number; first: Date | string | null }]
+
+  const acknowledgedRows = await db
+    .select({ stepKey: schema.onboardingSteps.stepKey })
+    .from(schema.onboardingSteps)
+    .where(and(
+      eq(schema.onboardingSteps.storeId, storeId),
+      inArray(schema.onboardingSteps.status, ['DONE', 'SKIPPED']),
+    ))
+
+  const firstRaw = presentations?.first ?? null
+  const first = firstRaw ? (firstRaw instanceof Date ? firstRaw : new Date(firstRaw)) : null
+
+  return progress({
+    storeCreatedAt: store.createdAt,
+    laborRate: Number(store.laborRate ?? 0),
+    partsTaxRate: Number(store.partsTaxRate ?? 0),
+    laborTaxRate: Number(store.laborTaxRate ?? 0),
+    staffCount: staff?.n ?? 0,
+    pendingInvites: invites?.n ?? 0,
+    opCodeCount: opCodes?.n ?? 0,
+    declineCount: declines?.n ?? 0,
+    importCount: imports?.n ?? 0,
+    presentationCount: presentations?.n ?? 0,
+    firstPresentationAt: first && !Number.isNaN(first.getTime()) ? first : null,
+    acknowledged: new Set(acknowledgedRows.map((r) => r.stepKey)),
   })
 }

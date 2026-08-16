@@ -6,8 +6,8 @@ import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { lifecycleHistory } from '@/lib/billing/store'
 import type { LifecycleStatus } from '@/lib/billing/lifecycle'
-import { loadSignals } from '@/lib/onboarding/load'
-import { progress as progressOf, type OnboardingProgress } from '@/lib/onboarding/steps'
+import { loadProgressForPlatform } from '@/lib/onboarding/load'
+import type { OnboardingProgress } from '@/lib/onboarding/steps'
 
 /**
  * The operational view of the platform.
@@ -261,10 +261,17 @@ export async function loadTenantDetail(organizationId: string) {
     */
     const onboarding: { storeId: string; storeName: string; progress: OnboardingProgress }[] = []
     for (const store of stores) {
-      const signals = await loadSignals(db, store.id)
-      if (signals) {
-        onboarding.push({ storeId: store.id, storeName: store.name, progress: progressOf(signals) })
-      }
+      /*
+        Count-only and privileged — see loadProgressForPlatform.
+
+        Read under the console's own row-level security this returns zero for
+        op codes, declines, roster and presentations, because migration 0016
+        withholds all four from platform staff. Every tenant would report "0 of
+        8 steps, never presented", which is worse than showing nothing: it
+        renders plausibly and is wrong in the same direction every time.
+      */
+      const p = await loadProgressForPlatform(store.id)
+      if (p) onboarding.push({ storeId: store.id, storeName: store.name, progress: p })
     }
 
     const [billing] = await db
