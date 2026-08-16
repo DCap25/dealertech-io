@@ -115,6 +115,34 @@ export const ENTITIES: EntityDef[] = [
         key: 'declineReason', label: 'Reason given', type: 'text', required: false,
         aliases: ['reason', 'declinereason', 'declinedreason', 'notes', 'comment'],
       },
+      /*
+        Vehicle identity, optional but wanted.
+
+        A decline can only be stored against a vehicle, and `make` and
+        `modelYear` are not nullable — so a row for a VIN we have never seen
+        needs enough to create one. Most decline exports carry these already,
+        because the advisor reading the report needs to know what the car is.
+
+        Where they are absent and the VIN is unknown, the row is rejected with
+        an instruction rather than imported against a vehicle called UNKNOWN.
+        A prep sheet reading "2019 UNKNOWN" in front of a customer is worse
+        than a row that did not import, and the warranty engine would have no
+        reference data for it either.
+      */
+      {
+        key: 'modelYear', label: 'Model year', type: 'integer', required: false,
+        aliases: ['year', 'modelyear', 'vehicleyear', 'yr'],
+        hint: 'Only needed for vehicles not already on file. Derived from the VIN when absent.',
+      },
+      {
+        key: 'make', label: 'Make', type: 'text', required: false,
+        aliases: ['make', 'manufacturer', 'brand', 'vehiclemake'],
+        hint: 'Only needed for vehicles not already on file.',
+      },
+      {
+        key: 'model', label: 'Model', type: 'text', required: false,
+        aliases: ['model', 'vehiclemodel', 'carline', 'series'],
+      },
       ...CUSTOMER_FIELDS,
     ],
   },

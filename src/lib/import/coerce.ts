@@ -16,6 +16,8 @@
  * Pure and I/O-free.
  */
 
+import { validateVin } from '@/lib/vin'
+
 export type Coerced<T> = { ok: true; value: T } | { ok: false; reason: string }
 
 const ok = <T>(value: T): Coerced<T> => ({ ok: true, value })
@@ -40,32 +42,42 @@ export function coerceText(raw: string, max = 500): Coerced<string> {
  * A vehicle identification number.
  *
  * ---------------------------------------------------------------------------
- * WHY THIS IS STRICT
+ * WHY THIS DELEGATES RATHER THAN CHECKING A PATTERN
  * ---------------------------------------------------------------------------
  * The VIN is how every imported row finds its vehicle, and how the warranty
  * engine knows what the car is. A malformed one does not degrade the import —
  * it silently creates a second, phantom vehicle that shares nothing with the
  * real one, so the declines land on a car that never visits and the prep sheet
  * for the real car stays empty. That failure is invisible until an advisor
- * wonders why a customer's history vanished.
+ * wonders where a customer's history went.
  *
- * Seventeen characters since 1981, and I, O and Q are excluded from the
- * alphabet precisely so they cannot be confused with 1 and 0 — which means a
- * VIN containing one is a transcription error, not an unusual vehicle.
+ * `src/lib/vin/validate.ts` already does this properly, including the ISO 3779
+ * check digit. That matters here more than a regex would: a length-and-alphabet
+ * test passes a transposed VIN happily, and a transposition is precisely how a
+ * typed or OCR'd VIN goes wrong. The check digit catches it.
+ *
+ * The one deliberate difference is severity. That module treats a bad check
+ * digit as a warning, because a human looking up a car in the drive should get
+ * an answer plus a caution rather than a refusal. An import has nobody to
+ * caution — it runs unattended against twenty thousand rows — so here it is a
+ * rejection, and the row comes back with the reason attached.
  */
 export function coerceVin(raw: string): Coerced<string> {
-  const value = raw.trim().toUpperCase()
-  if (value === '') return bad('is empty')
-  if (value.length !== 17) {
-    return bad(`is ${value.length} characters; a VIN is 17`)
+  if (raw.trim() === '') return bad('is empty')
+
+  const result = validateVin(raw)
+  if (!result.wellFormed) {
+    // Already phrased for a human by the validator; strip the redundant lead.
+    const reason = result.errors[0] ?? 'is not a valid VIN'
+    return bad(reason.replace(/^VIN /, '').replace(/\.$/, ''))
   }
-  if (/[IOQ]/.test(value)) {
-    return bad('contains I, O or Q, which never appear in a VIN — likely a 1 or 0 mistyped')
+  if (!result.checkDigitValid) {
+    return bad(
+      'fails its check digit, which almost always means a transposed character — ' +
+      'importing it would create a second vehicle that never matches the real one',
+    )
   }
-  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(value)) {
-    return bad('contains characters that are not valid in a VIN')
-  }
-  return ok(value)
+  return ok(result.normalized)
 }
 
 /**

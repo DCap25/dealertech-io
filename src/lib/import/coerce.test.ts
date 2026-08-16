@@ -38,7 +38,29 @@ describe('VIN', () => {
     // the real one — declines land on a car that never visits.
     const r = coerceVin('1HGCM82633A')
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toContain('11 characters')
+    if (!r.ok) expect(r.reason).toContain('17 characters')
+  })
+
+  it('refuses a VIN that fails its check digit', () => {
+    /*
+      The reason this delegates to src/lib/vin rather than testing a pattern.
+
+      `5YJ3E1EA7JF005544` is valid; transposing two characters leaves something
+      a length-and-alphabet check waves through, and the ISO 3779 check digit
+      does not. A transposition is exactly how a typed or OCR'd VIN goes wrong,
+      and it is the case that produces a phantom vehicle.
+    */
+    const transposed = coerceVin('5YJ3E1EA7JF005454')
+    expect(transposed.ok).toBe(false)
+    if (!transposed.ok) expect(transposed.reason).toContain('check digit')
+  })
+
+  it('is stricter than the drive is, on purpose', () => {
+    // src/lib/vin treats a bad check digit as a warning, because a human
+    // looking a car up should get an answer plus a caution. An import has
+    // nobody to caution, so here the same condition is a rejection.
+    const viaImport = coerceVin('5YJ3E1EA7JF005454')
+    expect(viaImport.ok).toBe(false)
   })
 
   it('refuses I, O and Q, which a VIN never contains', () => {
