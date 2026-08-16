@@ -12,7 +12,7 @@ import { canManageStaff } from '@/lib/team/roster'
  * are not allowed reads as a broken promise. Managers get the extra link;
  * nobody else knows it exists.
  */
-export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' | 'billing' }) {
+export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' | 'billing' | 'import' }) {
   const user = await getCurrentUser()
   /*
     The same predicate the pages and the actions use.
@@ -37,6 +37,14 @@ export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up
     ...(isManager
       ? [
           { key: 'team' as const, href: '/team', label: 'Team' },
+          /*
+            Import is listed permanently rather than only while a store is
+            empty. Bringing history across is not a one-off setup step — a
+            group adds a rooftop, or re-exports a longer date range, or fixes a
+            column and runs the file again. Hiding it once the first import
+            lands would mean the second one needs somebody to remember a URL.
+          */
+          { key: 'import' as const, href: '/import', label: 'Import' },
           /*
             Billing sits at the very end, and only for the people who can act
             on it. An advisor has no business seeing what the dealership pays,
