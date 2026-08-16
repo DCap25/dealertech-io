@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { requirePlatformAdmin } from '@/lib/auth/session'
 import { loadTenants } from '@/lib/platform/load'
 import { LifecycleBadge, ago } from '../ui'
+import { formatCents } from '@/lib/billing/plans'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Tenants' }
@@ -51,6 +52,9 @@ export default async function TenantsPage() {
     changedAt: stores[0]!.lifecycleChangedAt,
     trialEndsAt: stores[0]!.trialEndsAt,
     staffCount: stores.reduce((n, s) => n + s.staffCount, 0),
+    // One figure per group, not per rooftop — the rooftops of a group share a
+    // subscription, so summing rows would multiply it by the rooftop count.
+    monthlyCents: stores[0]!.monthlyCents,
   }))
 
   const NEEDS_ATTENTION = ['PAST_DUE', 'RESTRICTED', 'SUSPENDED', 'EXPIRED']
@@ -66,7 +70,11 @@ export default async function TenantsPage() {
       <h1 className="mt-3 text-3xl font-bold tracking-tight">Dealerships</h1>
       <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
         {groups.length} dealer group{groups.length === 1 ? '' : 's'} ·{' '}
-        {tenants.length} rooftop{tenants.length === 1 ? '' : 's'}
+        {tenants.length} rooftop{tenants.length === 1 ? '' : 's'} ·{' '}
+        <span className="font-semibold">
+          {formatCents(groups.reduce((sum, g) => sum + (g.monthlyCents ?? 0), 0))}
+        </span>{' '}
+        MRR
       </p>
 
       {attention.length > 0 && (
@@ -96,6 +104,8 @@ interface Group {
   changedAt: Date
   trialEndsAt: Date | null
   staffCount: number
+  /** Null for a group that bills nothing — a trial, or a comp. */
+  monthlyCents: number | null
 }
 
 function GroupRow({ group, now }: { group: Group; now: number }) {
@@ -113,6 +123,11 @@ function GroupRow({ group, now }: { group: Group; now: number }) {
         </p>
       </div>
       <div className="flex items-center gap-3 text-xs text-neutral-500">
+        {group.monthlyCents !== null && (
+          <span className="font-semibold tabular-nums text-neutral-700 dark:text-neutral-300">
+            {formatCents(group.monthlyCents)}/mo
+          </span>
+        )}
         {group.status === 'TRIAL' && group.trialEndsAt && (
           <span>trial ends {group.trialEndsAt.toISOString().slice(0, 10)}</span>
         )}

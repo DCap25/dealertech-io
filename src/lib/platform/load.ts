@@ -1,11 +1,12 @@
 // Not `server-only`: the provisioning path is also reachable from a CLI script
 // when a dealership is stood up ahead of a demo. It still cannot reach a
 // browser — it imports the scoped database client.
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
-import { schema } from '@/db/client'
+import { and, desc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
+import { getDb, schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { lifecycleHistory } from '@/lib/billing/store'
 import type { LifecycleStatus } from '@/lib/billing/lifecycle'
+import { monthlyTotalCents } from '@/lib/billing/plans'
 import { loadProgressForPlatform } from '@/lib/onboarding/load'
 import type { OnboardingProgress } from '@/lib/onboarding/steps'
 
@@ -43,6 +44,18 @@ export interface TenantSummary {
   lifecycleStatus: LifecycleStatus
   lifecycleChangedAt: Date
   trialEndsAt: Date | null
+  /**
+   * What this rooftop's group bills per month, in cents.
+   *
+   * Computed from the catalog and the group's rooftop count rather than asked
+   * of Stripe. Rendering this page must not depend on a third-party API being
+   * up, and an aggregate-of-Stripe call per tenant would make the one screen
+   * somebody leaves open all day the slowest in the product.
+   *
+   * Null for a group with no subscription — a trial or a comp bills nothing,
+   * and showing them a number would misstate the pipeline.
+   */
+  monthlyCents: number | null
 }
 
 export async function loadTenants(): Promise<TenantSummary[]> {
@@ -105,6 +118,35 @@ export async function loadTenants(): Promise<TenantSummary[]> {
       store_id: string; started_at: string; status: string; summary: string
     }[]
 
+    /*
+      Rooftops per group, so MRR is the group's bill rather than a rooftop's
+      share of it. Volume pricing means the two are not proportional — the
+      per-rooftop rate depends on how many the group has.
+    */
+    const rooftopsByOrg = new Map<string, number>()
+    for (const s of stores) {
+      if (!s.isActive) continue
+      rooftopsByOrg.set(s.organizationId, (rooftopsByOrg.get(s.organizationId) ?? 0) + 1)
+    }
+
+    const billed = await db
+      .select({
+        organizationId: schema.billingAccounts.organizationId,
+        status: schema.subscriptions.status,
+      })
+      .from(schema.subscriptions)
+      .innerJoin(
+        schema.billingAccounts,
+        eq(schema.billingAccounts.id, schema.subscriptions.billingAccountId),
+      )
+
+    // Only a subscription that actually bills counts toward MRR. A cancelled
+    // or comped one is revenue that is not arriving.
+    const billingOrgs = new Set(
+      billed.filter((b) => b.status === 'ACTIVE' || b.status === 'PAST_DUE')
+        .map((b) => b.organizationId),
+    )
+
     const staffBy = new Map(staff.map((s) => [s.storeId, s.n]))
     const invitesBy = new Map(invites.map((i) => [i.storeId, i.n]))
     const syncBy = new Map(syncs.map((s) => [s.store_id, s]))
@@ -118,9 +160,129 @@ export async function loadTenants(): Promise<TenantSummary[]> {
         lastSyncAt: sync ? new Date(sync.started_at) : null,
         lastSyncStatus: sync?.status ?? null,
         lastSyncSummary: sync?.summary ?? null,
+        monthlyCents: billingOrgs.has(s.organizationId)
+          ? monthlyTotalCents(rooftopsByOrg.get(s.organizationId) ?? 0)
+          : null,
       }
     })
   })
+}
+
+/**
+ * What needs somebody today, across every tenant.
+ *
+ * ---------------------------------------------------------------------------
+ * THE PAGE EXISTS TO ANSWER ONE QUESTION
+ * ---------------------------------------------------------------------------
+ * "What needs me?" — and it could not answer it. The console listed stale
+ * syncs and uncontacted leads and nothing else, so a failed webhook appeared
+ * nowhere at all, a past-due dealership looked identical to a healthy one
+ * until somebody opened its page, and a trial ending on Friday was invisible
+ * until it had ended.
+ *
+ * Each count below is a thing somebody has to do something about. Anything
+ * that is merely interesting belongs on a tenant page, not here — a rollup
+ * that includes things you cannot act on is one people stop reading.
+ *
+ * Counted rather than listed. The numbers are the alarm; the tenant pages
+ * behind them are where the detail lives.
+ */
+export interface NeedsAttention {
+  /** Behind on payment but still working. Recoverable, and worth a call. */
+  pastDue: number
+  /** Past grace: administrative surface withdrawn. Escalating. */
+  restricted: number
+  /** Switched off by a human. Here so nobody forgets one is switched off. */
+  suspended: number
+  /** Trials ending within a week — the window where a call still changes it. */
+  trialsEndingSoon: number
+  /** Expired trials nobody converted. */
+  trialsExpired: number
+  /**
+   * Webhook deliveries the handler accepted and could not apply.
+   *
+   * Invisible everywhere else. Stripe stops retrying eventually, and a
+   * subscription that never activated because one event failed looks exactly
+   * like a customer who never paid.
+   */
+  failedWebhooks: number
+  /** Stripe events that carried no DealerTech metadata. Should be zero. */
+  foreignWebhooks: number
+  /** Price syncs that refused or failed on their last run. */
+  failingSyncs: number
+  uncontactedLeads: number
+}
+
+/**
+ * Runs privileged, and only counts.
+ *
+ * `stripe_events` is platform-only by policy so the scoped connection would
+ * see it fine, but the sync and lifecycle counts span every tenant and the
+ * page is a rollup rather than a tenant view. Integers only — the same line
+ * drawn in loadProgressForPlatform: counting is not reading.
+ */
+export async function loadNeedsAttention(): Promise<NeedsAttention> {
+  const db = getDb()
+
+  const byStatus = await db
+    .select({ status: schema.organizations.lifecycleStatus, n: sql<number>`count(*)::int` })
+    .from(schema.organizations)
+    .groupBy(schema.organizations.lifecycleStatus)
+
+  const countFor = (status: LifecycleStatus) =>
+    byStatus.find((r) => r.status === status)?.n ?? 0
+
+  const soon = new Date(Date.now() + 7 * 86_400_000)
+  const [endingSoon] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.organizations)
+    .where(and(
+      eq(schema.organizations.lifecycleStatus, 'TRIAL'),
+      isNotNull(schema.organizations.trialEndsAt),
+      lte(schema.organizations.trialEndsAt, soon),
+    ))
+
+  const [failedHooks] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.stripeEvents)
+    .where(isNotNull(schema.stripeEvents.error))
+
+  const [foreignHooks] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.stripeEvents)
+    .where(eq(schema.stripeEvents.relevant, false))
+
+  /*
+    The newest sync per store, then the ones that did not say OK.
+
+    DISTINCT ON rather than a window function for the same reason loadTenants
+    uses it — this is the one place raw SQL reads better than the builder.
+  */
+  const failing = (await db.execute(sql`
+    SELECT count(*)::int AS n FROM (
+      SELECT DISTINCT ON (store_id) status
+      FROM pricing_sync_runs
+      ORDER BY store_id, started_at DESC
+    ) latest
+    WHERE latest.status <> 'OK'
+  `)) as unknown as { n: number }[]
+
+  const [leads] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.demoRequests)
+    .where(eq(schema.demoRequests.contacted, false))
+
+  return {
+    pastDue: countFor('PAST_DUE'),
+    restricted: countFor('RESTRICTED'),
+    suspended: countFor('SUSPENDED'),
+    trialsEndingSoon: endingSoon?.n ?? 0,
+    trialsExpired: countFor('EXPIRED'),
+    failedWebhooks: failedHooks?.n ?? 0,
+    foreignWebhooks: foreignHooks?.n ?? 0,
+    failingSyncs: failing[0]?.n ?? 0,
+    uncontactedLeads: leads?.n ?? 0,
+  }
 }
 
 export interface Lead {
@@ -291,6 +453,9 @@ export async function loadTenantDetail(organizationId: string) {
       ? (await db
           .select({
             id: schema.subscriptions.id,
+            // Carried so the console can deep-link into Stripe rather than
+            // re-render its billing UI — see the tenant page.
+            stripeSubscriptionId: schema.subscriptions.stripeSubscriptionId,
             planKey: schema.subscriptions.planKey,
             status: schema.subscriptions.status,
             rooftopQuantity: schema.subscriptions.rooftopQuantity,

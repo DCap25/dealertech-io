@@ -7,6 +7,7 @@ import { LifecycleBadge, ago } from '../../ui'
 import { LifecycleActions, SupportAccess } from './actions-ui'
 import { QuantityForm } from './quantity-form'
 import { InvoiceRailForm } from './invoice-rail-form'
+import { StripeLink } from '../../stripe-links'
 import { changeHistory } from '@/lib/billing/subscription-ops'
 
 export const dynamic = 'force-dynamic'
@@ -130,7 +131,39 @@ export default async function TenantPage({ params }: { params: Promise<{ orgId: 
           </Field>
           <Field label="Billing">
             {billing ? `${billing.collectionMode} · ${billing.billingEmail}` : 'no billing account'}
+            {billing?.netTermsDays ? ` · net ${billing.netTermsDays}` : ''}
+            {billing?.poNumber ? ` · PO ${billing.poNumber}` : ''}
           </Field>
+
+          {/*
+            Out to Stripe rather than a re-rendered copy of it. Invoices,
+            payment state and dunning history are already built there for every
+            edge case we would otherwise reimplement and keep in sync.
+          */}
+          {(billing?.stripeCustomerId || subscription?.stripeSubscriptionId) && (
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-bold uppercase tracking-wide text-neutral-500">
+                In Stripe
+              </dt>
+              <dd className="mt-0.5 flex flex-wrap gap-4 text-sm">
+                {billing?.stripeCustomerId && (
+                  <>
+                    <StripeLink path={`customers/${billing.stripeCustomerId}`}>
+                      Customer
+                    </StripeLink>
+                    <StripeLink path={`invoices?customer=${billing.stripeCustomerId}`}>
+                      Invoices
+                    </StripeLink>
+                  </>
+                )}
+                {subscription?.stripeSubscriptionId && (
+                  <StripeLink path={`subscriptions/${subscription.stripeSubscriptionId}`}>
+                    Subscription
+                  </StripeLink>
+                )}
+              </dd>
+            </div>
+          )}
           {subscription && subscription.rooftopQuantity !== stores.filter((s) => s.isActive).length && (
             <div className="sm:col-span-2">
               {/*

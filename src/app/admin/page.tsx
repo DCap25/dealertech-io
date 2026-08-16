@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { headers } from 'next/headers'
 import { requirePlatformAdmin } from '@/lib/auth/session'
 import { signOut } from '@/app/login/actions'
-import { loadLeads, loadRecentJobRuns, loadTenants } from '@/lib/platform/load'
+import { loadLeads, loadNeedsAttention, loadRecentJobRuns, loadTenants } from '@/lib/platform/load'
 import { knownMakes } from '@/lib/warranty'
 import { ProvisionForm } from './provision-form'
 import { LifecycleBadge } from './ui'
@@ -88,10 +88,11 @@ export default async function AdminPage() {
   const session = await requirePlatformAdmin()
   // One instant for the whole page. See the notes on `nowMs` and `ago`.
   const now = nowMs()
-  const [tenants, leads, runs] = await Promise.all([
+  const [tenants, leads, runs, attention] = await Promise.all([
     loadTenants(),
     loadLeads(20),
     loadRecentJobRuns(10),
+    loadNeedsAttention(),
   ])
 
   // Built server-side so the copied invitation link is right behind a proxy
@@ -101,7 +102,6 @@ export default async function AdminPage() {
   const origin = `${protocol}://${host}`
   const makes = knownMakes()
 
-  const uncontacted = leads.filter((l) => !l.contacted)
   const needAttention = tenants.filter(
     (t) => !awaitingFirstSync(t.createdAt, t.lastSyncAt, now)
       && (!t.lastSyncAt || t.lastSyncStatus !== "OK"),
@@ -146,19 +146,77 @@ export default async function AdminPage() {
         dealership&rsquo;s customers — that needs a role at the store, which leaves a record.
       </p>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+      {/*
+        The morning read.
+
+        Every tile is something somebody has to do about it, which is the whole
+        test for being here — a rollup carrying things you cannot act on is one
+        people stop reading. Failed webhooks in particular appeared nowhere at
+        all until now: Stripe stops retrying eventually, and a subscription
+        that never activated because one delivery failed looks exactly like a
+        customer who never paid.
+      */}
+      <div className="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <Stat label="Dealerships" value={String(tenants.length)} />
         <Stat
-          label="Need attention"
-          value={String(needAttention.length)}
-          tone={needAttention.length > 0 ? 'bad' : 'good'}
+          label="Past due"
+          value={String(attention.pastDue)}
+          tone={attention.pastDue > 0 ? 'warn' : 'good'}
+        />
+        <Stat
+          label="Restricted"
+          value={String(attention.restricted)}
+          tone={attention.restricted > 0 ? 'bad' : 'good'}
+        />
+        <Stat
+          label="Suspended"
+          value={String(attention.suspended)}
+          tone={attention.suspended > 0 ? 'bad' : 'good'}
+        />
+        <Stat
+          label="Trials ending in 7d"
+          value={String(attention.trialsEndingSoon)}
+          tone={attention.trialsEndingSoon > 0 ? 'warn' : 'good'}
+        />
+        <Stat
+          label="Trials expired"
+          value={String(attention.trialsExpired)}
+          tone={attention.trialsExpired > 0 ? 'warn' : 'good'}
+        />
+        <Stat
+          label="Failed webhooks"
+          value={String(attention.failedWebhooks)}
+          tone={attention.failedWebhooks > 0 ? 'bad' : 'good'}
+        />
+        <Stat
+          label="Failing syncs"
+          value={String(attention.failingSyncs)}
+          tone={attention.failingSyncs > 0 ? 'bad' : 'good'}
         />
         <Stat
           label="Leads not contacted"
-          value={String(uncontacted.length)}
-          tone={uncontacted.length > 0 ? 'warn' : 'good'}
+          value={String(attention.uncontactedLeads)}
+          tone={attention.uncontactedLeads > 0 ? 'warn' : 'good'}
+        />
+        <Stat
+          label="Stale integrations"
+          value={String(needAttention.length)}
+          tone={needAttention.length > 0 ? 'bad' : 'good'}
         />
       </div>
+
+      {attention.foreignWebhooks > 0 && (
+        /*
+          Should be zero, always. DealerTech bills from its own Stripe account,
+          so an event without our metadata means something is pointed at the
+          wrong account — worth an alarm rather than a tile, because the number
+          being non-zero is itself the problem.
+        */
+        <p className="mt-3 rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-900 dark:bg-rose-950 dark:text-rose-200">
+          {attention.foreignWebhooks} Stripe event(s) arrived without DealerTech metadata.
+          Something may be pointed at the wrong Stripe account.
+        </p>
+      )}
 
       <Section title={`Dealerships (${tenants.length})`}>
         {tenants.length === 0 ? (
