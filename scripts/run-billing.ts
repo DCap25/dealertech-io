@@ -31,9 +31,22 @@ async function main() {
     `\n${results.length} tenant${results.length === 1 ? '' : 's'} · ` +
     `${moved.length} moved · ${attention.length} needing attention`,
   )
+
+  /*
+    Explicit, like run-pricing-sync.ts.
+
+    The database client is pooled and holds the event loop open, so without
+    this the process prints everything and then simply never exits — which
+    looks exactly like a hang, and looks even more like one through a pipe,
+    since `| tail` waits for the stream to close before showing a single line.
+
+    Non-zero when something needs a human, so a scheduler surfaces it rather
+    than reporting a green run that quietly left a tenant needing a decision.
+  */
+  process.exit(attention.length === 0 ? 0 : 1)
 }
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : error)
-  process.exitCode = 1
+  process.exit(1)
 })

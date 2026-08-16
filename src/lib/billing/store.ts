@@ -4,7 +4,20 @@
 // it imports the privileged database client.
 import { desc, eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
-import { recordAudit } from '@/lib/audit/record'
+/*
+  The pure builder, not `recordAudit` from @/lib/audit/record.
+
+  That wrapper is marked `server-only`, and this module has to stay reachable
+  from a CLI — `npm run billing:run` is the same code the scheduled route
+  calls, which is the entire reason there is no second implementation of the
+  nightly job. Importing the guarded module made the script throw on import,
+  and the route kept working, so the divergence was invisible until somebody
+  ran it.
+
+  `@/lib/audit/events` is pure by design and carries no such guard. Same
+  approach as app/admin/tenants/actions.ts.
+*/
+import { buildAuditRow } from '@/lib/audit/events'
 import type { ScopedDb } from '@/db/scoped'
 import {
   transition, type LifecycleActor, type LifecycleEvent, type LifecycleStatus,
@@ -142,7 +155,7 @@ export async function applyTransition(input: ApplyTransition): Promise<ApplyResu
       storeId is null — this is an organization-level act, and naming one
       rooftop would imply the others were untouched.
     */
-    await recordAudit(tx as unknown as ScopedDb, {
+    const auditRow = buildAuditRow({
       action: 'TENANT_LIFECYCLE_CHANGED',
       entityType: 'organizations',
       entityId: org.id,
@@ -156,6 +169,22 @@ export async function applyTransition(input: ApplyTransition): Promise<ApplyResu
         reason: input.reason ?? null,
       },
     })
+    if (auditRow) {
+      /*
+        Swallowed, matching `recordAudit`'s documented behaviour.
+
+        Auditing is a record of the work, not a precondition for it. A
+        constraint nobody anticipated must not roll back a lifecycle
+        transition that was otherwise correct — the log may have gaps, but it
+        must not have lies, and `lifecycle_events` above is the authoritative
+        record of this particular change either way.
+      */
+      try {
+        await tx.insert(schema.auditLog).values(auditRow)
+      } catch (error) {
+        console.error('[audit] could not record TENANT_LIFECYCLE_CHANGED:', error)
+      }
+    }
 
     return { ok: true as const, from: decision.from, to: decision.to }
   })
