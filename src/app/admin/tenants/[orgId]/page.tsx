@@ -44,7 +44,7 @@ export default async function TenantPage({ params }: { params: Promise<{ orgId: 
   if (!detail) notFound()
 
   const now = nowMs()
-  const { org, stores, staff, history, billing, subscription } = detail
+  const { org, stores, staff, history, onboarding, billing, subscription } = detail
 
   /*
     Shown as the dealership experiences it, not as a status string.
@@ -138,6 +138,43 @@ export default async function TenantPage({ params }: { params: Promise<{ orgId: 
             </div>
           )}
         </dl>
+      </Section>
+
+      {/*
+        Activation, deliberately next to the commercial state rather than on a
+        screen of its own. "Paying and never activated" is the row worth a
+        phone call, and it is invisible if the two numbers live apart.
+      */}
+      <Section title="Activation">
+        <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+          {onboarding.map((o) => (
+            <li key={o.storeId} className="flex flex-wrap items-center justify-between gap-3 p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{o.storeName}</p>
+                <p className="text-xs text-neutral-500">
+                  {o.progress.doneCount} of {o.progress.totalCount} setup steps
+                  {o.progress.outstandingEssential.length > 0 && (
+                    <> · missing {o.progress.outstandingEssential.map((s) => s.label.toLowerCase()).join(', ')}</>
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 text-xs">
+                {o.progress.daysToFirstMenu !== null ? (
+                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                    first menu in {o.progress.daysToFirstMenu}d
+                  </span>
+                ) : (
+                  <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                    never presented
+                  </span>
+                )}
+                {o.progress.readyForTheDrive && (
+                  <span className="text-neutral-500">ready</span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
       </Section>
 
       <Section title="Lifecycle history">

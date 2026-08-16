@@ -6,6 +6,8 @@ import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { lifecycleHistory } from '@/lib/billing/store'
 import type { LifecycleStatus } from '@/lib/billing/lifecycle'
+import { loadSignals } from '@/lib/onboarding/load'
+import { progress as progressOf, type OnboardingProgress } from '@/lib/onboarding/steps'
 
 /**
  * The operational view of the platform.
@@ -248,6 +250,23 @@ export async function loadTenantDetail(organizationId: string) {
 
     const history = await lifecycleHistory(db, organizationId)
 
+    /*
+      Onboarding progress per rooftop, next to the commercial state.
+
+      Deliberately on the same page as billing rather than a separate screen.
+      A tenant that never presents a menu is a churn certainty whatever their
+      invoice says, and the two facts are only useful side by side — "paying
+      and never activated" is the row worth a phone call, and it is invisible
+      if the numbers live apart.
+    */
+    const onboarding: { storeId: string; storeName: string; progress: OnboardingProgress }[] = []
+    for (const store of stores) {
+      const signals = await loadSignals(db, store.id)
+      if (signals) {
+        onboarding.push({ storeId: store.id, storeName: store.name, progress: progressOf(signals) })
+      }
+    }
+
     const [billing] = await db
       .select({
         id: schema.billingAccounts.id,
@@ -276,7 +295,7 @@ export async function loadTenantDetail(organizationId: string) {
           .limit(1))[0] ?? null
       : null
 
-    return { org, stores, staff, history, billing: billing ?? null, subscription }
+    return { org, stores, staff, history, onboarding, billing: billing ?? null, subscription }
   })
 }
 

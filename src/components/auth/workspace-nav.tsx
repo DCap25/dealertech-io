@@ -12,7 +12,7 @@ import { canManageStaff } from '@/lib/team/roster'
  * are not allowed reads as a broken promise. Managers get the extra link;
  * nobody else knows it exists.
  */
-export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' | 'billing' | 'import' }) {
+export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' | 'billing' | 'import' | 'setup' }) {
   const user = await getCurrentUser()
   /*
     The same predicate the pages and the actions use.
@@ -45,6 +45,14 @@ export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up
             lands would mean the second one needs somebody to remember a URL.
           */
           { key: 'import' as const, href: '/import', label: 'Import' },
+          /*
+            Setup is listed permanently rather than disappearing once the
+            checklist is green. Almost every step is derived from live data,
+            so a store that deletes their op codes has an outstanding step
+            again — and a page that had hidden itself would be the last place
+            they would think to look.
+          */
+          { key: 'setup' as const, href: '/setup', label: 'Setup' },
           /*
             Billing sits at the very end, and only for the people who can act
             on it. An advisor has no business seeing what the dealership pays,
