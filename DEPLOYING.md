@@ -95,6 +95,25 @@ Four steps, in order:
    which is the exact failure this product exists to stop an advisor
    committing.
 
+### Enabling ACH, which is a dashboard setting and not code
+
+Dealer groups pay by bank transfer, not card. Turn on **ACH Direct Debit** in
+the Stripe dashboard under payment methods, once, and every invoice from that
+point offers it.
+
+Nothing in this repository hardcodes a payment method — `payment_method_types`
+is never passed on a Checkout session, a subscription or an invoice. That is
+deliberate rather than an omission: Stripe then offers whatever the account has
+enabled and adapts on its own, so enabling a method is a dashboard decision
+rather than a deploy. Hardcoding `['card']` is the common shortcut and it locks
+out exactly the method your buyers want.
+
+A tenant is put on invoiced billing from the platform console — the tenant
+page has the terms form. It converts an existing card subscription in place
+rather than creating a second one, because two live subscriptions would bill
+the dealership twice and the discovery would be an invoice landing at an
+accounts payable department that already pays us.
+
 ### The nightly billing job
 
 `netlify/functions/billing-reconcile.mts` runs at 09:00 UTC and POSTs to

@@ -6,6 +6,8 @@ import { and, eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { requirePlatformAdmin } from '@/lib/auth/session'
 import { applyTransition } from '@/lib/billing/store'
+import { setRooftopQuantity } from '@/lib/billing/subscription-ops'
+import { putOnInvoiceRail } from '@/lib/billing/invoice-rail'
 import { buildAuditRow } from '@/lib/audit/events'
 import type { LifecycleEvent } from '@/lib/billing/lifecycle'
 
@@ -153,6 +155,105 @@ export async function winBackAccount(
   return move(organizationId, 'WIN_BACK', reason, admin.id, {
     trialEndsAt: addDays(new Date(), 30),
   })
+}
+
+// ===========================================================================
+
+/**
+ * Change how many rooftops a group is billed for.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS A DELIBERATE ACT RATHER THAN A CONSEQUENCE
+ * ---------------------------------------------------------------------------
+ * The reconciler notices when the billed quantity and the active store count
+ * disagree, and refuses to fix it — because a rooftop opened last week that
+ * nobody added to the subscription and one deactivated during a dispute look
+ * identical from the outside, and the two want opposite handling. This is the
+ * other half of that decision: the place a human resolves it, having seen the
+ * money involved.
+ *
+ * The preview is shown on the page before this runs, so nobody presses the
+ * button without having read what it costs. Volume pricing means the answer is
+ * sometimes counter-intuitive — 25 to 26 rooftops lowers the bill — and being
+ * surprised by that on an invoice is exactly the failure the preview prevents.
+ */
+export async function changeRooftopQuantity(
+  _previous: TenantActionState,
+  formData: FormData,
+): Promise<TenantActionState> {
+  const admin = await requirePlatformAdmin()
+  const organizationId = String(formData.get('organizationId') ?? '')
+  const quantity = Number(formData.get('quantity') ?? 0)
+  const reason = reasonFrom(formData)
+
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) {
+    return { error: 'Enter a rooftop count between 1 and 500.' }
+  }
+  if (!reason) {
+    return { error: 'Say why. A quantity change is what an invoice is built from, and "why is February different" is a question somebody will ask in March.' }
+  }
+
+  const result = await setRooftopQuantity(organizationId, quantity, {
+    changedByUserId: admin.id,
+    reason,
+  })
+
+  if (!result.ok) return { error: result.reason }
+
+  revalidatePath(`/admin/tenants/${organizationId}`)
+  return { ok: `Now billing for ${result.to} rooftop(s), was ${result.from}.` }
+}
+
+/**
+ * Put a dealer group on invoiced billing with net terms.
+ *
+ * The sales-led rail. A franchise group has an accounts payable department, a
+ * purchase order and terms; the person who signs has no authority to put
+ * twenty thousand a month on a card and would not if they had.
+ *
+ * Deliberately does not touch the lifecycle status. Sending an invoice is not
+ * being paid, and marking somebody ACTIVE here would be the same mistake as
+ * trusting a checkout success page — the webhook moves them when the money
+ * actually arrives.
+ */
+export async function setInvoiceRail(
+  _previous: TenantActionState,
+  formData: FormData,
+): Promise<TenantActionState> {
+  const admin = await requirePlatformAdmin()
+  const organizationId = String(formData.get('organizationId') ?? '')
+  const billingEmail = String(formData.get('billingEmail') ?? '').trim().toLowerCase()
+  const billingName = String(formData.get('billingName') ?? '').trim()
+  const poNumber = String(formData.get('poNumber') ?? '').trim()
+  const netTermsDays = Number(formData.get('netTermsDays') ?? 30)
+  const rooftops = Number(formData.get('rooftops') ?? 1)
+  const reason = reasonFrom(formData)
+
+  if (!billingEmail.includes('@')) {
+    return { error: 'Enter the accounts payable email address — invoices go there, not to the person who signed.' }
+  }
+  if (!reason) return { error: 'Say what was agreed, and with whom.' }
+
+  const result = await putOnInvoiceRail(
+    organizationId,
+    rooftops,
+    {
+      billingEmail,
+      billingName: billingName || null,
+      poNumber: poNumber || null,
+      netTermsDays,
+    },
+    { changedByUserId: admin.id, reason },
+  )
+
+  if (!result.ok) return { error: result.reason }
+
+  revalidatePath(`/admin/tenants/${organizationId}`)
+  return {
+    ok: result.invoiceUrl
+      ? `On net-${netTermsDays} invoicing. First invoice: ${result.invoiceUrl}`
+      : `On net-${netTermsDays} invoicing. Stripe will issue the first invoice at the start of the period.`,
+  }
 }
 
 // ===========================================================================

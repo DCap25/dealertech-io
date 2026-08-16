@@ -5,6 +5,9 @@ import { loadTenantDetail } from '@/lib/platform/load'
 import { resolveAccess } from '@/lib/billing/access'
 import { LifecycleBadge, ago } from '../../ui'
 import { LifecycleActions, SupportAccess } from './actions-ui'
+import { QuantityForm } from './quantity-form'
+import { InvoiceRailForm } from './invoice-rail-form'
+import { changeHistory } from '@/lib/billing/subscription-ops'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,6 +65,10 @@ export default async function TenantPage({ params }: { params: Promise<{ orgId: 
   })
 
   const supportGrants = staff.filter((s) => s.expiresAt !== null)
+
+  // Privileged, like everything else in the console's write path: a platform
+  // admin holds no role at the dealership whose subscription this describes.
+  const changes = subscription ? await changeHistory(org.id) : []
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
@@ -137,8 +144,57 @@ export default async function TenantPage({ params }: { params: Promise<{ orgId: 
               </p>
             </div>
           )}
+
+          <div className="sm:col-span-2">
+            <InvoiceRailForm
+              organizationId={org.id}
+              currentMode={billing?.collectionMode ?? null}
+              defaultEmail={billing?.billingEmail ?? ''}
+              defaultRooftops={stores.filter((s) => s.isActive).length || 1}
+            />
+          </div>
+
+          {subscription && (
+            <div className="sm:col-span-2">
+              <QuantityForm
+                organizationId={org.id}
+                currentQuantity={subscription.rooftopQuantity}
+                activeStores={stores.filter((s) => s.isActive).length}
+                periodStart={null}
+                periodEnd={subscription.currentPeriodEnd?.toISOString() ?? null}
+              />
+            </div>
+          )}
         </dl>
       </Section>
+
+      {changes.length > 0 && (
+        <Section title="Commercial history">
+          {/*
+            Distinct from the lifecycle history above. That one records the
+            state a tenant moved to; this records what was done to the
+            arrangement itself — and it is what answers "why was February
+            different" when the person who changed it has left.
+          */}
+          <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+            {changes.map((c) => (
+              <li key={c.id} className="p-3">
+                <p className="text-sm">
+                  <span className="font-semibold">{c.kind.toLowerCase().replace('_', ' ')}</span>
+                  <span className="ml-2 text-xs text-neutral-500">
+                    {c.actorName ?? 'system'} · {ago(c.createdAt, now)}
+                  </span>
+                </p>
+                {c.reason && (
+                  <p className="mt-0.5 text-xs italic text-neutral-600 dark:text-neutral-400">
+                    {c.reason}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
 
       {/*
         Activation, deliberately next to the commercial state rather than on a
