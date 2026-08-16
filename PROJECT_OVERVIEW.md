@@ -331,17 +331,32 @@ Stated plainly so nobody discovers them the hard way.
 # Demo staff. Prints the new password once — put it in a password manager.
 npm run demo:rotate
 
-# Platform admin — recreate with a new password, then confirm the grant.
-npm run platform:create
+# Any single account, platform admin included. Prints it once.
+npm run platform:rotate -- admindan@dealertech.io
+
+# Confirm who holds platform access.
 npm run platform:list
 ```
 
-Rotation is its own script for a reason. `auth:provision --repair` looks like
-it would do this and does not: repair only fires when an auth id has drifted
-from its application row, and when the ids match — which is the normal case —
-it reports `ok` and changes no password at all. It also deletes and recreates
-the account it repairs, which is right for a broken link and wrong for a
-password change.
+Rotation is its own script for a reason, and **two** other scripts wear the
+disguise convincingly.
+
+`auth:provision --repair` looks like it would do this and does not: repair only
+fires when an auth id has drifted from its application row, and when the ids
+match — which is the normal case — it reports `ok` and changes no password at
+all. It also deletes and recreates the account it repairs, which is right for a
+broken link and wrong for a password change.
+
+`platform:create` takes a password argument and is idempotent on the account,
+which sounds like a rotation and is not. Its second branch — the one taken for
+an address that already exists — ensures the platform grant and never touches
+the password. It prints "already has an account", exits 0, and the old password
+keeps working. This was documented here as the way to rotate a platform admin
+and did not work; `platform:rotate` is the thing that does.
+
+Neither script revokes existing sessions. Supabase keeps issued tokens valid
+until they expire, so a rotation locks out a future sign-in and not a current
+one. Sign out everywhere from the Supabase dashboard if that matters.
 
 If one-tap sign-in stops working locally after a rotation, set
 `NEXT_PUBLIC_DEMO_PASSWORD` in `.env.local` to the new value. Without it the
