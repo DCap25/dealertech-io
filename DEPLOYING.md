@@ -28,7 +28,9 @@ exists in your local `.env.local`.
 | `DMS_ADAPTER` | `mock` | |
 | `DMS_MOCK_SCENARIO` | `AS_SEEDED` | |
 | `ANTHROPIC_API_KEY` | optional | Leave unset and the Co-Pilot runs its mock provider. |
-| `CRON_SECRET` | you generate it | Any long random string. Authenticates the scheduled price sync. **Without it the sync refuses every request and never runs** — it fails closed on purpose. |
+| `CRON_SECRET` | you generate it | Any long random string. Authenticates both scheduled jobs. **Without it they refuse every request and never run** — they fail closed on purpose. |
+| `STRIPE_SECRET_KEY` | Stripe → the DealerTech account → API keys | A **restricted** key (`rk_...`), not the secret key. Leave unset and billing is off. See below. |
+| `STRIPE_WEBHOOK_SECRET` | Stripe → Webhooks → your endpoint | Signing secret. **Without it the endpoint refuses every delivery** rather than trusting unverified JSON. |
 
 ### The morning price sync
 
@@ -50,6 +52,70 @@ Two things to know about it:
 Generate the secret with something like `openssl rand -base64 32` and set the
 same value on the site and, if you run the job by hand against production, in
 your shell.
+
+### Billing
+
+DealerTech bills from **its own Stripe account** (`acct_1U57SyKD1OmZb0LX`),
+separate from anything else under the same login. That separation is doing real
+work: a Stripe webhook endpoint receives every event on its account, so a shared
+account would mean two businesses' handlers each seeing the other's traffic.
+
+Leave `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` unset and billing is
+simply off — the app runs, tenants keep their lifecycle status, and every
+Stripe path refuses rather than falling back. A billing integration that
+quietly does nothing when misconfigured looks exactly like "nobody has paid
+yet", which is the failure you find out about a month late.
+
+Four steps, in order:
+
+1. **Activate the account.** Business details, EIN, bank account, and set the
+   statement descriptor to DEALERTECH. Until this is done Stripe accepts no
+   live charge — the catalog and the code work regardless, so this only blocks
+   the first real payment.
+
+2. **Create a restricted key** at the account's API keys page and set it as
+   `STRIPE_SECRET_KEY`. A restricted key (`rk_...`), not the secret key
+   (`sk_...`): write on Customers, Subscriptions, Checkout Sessions and
+   Billing Portal, read on Prices and Products, and nothing else. Nothing in
+   this product issues refunds or reads balances.
+
+3. **Create the webhook endpoint** pointing at
+   `https://<your-domain>/api/webhooks/stripe`, subscribed to
+   `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted`,
+   `invoice.paid`, `invoice.payment_failed` and
+   `invoice.marked_uncollectible`. Put its signing secret in
+   `STRIPE_WEBHOOK_SECRET`. This has to happen after the first deploy, since
+   Stripe verifies the URL is reachable.
+
+4. **Check the catalog agrees with the code** with `npm run check:stripe`. The
+   price list exists twice — as volume tiers on the Stripe price, and in
+   `src/lib/billing/plans.ts` where the app quotes from — and they must match.
+   A mismatch means showing a dealership one number and invoicing another,
+   which is the exact failure this product exists to stop an advisor
+   committing.
+
+### The nightly billing job
+
+`netlify/functions/billing-reconcile.mts` runs at 09:00 UTC and POSTs to
+`/api/cron/billing`, guarded by the same `CRON_SECRET`. `npm run billing:run`
+calls the identical code.
+
+It does two things nothing else does. It **runs the clocks** — a trial expiring
+and a past-due account reaching the end of its fourteen days have no external
+trigger, and Stripe never sends a webhook saying "this trial you never
+converted has lapsed". And it **catches what webhooks lost**: a delivery Stripe
+gave up retrying, an event our handler failed, a quantity somebody changed in
+the dashboard directly.
+
+It cannot suspend anybody. The lifecycle engine refuses that from any automatic
+actor, so the worst an unattended run can do is move a tenant to RESTRICTED,
+which leaves the drive working. Switching a dealership off stays a decision a
+person makes, with a reason, from the console.
+
+Scheduled two hours before the price sync deliberately: both walk every tenant
+against a rate-limited API, and this one's output is what somebody reads with
+their coffee.
 
 ### DATABASE_URL must be the transaction pooler
 

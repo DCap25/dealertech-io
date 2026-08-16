@@ -29,11 +29,20 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/api/cron/pricing')).toBe(true)
   })
 
+  it('lets Stripe reach the webhook endpoint', () => {
+    // Same reasoning as the cron routes: Stripe carries no session cookie, so
+    // deny-by-default would answer every delivery with a redirect and billing
+    // would be silently broken in a way that looks like nobody has paid yet.
+    // The signature is the guard, and it refuses when the secret is unset.
+    expect(isPublicPath('/api/webhooks/stripe')).toBe(true)
+  })
+
   it('does not open anything that merely starts with those words', () => {
     // Prefix matching on a bare startsWith would make /signups-report and
     // /invitees public too.
     expect(isPublicPath('/signup-admin')).toBe(false)
     expect(isPublicPath('/invitees')).toBe(false)
+    expect(isPublicPath('/api/webhooks-debug')).toBe(false)
   })
 
   it('lets the marketing site and sign-in through', () => {

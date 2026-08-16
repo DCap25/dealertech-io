@@ -24,6 +24,8 @@
     "check:env": "tsx --env-file=.env.local scripts/check-env.ts",
     "check:db": "tsx --env-file=.env.local scripts/check-db.ts",
     "check:schema": "tsx --env-file=.env.local scripts/check-ledger.ts",
+    "check:stripe": "tsx --env-file=.env.local scripts/check-stripe.ts",
+    "billing:run": "tsx --env-file=.env.local scripts/run-billing.ts",
     "verify:rls": "tsx --env-file=.env.local scripts/verify-rls.ts",
     "smoke": "tsx --env-file=.env.local scripts/smoke.ts",
     "db:test:up": "powershell -ExecutionPolicy Bypass -File scripts/test-db.ps1 up",
@@ -45,6 +47,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",
+    "stripe": "^22.5.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

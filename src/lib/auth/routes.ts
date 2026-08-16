@@ -61,6 +61,19 @@ const PUBLIC_PREFIXES = [
    * page and the job silently never ran.
    */
   '/api/cron',
+  /**
+   * Stripe's deliveries.
+   *
+   * Public for exactly the reason `/api/cron` is — Stripe carries no session
+   * cookie, and deny-by-default would answer every webhook with a redirect to
+   * the sign-in page, leaving billing silently broken in a way that looks like
+   * "no customers have paid yet".
+   *
+   * The guard is the signature, verified against a secret that must be set:
+   * an unset `STRIPE_WEBHOOK_SECRET` refuses every request rather than
+   * accepting unverified JSON that could mark any dealership as paid.
+   */
+  '/api/webhooks',
 ]
 
 /** Never gated: static assets, framework internals, health checks. */
