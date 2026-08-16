@@ -39,6 +39,18 @@ export const AUDIT_ACTIONS = [
   'STAFF_REMOVED',
   'STAFF_RESTORED',
   'STAFF_ROLE_CHANGED',
+  /** A dealership moved between commercial states — trialled, comped, suspended. */
+  'TENANT_LIFECYCLE_CHANGED',
+  /**
+   * DealerTech staff granted themselves a role at a dealership.
+   *
+   * The single mechanism by which anyone outside a store can reach its
+   * customers, so it is audited at the moment of granting rather than only
+   * being visible in the roster. The dealership sees it on their own team
+   * page too — that is the design, not an oversight.
+   */
+  'SUPPORT_ACCESS_GRANTED',
+  'SUPPORT_ACCESS_REVOKED',
 ] as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number]

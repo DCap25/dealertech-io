@@ -6,6 +6,7 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { getDmsAdapter } from '@/lib/dms/registry'
+import type { LifecycleStatus } from '@/lib/billing/lifecycle'
 import { describePlan, planPriceSync, type SyncPlan } from './sync'
 
 /**
@@ -170,16 +171,52 @@ export async function syncStorePricing(
   })
 }
 
+/**
+ * Tenants whose prices we no longer pull.
+ *
+ * Only the two states where the product has actually stopped. Everything else
+ * — past due, restricted, cancelled but still inside the paid period — keeps
+ * syncing, and that is the point: a dealership that settles an invoice on day
+ * twenty must not come back to a fortnight-old price book and start quoting
+ * numbers the DMS will not honour. The cost of syncing a store that turns out
+ * not to pay is a few API calls; the cost of not syncing one that does is the
+ * exact failure this product exists to prevent.
+ */
+const DORMANT: LifecycleStatus[] = ['SUSPENDED', 'CHURNED']
+
 /** Every active store. What the scheduled job calls. */
 export async function syncAllStorePricing(): Promise<StoreSyncResult[]> {
   const db = getDb()
   const stores = await db
-    .select({ id: schema.stores.id, name: schema.stores.name })
+    .select({
+      id: schema.stores.id,
+      name: schema.stores.name,
+      lifecycleStatus: schema.organizations.lifecycleStatus,
+    })
     .from(schema.stores)
+    .innerJoin(schema.organizations, eq(schema.organizations.id, schema.stores.organizationId))
     .where(eq(schema.stores.isActive, true))
 
   const results: StoreSyncResult[] = []
   for (const store of stores) {
+    if (DORMANT.includes(store.lifecycleStatus)) {
+      /*
+        Recorded, not silent.
+
+        A store that vanishes from the sync report reads as a broken job. A
+        store that reports SKIPPED with a reason reads as a decision, which is
+        what it is — and it keeps the console's "needs attention" count honest
+        by not counting a suspended tenant as a failing integration.
+      */
+      results.push({
+        storeId: store.id,
+        storeName: store.name,
+        status: 'SKIPPED',
+        summary: `Not synced — account is ${store.lifecycleStatus.toLowerCase()}.`,
+        quarantined: 0,
+      })
+      continue
+    }
     // Sequential on purpose. A rate-limited vendor API answers a group of
     // twenty rooftops far better one at a time than twenty at once.
     results.push(await syncStorePricing(store.id, store.name))

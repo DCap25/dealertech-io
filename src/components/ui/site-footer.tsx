@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { AccountBanner } from './account-banner'
 
 /**
  * The line at the bottom of every page.
@@ -56,12 +57,20 @@ export function Copyright() {
 }
 
 /**
- * Inside the product. Wraps a whole section of the workspace, plus the two
- * customer-facing surfaces.
+ * Inside the product. Wraps a whole section of the workspace.
+ *
+ * Also where the account notice goes, for the same reason the footer does:
+ * "every page in the workspace" has to survive the next page somebody adds,
+ * and a banner pasted into sixteen files will be missing from the seventeenth.
+ *
+ * Note what this does NOT cover — `CustomerFrame` is a separate wrapper, so a
+ * customer holding a tablet or opening a menu link can never be shown the
+ * dealership's billing state. That separation is load-bearing, not incidental.
  */
 export function AppFrame({ children }: { children: ReactNode }) {
   return (
     <>
+      <AccountBanner />
       {children}
       <PoweredBy />
     </>

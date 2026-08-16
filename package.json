@@ -23,6 +23,7 @@
     "platform:list": "tsx --env-file=.env.local scripts/platform-admin.ts list",
     "check:env": "tsx --env-file=.env.local scripts/check-env.ts",
     "check:db": "tsx --env-file=.env.local scripts/check-db.ts",
+    "check:schema": "tsx --env-file=.env.local scripts/check-ledger.ts",
     "verify:rls": "tsx --env-file=.env.local scripts/verify-rls.ts",
     "smoke": "tsx --env-file=.env.local scripts/smoke.ts",
     "db:test:up": "powershell -ExecutionPolicy Bypass -File scripts/test-db.ps1 up",

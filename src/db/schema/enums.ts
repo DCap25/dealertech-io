@@ -231,3 +231,47 @@ export const opportunityOutcomeEnum = pgEnum('opportunity_outcome', [
   'DECLINED',
   'SKIPPED',
 ])
+
+// ---------------------------------------------------------------- billing
+/**
+ * Where a tenant stands commercially. The single source of truth for access —
+ * Stripe only ever *informs* this, via the lifecycle engine in
+ * src/lib/billing/lifecycle.ts. See docs/SAAS_PLAN.md §4.
+ */
+export const lifecycleStatusEnum = pgEnum('lifecycle_status', [
+  'TRIAL',
+  'EXPIRED',
+  'ACTIVE',
+  'PAST_DUE',
+  'RESTRICTED',
+  'SUSPENDED',
+  'CANCELED',
+  'CHURNED',
+  'COMPED',
+])
+
+/** Who moved a tenant between lifecycle states. */
+export const lifecycleActorEnum = pgEnum('lifecycle_actor', [
+  'SYSTEM',
+  'WEBHOOK',
+  'RECONCILER',
+  'PLATFORM_ADMIN',
+])
+
+/** How a dealer group pays: card on file, or invoiced with net terms. */
+export const collectionModeEnum = pgEnum('collection_mode', ['CARD', 'INVOICE'])
+
+/** Mirror of Stripe's subscription status, plus COMPED which Stripe never sees. */
+export const subscriptionStatusEnum = pgEnum('subscription_status', [
+  'TRIALING',
+  'ACTIVE',
+  'PAST_DUE',
+  'CANCELED',
+  'COMPED',
+])
+
+export const onboardingStepStatusEnum = pgEnum('onboarding_step_status', [
+  'PENDING',
+  'DONE',
+  'SKIPPED',
+])

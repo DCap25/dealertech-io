@@ -5,7 +5,7 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { recordAudit } from '@/lib/audit/record'
-import { requireUser } from '@/lib/auth/session'
+import { checkAccess, requireUser } from '@/lib/auth/session'
 import { isInvitableRole, normaliseEmail } from '@/lib/invites/invite'
 import { createInvitation } from '@/lib/invites/create'
 import {
@@ -54,6 +54,17 @@ export async function inviteStaff(
   if (!canManageStaff(user.role)) {
     return { error: 'Only a service manager or administrator can invite staff.' }
   }
+
+  /*
+    Checked after the role, before anything is written.
+
+    Order matters for the message a manager reads: "you are not allowed to do
+    this" and "the account needs attention first" are different problems with
+    different fixes, and reporting the billing one to somebody who could not
+    have invited staff anyway would send them chasing an invoice for nothing.
+  */
+  const access = await checkAccess('INVITE_STAFF')
+  if (!access.allowed) return { error: access.error }
 
   const email = normaliseEmail(String(formData.get('email') ?? ''))
   const role = String(formData.get('role') ?? '')

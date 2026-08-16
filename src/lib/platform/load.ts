@@ -1,9 +1,11 @@
 // Not `server-only`: the provisioning path is also reachable from a CLI script
 // when a dealership is stood up ahead of a demo. It still cannot reach a
 // browser — it imports the scoped database client.
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
+import { lifecycleHistory } from '@/lib/billing/store'
+import type { LifecycleStatus } from '@/lib/billing/lifecycle'
 
 /**
  * The operational view of the platform.
@@ -23,6 +25,7 @@ import { withCurrentUserScope } from '@/db/scoped'
 export interface TenantSummary {
   storeId: string
   storeName: string
+  organizationId: string
   organizationName: string
   franchiseMake: string | null
   state: string | null
@@ -34,6 +37,10 @@ export interface TenantSummary {
   lastSyncAt: Date | null
   lastSyncStatus: string | null
   lastSyncSummary: string | null
+  /** Where they stand commercially. Read next to sync health, deliberately. */
+  lifecycleStatus: LifecycleStatus
+  lifecycleChangedAt: Date
+  trialEndsAt: Date | null
 }
 
 export async function loadTenants(): Promise<TenantSummary[]> {
@@ -42,11 +49,15 @@ export async function loadTenants(): Promise<TenantSummary[]> {
       .select({
         storeId: schema.stores.id,
         storeName: schema.stores.name,
+        organizationId: schema.organizations.id,
         organizationName: schema.organizations.name,
         franchiseMake: schema.stores.franchiseMake,
         state: schema.stores.state,
         isActive: schema.stores.isActive,
         createdAt: schema.stores.createdAt,
+        lifecycleStatus: schema.organizations.lifecycleStatus,
+        lifecycleChangedAt: schema.organizations.lifecycleChangedAt,
+        trialEndsAt: schema.organizations.trialEndsAt,
       })
       .from(schema.stores)
       .innerJoin(schema.organizations, eq(schema.organizations.id, schema.stores.organizationId))
@@ -164,6 +175,112 @@ export interface JobRun {
   quarantinedCount: number
   startedAt: Date
 }
+
+/**
+ * One dealer group in full, for the tenant page.
+ *
+ * Returns null rather than throwing when the id does not resolve — which
+ * covers both a bad uuid in the URL and, importantly, a caller who is not
+ * platform staff: the RLS policies simply return no rows, and the page turns
+ * that into a 404 like every other unknown id. The console does not announce
+ * itself to people who should not be looking at it.
+ *
+ * Note what this deliberately does not fetch: a single customer, vehicle or
+ * repair order. The policies would refuse anyway (migration 0016), but the
+ * query does not ask, so nobody reading this file later mistakes the console
+ * for something that can.
+ */
+export async function loadTenantDetail(organizationId: string) {
+  return withCurrentUserScope(async (db) => {
+    const [org] = await db
+      .select({
+        id: schema.organizations.id,
+        name: schema.organizations.name,
+        slug: schema.organizations.slug,
+        lifecycleStatus: schema.organizations.lifecycleStatus,
+        lifecycleChangedAt: schema.organizations.lifecycleChangedAt,
+        trialEndsAt: schema.organizations.trialEndsAt,
+        createdAt: schema.organizations.createdAt,
+      })
+      .from(schema.organizations)
+      .where(eq(schema.organizations.id, organizationId))
+      .limit(1)
+
+    if (!org) return null
+
+    const stores = await db
+      .select({
+        id: schema.stores.id,
+        name: schema.stores.name,
+        franchiseMake: schema.stores.franchiseMake,
+        state: schema.stores.state,
+        laborRate: schema.stores.laborRate,
+        isActive: schema.stores.isActive,
+        createdAt: schema.stores.createdAt,
+      })
+      .from(schema.stores)
+      .where(eq(schema.stores.organizationId, organizationId))
+      .orderBy(schema.stores.name)
+
+    const storeIds = stores.map((s) => s.id)
+
+    // Sequential rather than Promise.all: one transaction is one connection,
+    // so parallel queries inside a scope serialise anyway. See src/db/README.md.
+    const staff = storeIds.length === 0 ? [] : await db
+      .select({
+        // The role row's own id, not the user's — revoking support access
+        // targets one grant, and a person can hold a role at several rooftops.
+        roleId: schema.userStoreRoles.id,
+        storeId: schema.userStoreRoles.storeId,
+        userId: schema.userStoreRoles.userId,
+        name: schema.users.fullName,
+        email: schema.users.email,
+        role: schema.userStoreRoles.role,
+        expiresAt: schema.userStoreRoles.expiresAt,
+        lastSeenAt: schema.users.lastSeenAt,
+      })
+      .from(schema.userStoreRoles)
+      .innerJoin(schema.users, eq(schema.users.id, schema.userStoreRoles.userId))
+      .where(and(
+        eq(schema.userStoreRoles.isActive, true),
+        inArray(schema.userStoreRoles.storeId, storeIds),
+      ))
+
+    const history = await lifecycleHistory(db, organizationId)
+
+    const [billing] = await db
+      .select({
+        id: schema.billingAccounts.id,
+        stripeCustomerId: schema.billingAccounts.stripeCustomerId,
+        collectionMode: schema.billingAccounts.collectionMode,
+        billingEmail: schema.billingAccounts.billingEmail,
+        poNumber: schema.billingAccounts.poNumber,
+        netTermsDays: schema.billingAccounts.netTermsDays,
+      })
+      .from(schema.billingAccounts)
+      .where(eq(schema.billingAccounts.organizationId, organizationId))
+      .limit(1)
+
+    const subscription = billing
+      ? (await db
+          .select({
+            id: schema.subscriptions.id,
+            planKey: schema.subscriptions.planKey,
+            status: schema.subscriptions.status,
+            rooftopQuantity: schema.subscriptions.rooftopQuantity,
+            currentPeriodEnd: schema.subscriptions.currentPeriodEnd,
+            cancelAtPeriodEnd: schema.subscriptions.cancelAtPeriodEnd,
+          })
+          .from(schema.subscriptions)
+          .where(eq(schema.subscriptions.billingAccountId, billing.id))
+          .limit(1))[0] ?? null
+      : null
+
+    return { org, stores, staff, history, billing: billing ?? null, subscription }
+  })
+}
+
+export type TenantDetail = NonNullable<Awaited<ReturnType<typeof loadTenantDetail>>>
 
 /** Recent price syncs across every tenant, worst first. */
 export async function loadRecentJobRuns(limit = 25): Promise<JobRun[]> {

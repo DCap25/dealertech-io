@@ -1,5 +1,6 @@
+import { sql } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp, boolean, integer, numeric, index, unique } from 'drizzle-orm/pg-core'
-import { userRoleEnum } from './enums'
+import { lifecycleStatusEnum, userRoleEnum } from './enums'
 
 /**
  * Tenancy.
@@ -14,6 +15,23 @@ export const organizations = pgTable('organizations', {
   name: text('name').notNull(),
   /** Dealer group slug, used in URLs. */
   slug: text('slug').notNull().unique(),
+
+  /**
+   * Where this tenant stands commercially — the single source of truth for
+   * access. Only src/lib/billing/lifecycle.ts moves it, and every move writes
+   * a lifecycle_events row alongside. Stripe informs it; it never reads Stripe.
+   */
+  lifecycleStatus: lifecycleStatusEnum('lifecycle_status').notNull().default('TRIAL'),
+  lifecycleChangedAt: timestamp('lifecycle_changed_at', { withTimezone: true })
+    .notNull().defaultNow(),
+  /**
+   * When the trial lapses. On the organization rather than the subscription
+   * because a trial predates any Stripe object — there is nothing else to hang
+   * it on. Defaults thirty days out so self-serve signup needs no extra write.
+   */
+  trialEndsAt: timestamp('trial_ends_at', { withTimezone: true })
+    .default(sql`now() + interval '30 days'`),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -103,6 +121,19 @@ export const userStoreRoles = pgTable(
     /** Advisor's DMS operator number, for matching RO ownership on import. */
     dmsOperatorCode: text('dms_operator_code'),
     isActive: boolean('is_active').notNull().default(true),
+
+    /**
+     * When this grant stops working, for support access.
+     *
+     * Null on every ordinary role — a dealership's own staff do not expire.
+     * Set when DealerTech staff grant themselves a role at a store to
+     * investigate something, so the grant lapses on its own rather than
+     * depending on somebody remembering to revoke it. The session loader
+     * treats an elapsed expiry as no membership at all; the row stays,
+     * because "who could see this store last March" is the question the
+     * whole support-access design exists to answer.
+     */
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

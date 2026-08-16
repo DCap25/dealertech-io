@@ -2,9 +2,12 @@ import 'server-only'
 import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
-import { and, asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, gt, isNull, or } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import {
+  permits, resolveAccess, type AccessDecision, type GuardedAction,
+} from '@/lib/billing/access'
 import {
   ACTIVE_STORE_COOKIE, resolveActiveStore,
   type StaffRole, type StoreMembership,
@@ -54,6 +57,8 @@ export interface CurrentUser {
    * separation is the whole design; see migration 0016.
    */
   isPlatformAdmin: boolean
+  /** What this dealership may do today. Never null once a store is active. */
+  access: AccessDecision
 }
 
 /**
@@ -79,6 +84,17 @@ export interface Session {
   active: StoreMembership | null
   memberships: StoreMembership[]
   isPlatformAdmin: boolean
+  /**
+   * What the dealership behind the active rooftop may do today.
+   *
+   * Resolved once per request alongside the identity, because a banner and a
+   * guard on the same page must not be able to disagree — and because
+   * re-deriving it per component would mean a query per component.
+   *
+   * Null when there is no active store, which is a platform admin with nothing
+   * to be restricted about.
+   */
+  access: AccessDecision | null
 }
 
 /**
@@ -151,6 +167,21 @@ export const getSession = cache(async (): Promise<Session | null> => {
       eq(schema.users.id, data.user.id),
       eq(schema.userStoreRoles.isActive, true),
       eq(schema.stores.isActive, true),
+      /*
+        Support access that has run out is no access.
+
+        Ordinary dealership roles carry no expiry and match the first branch.
+        The second covers a DealerTech engineer who granted themselves a role
+        to look at a sync failure: when the deadline passes the membership
+        stops resolving here, and `current_user_store_ids()` stops returning
+        the store in the database too (migration 0023). Two independent checks
+        on purpose — this is the one path by which anybody outside a
+        dealership reaches its customers.
+      */
+      or(
+        isNull(schema.userStoreRoles.expiresAt),
+        gt(schema.userStoreRoles.expiresAt, new Date()),
+      ),
     ))
     .orderBy(asc(schema.stores.name))
 
@@ -196,6 +227,39 @@ export const getSession = cache(async (): Promise<Session | null> => {
     .where(eq(schema.users.id, data.user.id))
     .limit(1)
 
+  /*
+    Where this dealership stands commercially.
+
+    Read on the privileged connection like everything else in this file — it
+    establishes the context the rest of the request is scoped by, so it cannot
+    itself be scoped. One extra query per request, on the same connection that
+    already resolved the memberships.
+
+    A failure here must not sign anybody out or blank a page: the access engine
+    treats a missing status as full access with a note, which is the deliberate
+    fail-open described in src/lib/billing/access.ts.
+  */
+  let access: AccessDecision | null = null
+  if (active) {
+    const [org] = await db
+      .select({
+        status: schema.organizations.lifecycleStatus,
+        statusChangedAt: schema.organizations.lifecycleChangedAt,
+        trialEndsAt: schema.organizations.trialEndsAt,
+      })
+      .from(schema.organizations)
+      .innerJoin(schema.stores, eq(schema.stores.organizationId, schema.organizations.id))
+      .where(eq(schema.stores.id, active.storeId))
+      .limit(1)
+
+    access = resolveAccess({
+      status: org?.status,
+      statusChangedAt: org?.statusChangedAt,
+      trialEndsAt: org?.trialEndsAt ?? null,
+      asOf: new Date(),
+    })
+  }
+
   return {
     id: data.user.id,
     email: identity?.email ?? data.user.email ?? '',
@@ -203,6 +267,7 @@ export const getSession = cache(async (): Promise<Session | null> => {
     active,
     memberships,
     isPlatformAdmin,
+    access,
   }
 })
 
@@ -228,6 +293,15 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     isAdvisor: active.role === 'ADVISOR' || active.role === 'SERVICE_MANAGER',
     memberships: session.memberships,
     isPlatformAdmin: session.isPlatformAdmin,
+    /*
+      Never null here. `getSession` resolves access whenever there is an active
+      store, and this function has already returned if there is not — but the
+      types cannot see that, and defaulting is safer than asserting. The
+      fallback is the same fail-open the engine uses.
+    */
+    access: session.access ?? resolveAccess({
+      status: null, statusChangedAt: null, asOf: new Date(),
+    }),
   }
 })
 
@@ -281,6 +355,37 @@ export async function accountShape(userId: string): Promise<{
   ])
 
   return { hasStore: store.length > 0, isPlatformAdmin: platform.length > 0 }
+}
+
+/**
+ * May the current dealership do this right now?
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS RETURNS A MESSAGE RATHER THAN REDIRECTING
+ * ---------------------------------------------------------------------------
+ * `requireUser()` redirects because being signed out has one sensible
+ * response. Being past due does not: the person hitting this is mid-task, and
+ * bouncing them to a billing page loses whatever they had typed. Every caller
+ * here is a server action that already returns `{ error }` to a form, so the
+ * refusal renders where they are, in words that say what to do about it.
+ *
+ * Nothing on the drive calls this. The guarded actions are administrative by
+ * construction — see `GuardedAction` — because a billing problem must never
+ * break the drive.
+ */
+export async function checkAccess(
+  action: GuardedAction,
+): Promise<{ allowed: true } | { allowed: false; error: string }> {
+  const user = await requireUser()
+  if (permits(user.access, action)) return { allowed: true }
+
+  return {
+    allowed: false,
+    error:
+      user.access.level === 'SUSPENDED'
+        ? 'This account is suspended. Contact DealerTech to restore access.'
+        : 'Billing needs attention before this can be changed. Everything else keeps working — see the notice at the top of the page.',
+  }
 }
 
 /**

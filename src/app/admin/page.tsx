@@ -1,9 +1,11 @@
+import Link from 'next/link'
 import { headers } from 'next/headers'
 import { requirePlatformAdmin } from '@/lib/auth/session'
 import { signOut } from '@/app/login/actions'
 import { loadLeads, loadRecentJobRuns, loadTenants } from '@/lib/platform/load'
 import { knownMakes } from '@/lib/warranty'
 import { ProvisionForm } from './provision-form'
+import { LifecycleBadge } from './ui'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Platform' }
@@ -164,26 +166,38 @@ export default async function AdminPage() {
         ) : (
           <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
             {tenants.map((t) => (
-              <li key={t.storeId} className="flex flex-wrap items-center justify-between gap-3 p-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">
-                    {t.storeName}
-                    {!t.isActive && (
-                      <span className="ml-2 rounded bg-neutral-200 px-1.5 py-0.5 text-xs dark:bg-neutral-800">
-                        inactive
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs text-neutral-500">
-                    {[t.organizationName, t.franchiseMake ?? 'multi-brand', t.state]
-                      .filter(Boolean).join(' · ')}
-                  </p>
-                </div>
-                <div className="flex items-center gap-4 text-xs text-neutral-500">
-                  <span>{t.staffCount} staff</span>
-                  {t.pendingInvites > 0 && <span>{t.pendingInvites} invited</span>}
-                  <SyncBadge at={t.lastSyncAt} status={t.lastSyncStatus} createdAt={t.createdAt} now={now} />
-                </div>
+              <li key={t.storeId}>
+                <Link
+                  href={`/admin/tenants/${t.organizationId}`}
+                  className="flex flex-wrap items-center justify-between gap-3 p-3 hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">
+                      {t.storeName}
+                      {!t.isActive && (
+                        <span className="ml-2 rounded bg-neutral-200 px-1.5 py-0.5 text-xs dark:bg-neutral-800">
+                          inactive
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-neutral-500">
+                      {[t.organizationName, t.franchiseMake ?? 'multi-brand', t.state]
+                        .filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-neutral-500">
+                    <span>{t.staffCount} staff</span>
+                    {t.pendingInvites > 0 && <span>{t.pendingInvites} invited</span>}
+                    {/*
+                      Commercial standing next to integration health, on one
+                      line. They are the two ways a tenant quietly stops being
+                      a customer, and reading them together is the whole
+                      purpose of this row.
+                    */}
+                    <LifecycleBadge status={t.lifecycleStatus} />
+                    <SyncBadge at={t.lastSyncAt} status={t.lastSyncStatus} createdAt={t.createdAt} now={now} />
+                  </div>
+                </Link>
               </li>
             ))}
           </ul>
