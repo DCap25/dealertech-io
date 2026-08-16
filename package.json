@@ -29,6 +29,7 @@
     "db:test:reset": "powershell -ExecutionPolicy Bypass -File scripts/test-db.ps1 reset",
     "db:test:down": "powershell -ExecutionPolicy Bypass -File scripts/test-db.ps1 down",
     "auth:provision": "tsx --env-file=.env.local scripts/provision-auth-users.ts",
+    "demo:rotate": "tsx --env-file=.env.local scripts/rotate-demo-passwords.ts",
     "db:apply": "tsx --env-file=.env.local scripts/apply-migrations.ts",
     "storage:provision": "tsx --env-file=.env.local scripts/provision-storage.ts"
   },

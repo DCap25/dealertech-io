@@ -315,14 +315,9 @@ the only record of a bug that took a long time to find.
 
 Stated plainly so nobody discovers them the hard way.
 
-- **Shared demo passwords are live.** The six `@lonestarford.test` accounts on
-  the production Supabase project all share `dealertech-demo`, which is the
-  committed default in `scripts/provision-auth-users.ts`. They hold active
-  roles at the demo dealership, so anyone who has read this repository can sign
-  in and see it. The script now refuses that default against a non-local
-  database, but the accounts that already exist need rotating — see below.
 - **`admindan@dealertech.io` needs its password rotated.** Platform admin, so
-  it reaches every tenant's operational data.
+  it reaches every tenant's operational data. The demo staff accounts were
+  rotated off the committed default; this one has not been.
 - No error monitoring, no CI pipeline, no integration tests.
 - Rate limiting is per-instance and in-memory (`src/lib/rate-limit/`), which
   stops the cheap version and not a distributed one. A shared store is the
@@ -333,17 +328,24 @@ Stated plainly so nobody discovers them the hard way.
 ### Rotating the credentials
 
 ```bash
-# Demo staff — pick a password, tell whoever needs it, do not commit it.
-DEMO_PASSWORD="$(openssl rand -base64 24)" npm run auth:provision -- --repair
+# Demo staff. Prints the new password once — put it in a password manager.
+npm run demo:rotate
 
 # Platform admin — recreate with a new password, then confirm the grant.
 npm run platform:create
 npm run platform:list
 ```
 
-`--repair` deletes and recreates a mismatched login, so read what
-`provision-auth-users.ts` says about it before running it against anything
-that matters.
+Rotation is its own script for a reason. `auth:provision --repair` looks like
+it would do this and does not: repair only fires when an auth id has drifted
+from its application row, and when the ids match — which is the normal case —
+it reports `ok` and changes no password at all. It also deletes and recreates
+the account it repairs, which is right for a broken link and wrong for a
+password change.
+
+If one-tap sign-in stops working locally after a rotation, set
+`NEXT_PUBLIC_DEMO_PASSWORD` in `.env.local` to the new value. Without it the
+demo cards fill the address only.
 
 ### Two things that turned out not to be bugs
 

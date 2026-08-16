@@ -5,8 +5,26 @@ import { signIn, type SignInState } from './actions'
 
 const INITIAL: SignInState = {}
 
-/** Matches scripts/provision-auth-users.ts. Development only. */
-const DEMO_PASSWORD = 'dealertech-demo'
+/**
+ * The demo password, if this machine has been told it.
+ *
+ * It used to be the literal string, matching the committed default in
+ * provision-auth-users.ts. That made the one-tap cards work and also meant the
+ * password to six live accounts was sitting in a source file — and the moment
+ * those accounts were rotated, the cards silently filled the wrong one and
+ * "sign in" started failing for no visible reason.
+ *
+ * Read from the environment instead, and absent by default. Set it in
+ * .env.local alongside the rest of your local config and one-tap works as
+ * before; leave it unset and the cards fill the address only, which is still
+ * most of the typing. Either way nothing that opens a real account is in the
+ * repository.
+ *
+ * NEXT_PUBLIC_ because the fill happens in the browser. That is safe here and
+ * only here: the cards render solely outside production, and a value that is
+ * never set on the deployed site cannot be inlined into its bundle.
+ */
+const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? ''
 
 export interface DemoUser {
   email: string
@@ -76,7 +94,9 @@ export function SignInForm({ next, demoUsers }: { next: string; demoUsers: DemoU
             Demo accounts
           </p>
           <p className="mt-1 text-xs text-neutral-500">
-            Development only. Tap one to fill the form, then sign in.
+            {DEMO_PASSWORD
+              ? 'Development only. Tap one to fill the form, then sign in.'
+              : 'Development only. Tap one to fill the address — set NEXT_PUBLIC_DEMO_PASSWORD in .env.local to fill the password too.'}
           </p>
           <ul className="mt-2 space-y-2">
             {demoUsers.map((u) => (
@@ -85,7 +105,10 @@ export function SignInForm({ next, demoUsers }: { next: string; demoUsers: DemoU
                   type="button"
                   onClick={() => {
                     setEmail(u.email)
-                    setPassword(DEMO_PASSWORD)
+                    // Only when this machine knows it. Overwriting a password
+                    // the developer just typed with an empty string would be
+                    // worse than leaving the field alone.
+                    if (DEMO_PASSWORD) setPassword(DEMO_PASSWORD)
                   }}
                   className="touch-target flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--border)] px-3.5 py-2.5 text-left transition active:scale-[0.98] hover:border-neutral-900 dark:hover:border-neutral-300"
                 >
