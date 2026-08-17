@@ -428,6 +428,31 @@ exists to protect, that sentence is currently false. Sending `null` for both whe
 
 ### F4 — Nothing reads a link customer's answers · **High**
 
+> **RESOLVED — fixed by Opus per Q3(c), verified by Fable.** Commit `f802ef5`
+> (closes F12 too). Link answers now merge into the advisor's decision state
+> with per-line provenance through the same `decideFromCustomer` path the
+> tablet uses: pure tested helpers (`mergeCustomerAnswers` — sequence order,
+> later presentation wins per id, absence is silence; `answersToApply` —
+> `PENDING` dropped at the advisor boundary, advisor-decided lines never
+> overwritten), all four decision values flowing, `CALL_ME` included — F5's
+> filter bug deliberately not replicated. Freshness is two mechanisms: the
+> screen reads at mount and on tab-return (not polled; the send-to-tablet
+> comment now records that not polled ≠ not read), and `pushHandOffForVisit`
+> re-reads answers server-side at push time, so the permanent record cannot
+> inherit a stale page — the authorisation block and the RO lines finally
+> describe the same event. `presentationsForVisit` has callers, an `asc`
+> order matching its comment, and an explicit channel filter. Verified: merge
+> and boundary probes all exact; +11 tests, each failing pre-fix; 1,061
+> passing.
+>
+> **Noted in verification:** a pre-existing nuance is now more visible —
+> `decide()` refuses to re-decide an id that already holds a decision, so once
+> a customer's answer lands, the advisor can only clear it via reset (same as
+> the tablet mirror always was). And F6 now bites harder: customer-accepted
+> unpriced lines actually reach the payload, so the estimate-inclusive
+> authorisation figure is more likely to be exercised. F6 is the natural next
+> fix.
+
 **Where:** absence. `recordLinkDecisions` (`link-store.ts:123`) writes
 `presentation_sessions.decisions`; the only readers are the customer's own page
 and `latestAuthorization` / `repriceSinceAuthorisation`, which read
@@ -662,6 +687,10 @@ no explanation, immediately after doing the most ordinary thing in the builder.
 ---
 
 ### F12 — `presentationsForVisit` is dead code with an inverted comment · **Low**
+
+> **RESOLVED with F4** — commit `f802ef5`. The function now has callers
+> (`linkAnswersForVisit`), orders ascending as its comment claims, breaks
+> sequence ties on `startedAt`, and takes an explicit channel filter.
 
 **Where:** `src/lib/presentation/link-store.ts:346–367`.
 
