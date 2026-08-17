@@ -107,6 +107,87 @@ export function sanitizeDecisions(
   return out
 }
 
+/**
+ * One presentation's answers, as they sit on the row.
+ *
+ * `decisions` is deliberately `unknown`: it comes out of a jsonb column that
+ * anything could have written, and it is validated here against the ids that
+ * presentation actually showed rather than assumed to be well formed.
+ */
+export interface PresentedAnswers {
+  /** Which conversation on the visit this was. 1 at write-up, 2 after the MPI. */
+  sequence: number
+  /** The ids on that presentation's frozen snapshot. */
+  presentedIds: Iterable<string>
+  /** The `decisions` column, unvalidated. */
+  decisions: unknown
+}
+
+/**
+ * Everything the customer answered across a visit, as one map.
+ *
+ * A visit has more than one conversation by design — a menu at write-up and
+ * another after the technician has been under the car — and each is its own
+ * row starting from `{}`. So the answers have to be read together, and where
+ * the two overlap the later conversation is the one that happened last and
+ * therefore the one that stands.
+ *
+ * Merged in sequence order, oldest first, later wins per id. An item that was
+ * only on the earlier menu keeps its earlier answer: a second presentation
+ * that does not mention a line is silent about it, not a retraction.
+ *
+ * `PENDING` passes through like any other answer, because on a customer's
+ * screen it is one — tapping the same button twice clears the choice
+ * (`service-menu.tsx:53`), and somebody taking an answer back at two o'clock
+ * has said something about the line. What must not happen with it is further
+ * down, in `answersToApply`.
+ *
+ * Ties on `sequence` keep the order they arrived in, so a caller that reads
+ * oldest-first gets oldest-first — which matters while tablet sessions all
+ * still claim sequence 1.
+ */
+export function mergeCustomerAnswers(
+  presentations: PresentedAnswers[],
+): Record<string, Decision> {
+  const merged: Record<string, Decision> = {}
+  for (const presentation of [...presentations].sort((a, b) => a.sequence - b.sequence)) {
+    Object.assign(merged, sanitizeDecisions(presentation.presentedIds, presentation.decisions))
+  }
+  return merged
+}
+
+/**
+ * Which of those answers may land on the advisor's decision state.
+ *
+ * Two rules, both about not overwriting somebody with somebody else.
+ *
+ * `PENDING` is dropped. On the customer's screen it means they cleared their
+ * choice; on the advisor's it means nobody has answered, and writing it there
+ * would blank a decision the advisor made themselves and pull the card out of
+ * their stack while the totals still counted it as outstanding. An answer that
+ * was taken back is an absence, and an absence is what the advisor already has.
+ *
+ * A line the advisor has already decided themselves is left alone. Both records
+ * survive — theirs on the screen, the customer's in the presentation row — and
+ * the one an advisor typed while standing at the car is the more recent act.
+ * Silently replacing it is the risk that made a plain merge the wrong shape.
+ */
+export function answersToApply(
+  answers: Record<string, Decision>,
+  /** Ids the advisor has recorded a decision for. */
+  advisorDecided: Iterable<string>,
+): Record<string, Exclude<Decision, 'PENDING'>> {
+  const theirs = new Set(advisorDecided)
+  const out: Record<string, Exclude<Decision, 'PENDING'>> = {}
+
+  for (const [id, decision] of Object.entries(answers)) {
+    if (decision === 'PENDING') continue
+    if (theirs.has(id)) continue
+    out[id] = decision
+  }
+  return out
+}
+
 export interface DecisionTotals {
   accepted: number
   declined: number

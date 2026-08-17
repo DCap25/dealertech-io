@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  DECISIONS, followUpPriority, isAuthorised, isDecision, needsFollowUp,
-  sanitizeDecisions, totalDecisions, type Decision,
+  answersToApply, DECISIONS, followUpPriority, isAuthorised, isDecision,
+  mergeCustomerAnswers, needsFollowUp, sanitizeDecisions, totalDecisions,
+  type Decision,
 } from './decisions'
 
 describe('the three answers', () => {
@@ -124,6 +125,103 @@ describe('totalDecisions', () => {
       { brakes: 'ACCEPTED' },
     )
     expect(totals.authorisedAmount).toBe(618)
+  })
+})
+
+describe('mergeCustomerAnswers', () => {
+  it('lets the later conversation win where the two overlap', () => {
+    // Two menus on one visit — one at write-up, one after the technician has
+    // been under the car. Where both asked about the brakes, what they said
+    // the second time is what they think now.
+    const merged = mergeCustomerAnswers([
+      { sequence: 1, presentedIds: ['brakes', 'tyres'], decisions: { brakes: 'DECLINED', tyres: 'DECLINED' } },
+      { sequence: 2, presentedIds: ['brakes', 'align'], decisions: { brakes: 'ACCEPTED', align: 'CALL_ME' } },
+    ])
+    expect(merged).toEqual({ brakes: 'ACCEPTED', tyres: 'DECLINED', align: 'CALL_ME' })
+  })
+
+  it('merges in sequence order however the rows arrive', () => {
+    const merged = mergeCustomerAnswers([
+      { sequence: 2, presentedIds: ['brakes'], decisions: { brakes: 'ACCEPTED' } },
+      { sequence: 1, presentedIds: ['brakes'], decisions: { brakes: 'DECLINED' } },
+    ])
+    expect(merged.brakes).toBe('ACCEPTED')
+  })
+
+  it('keeps an answer the later menu never asked about', () => {
+    // A second presentation that does not mention a line is silent about it,
+    // not a retraction of what they already said.
+    const merged = mergeCustomerAnswers([
+      { sequence: 1, presentedIds: ['tyres'], decisions: { tyres: 'ACCEPTED' } },
+      { sequence: 2, presentedIds: ['brakes'], decisions: { brakes: 'ACCEPTED' } },
+    ])
+    expect(merged.tyres).toBe('ACCEPTED')
+  })
+
+  it('carries all four answers through', () => {
+    // The call-me above all: it is the highest-intent thing said on the sheet,
+    // and the tablet mirror already drops it once.
+    const merged = mergeCustomerAnswers([{
+      sequence: 1,
+      presentedIds: ['a', 'b', 'c', 'd'],
+      decisions: { a: 'ACCEPTED', b: 'DECLINED', c: 'CALL_ME', d: 'PENDING' },
+    }])
+    expect(merged).toEqual({ a: 'ACCEPTED', b: 'DECLINED', c: 'CALL_ME', d: 'PENDING' })
+  })
+
+  it('lets a customer take an answer back on a later menu', () => {
+    // Tapping the same button twice clears the choice, and that is a thing
+    // they did rather than a thing they failed to do.
+    const merged = mergeCustomerAnswers([
+      { sequence: 1, presentedIds: ['brakes'], decisions: { brakes: 'ACCEPTED' } },
+      { sequence: 2, presentedIds: ['brakes'], decisions: { brakes: 'PENDING' } },
+    ])
+    expect(merged.brakes).toBe('PENDING')
+  })
+
+  it('drops answers to ids that presentation never showed', () => {
+    const merged = mergeCustomerAnswers([
+      { sequence: 1, presentedIds: ['brakes'], decisions: { brakes: 'ACCEPTED', wipers: 'ACCEPTED' } },
+    ])
+    expect(merged).toEqual({ brakes: 'ACCEPTED' })
+  })
+
+  it('survives junk in the decisions column', () => {
+    for (const junk of [null, undefined, 'ACCEPTED', 7, []]) {
+      expect(mergeCustomerAnswers([
+        { sequence: 1, presentedIds: ['a'], decisions: junk },
+      ])).toEqual({})
+    }
+    expect(mergeCustomerAnswers([
+      { sequence: 1, presentedIds: ['a'], decisions: { a: 'MAYBE' } },
+    ])).toEqual({})
+  })
+
+  it('is empty when the visit had no link presentations', () => {
+    expect(mergeCustomerAnswers([])).toEqual({})
+  })
+})
+
+describe('answersToApply', () => {
+  it('lands a customer answer on a line nobody has decided', () => {
+    expect(answersToApply({ brakes: 'ACCEPTED', align: 'CALL_ME' }, []))
+      .toEqual({ brakes: 'ACCEPTED', align: 'CALL_ME' })
+  })
+
+  it('does not blank a line with an answer that was taken back', () => {
+    // Pending on their screen means they cleared their choice; on the
+    // advisor's it means nobody answered. Writing it across would delete a
+    // decision and pull the card out of the stack while the totals still
+    // counted it as outstanding.
+    expect(answersToApply({ brakes: 'PENDING' }, [])).toEqual({})
+  })
+
+  it('leaves a line the advisor decided themselves alone', () => {
+    // Both records survive — theirs on the screen, the customer's on the
+    // presentation row. The one typed at the car is the more recent act, and
+    // replacing it silently is what made a plain merge the wrong shape.
+    expect(answersToApply({ brakes: 'DECLINED', tyres: 'ACCEPTED' }, ['brakes']))
+      .toEqual({ tyres: 'ACCEPTED' })
   })
 })
 

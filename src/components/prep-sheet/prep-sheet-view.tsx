@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Card, money } from '@/components/ui/primitives'
 import {
@@ -18,6 +18,8 @@ import { OwnershipRow } from './ownership-row'
 import { NextActionCallout } from './next-action'
 import { HandoffPanel } from './handoff-panel'
 import { recordVisitOutcomes } from '@/app/drive/outcome-actions'
+import { readLinkAnswers } from '@/app/drive/present-actions'
+import { answersToApply } from '@/lib/presentation/decisions'
 import { CoverageStack } from './coverage-stack'
 import { OpportunityCard } from './opportunity-card'
 import { PresentMenu } from './present-menu'
@@ -169,11 +171,70 @@ export function PrepSheetView({ sheet }: { sheet: PrepSheet }) {
    * reading and changing their mind, so this one is reversible and moves
    * nothing on screen behind them.
    */
-  function decideFromCustomer(id: string, decision: OpportunityDecision) {
+  const decideFromCustomer = useCallback((id: string, decision: OpportunityDecision) => {
     setDecisions((prev) => ({ ...prev, [id]: decision }))
     setDecisionSources((prev) => ({ ...prev, [id]: 'CUSTOMER' }))
     setPulseKey((k) => k + 1)
-  }
+  }, [])
+
+  /**
+   * The answers that came back from a link, long after the conversation.
+   *
+   * A tablet is mirrored live because the customer is standing there. A link
+   * customer answers from an office at lunchtime, and until this existed their
+   * answers were written to the presentation row and read by nothing: the stack
+   * showed every item still outstanding, the totals counted them as unanswered,
+   * and the hand-off carried the advisor's own decisions underneath an
+   * authorisation block claiming the customer had agreed to them.
+   *
+   * Read when the page loads and again whenever the advisor comes back to the
+   * tab. Not polled, and the comment in `send-to-tablet.tsx` explaining why is
+   * still right — a spinner promising an imminent answer for two hours is a
+   * lie. Returning to the tab is the moment an advisor asks the question, and
+   * answering it then costs one query instead of one every second and a half.
+   * The hand-off re-reads this server-side regardless, so a screen left open
+   * since the morning cannot put a stale set of lines in the permanent record.
+   */
+  const latest = useRef({ decisions, decisionSources })
+  useEffect(() => {
+    latest.current = { decisions, decisionSources }
+  }, [decisions, decisionSources])
+  const appointmentId = sheet.appointment?.id ?? null
+
+  useEffect(() => {
+    if (!appointmentId) return
+    let live = true
+
+    async function pull() {
+      // Swallowed rather than surfaced: a failed read leaves the screen as it
+      // was, which is what it showed a second ago, and the hand-off reads the
+      // answers again on the server before anything permanent is written.
+      const answers = await readLinkAnswers(appointmentId!).catch(() => null)
+      if (!live || !answers) return
+
+      const { decisions: shown, decisionSources: sources } = latest.current
+      const landing = answersToApply(
+        answers,
+        Object.keys(shown).filter((id) => sources[id] !== 'CUSTOMER'),
+      )
+      for (const [id, decision] of Object.entries(landing)) {
+        if (shown[id] === decision) continue
+        decideFromCustomer(id, decision)
+      }
+    }
+
+    void pull()
+    const onReturn = () => {
+      if (document.visibilityState === 'visible') void pull()
+    }
+    window.addEventListener('focus', onReturn)
+    document.addEventListener('visibilitychange', onReturn)
+    return () => {
+      live = false
+      window.removeEventListener('focus', onReturn)
+      document.removeEventListener('visibilitychange', onReturn)
+    }
+  }, [appointmentId, decideFromCustomer])
 
   function reset() {
     setDecisions({})

@@ -4,7 +4,8 @@ import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { buildDeviceSnapshot } from '@/lib/pairing/snapshot'
 import { endSession, listDevices, pushToDevice, sessionForAdvisor } from '@/lib/pairing/store'
-import { createLinkPresentation } from '@/lib/presentation/link-store'
+import { createLinkPresentation, linkAnswersForVisit } from '@/lib/presentation/link-store'
+import type { Decision } from '@/lib/presentation/decisions'
 import type { MenuSelection } from '@/lib/menu/selection'
 import { demoNow } from '@/lib/demo-day'
 
@@ -136,6 +137,25 @@ export async function readSessionDecisions(
     decisions: (session.decisions ?? {}) as Record<string, string>,
     active: session.status === 'ACTIVE',
   }
+}
+
+/**
+ * What the customer answered on a link, hours after we sent it.
+ *
+ * The tablet mirror above polls one live session; this reads a visit. A link
+ * customer answers at lunchtime from an office, so there is no live session to
+ * watch — their answers sit on the presentation row until somebody asks for
+ * them, and until this existed nobody ever did.
+ *
+ * Returns the merged map including any `PENDING` the customer cleared. The
+ * caller decides what may land on their own state — `answersToApply` is that
+ * decision, and it is pure and tested.
+ */
+export async function readLinkAnswers(
+  appointmentId: string,
+): Promise<Record<string, Decision>> {
+  const user = await requireUser()
+  return linkAnswersForVisit(user.storeId, appointmentId)
 }
 
 export async function takeBackMenu(sessionId: string): Promise<void> {

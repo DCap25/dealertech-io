@@ -11,7 +11,10 @@ import {
   type DecisionSource, type HandOffReceipt,
 } from '@/lib/dms/handoff-record'
 import { repriceWarningNote, withAuthorization } from '@/lib/dms/authorization-note'
-import { latestAuthorization, repriceSinceAuthorisation } from '@/lib/presentation/link-store'
+import {
+  latestAuthorization, linkAnswersForVisit, repriceSinceAuthorisation,
+} from '@/lib/presentation/link-store'
+import { answersToApply } from '@/lib/presentation/decisions'
 import { needsReauthorisation } from '@/lib/presentation/reprice'
 import { existingSuccess, handoffsForAppointment, recordHandOff } from '@/lib/dms/handoff-store'
 import type { HandOffPayload } from '@/lib/dms/types'
@@ -128,6 +131,32 @@ export async function pushHandOffForVisit(
     const safeSources: Record<string, DecisionSource> = {}
     for (const [id, value] of Object.entries(sources)) {
       if (value === 'ADVISOR' || value === 'CUSTOMER') safeSources[id] = value
+    }
+
+    /**
+     * The customer's own answers, read here rather than trusted from the page.
+     *
+     * The authorisation above is read from the record; the lines it is attached
+     * to were not. A customer answering a link at lunchtime had their taps
+     * stored and looked at by nothing, so the note said "Confirmed by them,
+     * $618 approved" over a set of lines the advisor had chosen on their own —
+     * two statements about the same event that need not have overlapped at all.
+     *
+     * Re-read at the moment of the push because that is the copy that becomes
+     * permanent. An advisor whose page has been open since eight o'clock has a
+     * stale screen; the record must not inherit it.
+     *
+     * Their own decisions win where the two disagree — see `answersToApply`.
+     */
+    const advisorDecided = Object.keys(safeDecisions)
+      .filter((id) => safeSources[id] !== 'CUSTOMER')
+    const fromCustomer = answersToApply(
+      await linkAnswersForVisit(store.id, appointmentId),
+      advisorDecided,
+    )
+    for (const [id, decision] of Object.entries(fromCustomer)) {
+      safeDecisions[id] = decision
+      safeSources[id] = 'CUSTOMER'
     }
 
     const built = buildHandOffPayload(sheet, safeDecisions, new Date(), authorization)

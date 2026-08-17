@@ -1,10 +1,10 @@
 // Not `server-only`: the customer-facing route is a plain page and this is
 // reached from it as well as from advisor actions. It still cannot leave the
 // server — it imports the privileged database client.
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { recordAudit } from '@/lib/audit/record'
-import { sanitizeDecisions, type Decision } from './decisions'
+import { mergeCustomerAnswers, sanitizeDecisions, type Decision } from './decisions'
 import {
   createLinkToken, hashLinkToken, linkExpiryFrom, linkStatus,
   type LinkStatus,
@@ -343,8 +343,33 @@ export async function repriceSinceAuthorisation(
   })
 }
 
-/** Every presentation on a visit, oldest first. What the advisor view reads. */
-export async function presentationsForVisit(storeId: string, appointmentId: string) {
+/**
+ * Every presentation on a visit, oldest first.
+ *
+ * Ordered ascending because the read-back below merges them in that order and
+ * lets the later conversation win. It used to order `desc` under a comment
+ * claiming "oldest first" — harmless only because nothing called it, which was
+ * the deeper problem: a customer's answers were written and never read by
+ * anything (F4). `startedAt` breaks a tie on `sequence`, since tablet sessions
+ * do not set one and all claim to be the first conversation.
+ *
+ * Channel is filtered explicitly rather than left to the caller to remember. A
+ * tablet's answers already reach the advisor live, through the poll in
+ * `send-to-tablet.tsx`; a link's reach them only through here.
+ */
+export async function presentationsForVisit(
+  storeId: string,
+  appointmentId: string,
+  options: { channel?: 'TABLET' | 'LINK' | 'PRINT' } = {},
+) {
+  const where = [
+    eq(schema.presentationSessions.storeId, storeId),
+    eq(schema.presentationSessions.appointmentId, appointmentId),
+  ]
+  if (options.channel) {
+    where.push(eq(schema.presentationSessions.channel, options.channel))
+  }
+
   return getDb()
     .select({
       id: schema.presentationSessions.id,
@@ -359,9 +384,43 @@ export async function presentationsForVisit(storeId: string, appointmentId: stri
       endedAt: schema.presentationSessions.endedAt,
     })
     .from(schema.presentationSessions)
-    .where(and(
-      eq(schema.presentationSessions.storeId, storeId),
-      eq(schema.presentationSessions.appointmentId, appointmentId),
-    ))
-    .orderBy(desc(schema.presentationSessions.sequence))
+    .where(and(...where))
+    .orderBy(
+      asc(schema.presentationSessions.sequence),
+      asc(schema.presentationSessions.startedAt),
+    )
+}
+
+/**
+ * What the link customers on this visit have answered, as one map.
+ *
+ * This is the read that was missing. Everything a customer tapped on their own
+ * phone was stored correctly and no advisor surface ever looked at it: the prep
+ * sheet showed nothing change, the totals went on counting the items as
+ * unanswered, and the hand-off carried the advisor's own decisions — while the
+ * authorisation block built from `latestAuthorization` stamped "Confirmed by
+ * [name] … $X approved" onto the permanent DMS note. The record asserted a
+ * customer had agreed to lines they never touched. The claim is only true once
+ * something reads this.
+ *
+ * Scoped by store like every other advisor-side read here, because `getDb()`
+ * bypasses row-level security and the predicate is the whole isolation.
+ *
+ * The merge itself is pure and tested in `decisions.ts`; this function is the
+ * query and nothing else.
+ */
+export async function linkAnswersForVisit(
+  storeId: string,
+  appointmentId: string,
+): Promise<Record<string, Decision>> {
+  const rows = await presentationsForVisit(storeId, appointmentId, { channel: 'LINK' })
+
+  return mergeCustomerAnswers(rows.map((row) => {
+    const snapshot = row.snapshot as DeviceSnapshot | null
+    return {
+      sequence: row.sequence,
+      presentedIds: (snapshot?.tiers ?? []).flatMap((t) => t.items.map((i) => i.id)),
+      decisions: row.decisions,
+    }
+  }))
 }

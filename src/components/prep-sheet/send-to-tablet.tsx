@@ -24,6 +24,11 @@ import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
  * tablet returns to showing nothing. A link is not polled: the customer may
  * answer in ten minutes or at lunchtime, and a spinner on the advisor's screen
  * for two hours is a lie about what is happening.
+ *
+ * Not polled is not the same as not read, which is what it used to mean. A
+ * link's answers land on the prep sheet when it loads and again whenever the
+ * advisor comes back to the tab (`prep-sheet-view.tsx`), and the hand-off
+ * re-reads them on the server before anything reaches the DMS.
  */
 
 const POLL_MS = 1500
