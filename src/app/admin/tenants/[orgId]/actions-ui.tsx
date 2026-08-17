@@ -2,9 +2,9 @@
 
 import { useActionState, useState } from 'react'
 import {
-  compAccount, extendTrial, grantSupportAccess, reactivateAccount, revokeSupportAccess,
-  reverseCancellationAction, scheduleCancellationAction, suspendAccount, winBackAccount,
-  type TenantActionState,
+  compAccount, endCompAccount, extendTrial, grantSupportAccess, reactivateAccount,
+  revokeSupportAccess, reverseCancellationAction, scheduleCancellationAction, suspendAccount,
+  winBackAccount, type TenantActionState,
 } from '../actions'
 
 const INITIAL: TenantActionState = {}
@@ -142,6 +142,22 @@ export function LifecycleActions({
           title="Comp"
           description="Full access, no subscription, no expiry. Behaves exactly as ACTIVE."
           submitLabel="Comp this account"
+        />
+      )}
+
+      {/*
+        The comp's own ending. A comped tenant has nothing in Stripe, so the
+        cancellation controls in the commercial block refuse them — this is
+        where that refusal points.
+      */}
+      {status === 'COMPED' && (
+        <ActionForm
+          action={endCompAccount}
+          organizationId={organizationId}
+          title="End the comp"
+          description="Stops the free arrangement. They keep working for thirty days, as any cancelled account does, then the account closes."
+          submitLabel="End it"
+          danger
         />
       )}
 

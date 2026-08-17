@@ -75,6 +75,28 @@ export async function recordChange(
   })
 }
 
+/**
+ * Write one audit row inside the transaction that earned it.
+ *
+ * Swallows its own failures, matching `recordAudit` and `applyTransition`. The
+ * audit log is a record of the work, not a precondition for it: an
+ * unanticipated constraint must not roll back a change Stripe has already
+ * accepted, because that would leave the mirror disagreeing with Stripe for a
+ * reason nobody could see. The log may have gaps; it must not have lies.
+ */
+async function auditIn(
+  tx: Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0],
+  event: Parameters<typeof buildAuditRow>[0],
+): Promise<void> {
+  const row = buildAuditRow(event)
+  if (!row) return
+  try {
+    await tx.insert(schema.auditLog).values(row)
+  } catch (error) {
+    console.error(`[audit] could not record ${event.action}:`, error)
+  }
+}
+
 export type QuantityResult =
   | { ok: true; from: number; to: number }
   | { ok: false; reason: string }
@@ -179,6 +201,31 @@ export async function setRooftopQuantity(
       after: { rooftops: mirror.rooftopQuantity },
       changedByUserId: opts.changedByUserId,
       reason: opts.reason,
+    })
+
+    /*
+      Audited as well as recorded, per SAAS_PLAN §7 — every console mutation
+      leaves an audit row, and this one moves money directly. It shipped
+      without one: `subscription_changes` above answers what the arrangement
+      became, and nothing answered who reached for it.
+
+      storeId is null. Changing the billed rooftop count is an
+      organization-level act, and naming one rooftop would imply the others
+      were untouched — which under volume pricing is the opposite of true, as
+      every rooftop re-prices.
+    */
+    await auditIn(tx, {
+      action: 'SUBSCRIPTION_QUANTITY_CHANGED',
+      entityType: 'subscriptions',
+      entityId: row.id,
+      storeId: null,
+      userId: opts.changedByUserId ?? null,
+      changes: {
+        organizationId,
+        from: row.rooftopQuantity,
+        to: mirror.rooftopQuantity,
+        reason: opts.reason ?? null,
+      },
     })
   })
 
@@ -307,7 +354,7 @@ async function setCancelAtPeriodEnd(
       organization-level act, and naming one rooftop would imply the others
       were untouched.
     */
-    const auditRow = buildAuditRow({
+    await auditIn(tx, {
       action,
       entityType: 'subscriptions',
       entityId: row.id,
@@ -320,20 +367,6 @@ async function setCancelAtPeriodEnd(
         reason: opts.reason ?? null,
       },
     })
-    if (auditRow) {
-      /*
-        Swallowed, matching `recordAudit` and `applyTransition`. The audit log
-        is a record of the work, not a precondition for it — an unanticipated
-        constraint must not roll back a cancellation Stripe has already
-        accepted, which would leave the mirror disagreeing with Stripe for no
-        reason anybody could see.
-      */
-      try {
-        await tx.insert(schema.auditLog).values(auditRow)
-      } catch (error) {
-        console.error(`[audit] could not record ${action}:`, error)
-      }
-    }
   })
 
   return {

@@ -1,5 +1,5 @@
 import { differenceInCalendarDays } from 'date-fns'
-import { GRACE_DAYS, type LifecycleStatus } from './lifecycle'
+import { CHURN_AFTER_DAYS, GRACE_DAYS, type LifecycleStatus } from './lifecycle'
 
 /**
  * What a tenant may do today.
@@ -217,14 +217,27 @@ export function resolveAccess(input: AccessInput): AccessDecision {
         },
       }
 
-    case 'CANCELED':
+    case 'CANCELED': {
       /*
-        Cancelled, but paid through the end of the period.
+        Finished paying, still working — and the wording matters here.
 
-        They keep working to the day they paid for. Taking the product away the
-        moment somebody clicks cancel would be charging for time and not
-        delivering it, and it is also the last impression they leave with.
+        This banner used to say access continued "until the end of the paid
+        period", which was wrong in both directions. A tenant does not reach
+        CANCELED when somebody clicks cancel; scheduling a cancellation leaves
+        them ACTIVE, and Stripe only fires the event that lands them here once
+        the paid period has *already* ended. So the sentence described a
+        deadline that had passed, and named a paid period that a comp ended by
+        an administrator never had at all.
+
+        What is actually true of both is this: billing has stopped, and they
+        keep everything for the thirty days before CHURNED. Counting them down
+        is the same courtesy PAST_DUE gets, and it is the number that decides
+        whether somebody picks up the phone.
+
+        They keep working throughout. Taking the product away on the day the
+        money stops would be the last impression the product ever leaves.
       */
+      const daysLeft = Math.max(0, CHURN_AFTER_DAYS - daysInStatus)
       return {
         level: 'GRACE',
         blockedActions: ['ADD_STORE'],
@@ -233,9 +246,13 @@ export function resolveAccess(input: AccessInput): AccessDecision {
         banner: {
           audience: 'MANAGERS',
           tone: 'WARNING',
-          message: 'Your subscription is set to end. Access continues until the end of the paid period.',
+          message:
+            'Your subscription has ended. Everything keeps working for '
+            + `${daysLeft} more day${daysLeft === 1 ? '' : 's'}, and your records stay yours to `
+            + 'export after that. Talk to us if you would like to carry on.',
         },
       }
+    }
 
     case 'CHURNED':
       /*

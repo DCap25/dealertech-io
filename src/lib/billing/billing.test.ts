@@ -27,7 +27,7 @@ const ALL_STATUSES: LifecycleStatus[] = [
 const ALL_EVENTS: LifecycleEvent[] = [
   'SUBSCRIPTION_ACTIVATED', 'TRIAL_EXPIRED', 'TRIAL_EXTENDED', 'PAYMENT_FAILED',
   'PAYMENT_RECOVERED', 'DUNNING_EXHAUSTED', 'SUSPENDED_BY_ADMIN', 'REACTIVATED_BY_ADMIN',
-  'SUBSCRIPTION_CANCELED', 'CHURN_CONFIRMED', 'COMPED_BY_ADMIN', 'WIN_BACK',
+  'SUBSCRIPTION_CANCELED', 'COMP_ENDED', 'CHURN_CONFIRMED', 'COMPED_BY_ADMIN', 'WIN_BACK',
 ]
 
 const AUTOMATIC: LifecycleActor[] = ['SYSTEM', 'WEBHOOK', 'RECONCILER']
@@ -95,6 +95,47 @@ describe('lifecycle transitions', () => {
         }
       }
     }
+  })
+})
+
+describe('ending a comp, and who may say a subscription is over', () => {
+  it('lets a platform admin end a comp, landing in CANCELED rather than CHURNED', () => {
+    const result = transition('COMPED', 'COMP_ENDED', 'PLATFORM_ADMIN')
+    expect(result.ok).toBe(true)
+    // Thirty days of grace, like any other ending. A comped dealership still
+    // has customers booked in tomorrow.
+    if (result.ok) expect(result.to).toBe('CANCELED')
+  })
+
+  it('applies only to a comp', () => {
+    for (const from of ALL_STATUSES.filter((s) => s !== 'COMPED')) {
+      expect(transition(from, 'COMP_ENDED', 'PLATFORM_ADMIN').ok).toBe(false)
+    }
+  })
+
+  it('is not something a job can decide', () => {
+    for (const actor of AUTOMATIC) {
+      expect(transition('COMPED', 'COMP_ENDED', actor).ok).toBe(false)
+    }
+  })
+
+  it('refuses a platform admin who tries to declare a subscription cancelled', () => {
+    /*
+      The narrowing that COMP_ENDED exists to make possible, asserted from
+      every state a paying tenant can be in.
+
+      SUBSCRIPTION_CANCELED means "Stripe has stopped billing them", which only
+      Stripe can report. A console path firing it would mark a dealership
+      CANCELED while their card carried on being charged every month, with our
+      records and Stripe disagreeing and nothing anywhere to notice.
+
+      The console ends a real subscription by scheduling it with Stripe and
+      letting the webhook fire this when it actually happens.
+    */
+    for (const from of ALL_STATUSES) {
+      expect(transition(from, 'SUBSCRIPTION_CANCELED', 'PLATFORM_ADMIN').ok).toBe(false)
+    }
+    expect(transition('ACTIVE', 'SUBSCRIPTION_CANCELED', 'WEBHOOK').ok).toBe(true)
   })
 })
 

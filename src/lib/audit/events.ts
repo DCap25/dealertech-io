@@ -53,6 +53,14 @@ export const AUDIT_ACTIONS = [
    */
   'SUBSCRIPTION_CANCEL_SCHEDULED',
   'SUBSCRIPTION_CANCEL_REVERSED',
+  /**
+   * How many rooftops a group is billed for changed.
+   *
+   * The one console action that moves money directly, and it went unaudited
+   * for a phase — `subscription_changes` recorded it, which answers what the
+   * arrangement looked like, and nothing answered who reached for it.
+   */
+  'SUBSCRIPTION_QUANTITY_CHANGED',
   /** Somebody rang a lead back and wrote down what happened. */
   'LEAD_OUTCOME_RECORDED',
   /**

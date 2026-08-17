@@ -50,6 +50,7 @@ export type LifecycleEvent =
   | 'SUSPENDED_BY_ADMIN'
   | 'REACTIVATED_BY_ADMIN'
   | 'SUBSCRIPTION_CANCELED'
+  | 'COMP_ENDED'
   | 'CHURN_CONFIRMED'
   | 'COMPED_BY_ADMIN'
   | 'WIN_BACK'
@@ -134,7 +135,42 @@ const RULES: Record<LifecycleEvent, Rule> = {
   SUBSCRIPTION_CANCELED: {
     from: ['ACTIVE', 'PAST_DUE', 'RESTRICTED', 'COMPED'],
     to: 'CANCELED',
-    actors: ['WEBHOOK', 'RECONCILER', 'PLATFORM_ADMIN'],
+    /*
+      No PLATFORM_ADMIN, deliberately, and it is a narrowing rather than an
+      oversight.
+
+      This event means "Stripe has stopped billing them", which only Stripe can
+      report. A console path firing it would mark a dealership CANCELED while
+      their subscription carried on invoicing — our records saying the
+      relationship is over while their card is still charged monthly, with
+      nothing anywhere to notice the disagreement.
+
+      The console ends a subscription by scheduling it with Stripe
+      (`scheduleCancellation`) and letting the webhook fire this when it
+      actually happens. The one commercial ending that has no Stripe
+      counterpart is a comp, and that has its own event below.
+    */
+    actors: ['WEBHOOK', 'RECONCILER'],
+  },
+  COMP_ENDED: {
+    /*
+      Ending a free arrangement, which is the one cancellation with nothing in
+      Stripe behind it.
+
+      Separate from SUBSCRIPTION_CANCELED because the two are different facts
+      that happen to share a destination: one is Stripe reporting that billing
+      stopped, this is a person deciding a comp is over. Collapsing them would
+      have meant giving the console authority over the first, which is exactly
+      what the note above refuses.
+
+      Lands in CANCELED rather than straight in CHURNED so the ordinary thirty
+      days of grace apply. A dealership on a comp is still a dealership with
+      customers booked in tomorrow, and ending the arrangement is a commercial
+      decision, not a reason to close their account this afternoon.
+    */
+    from: ['COMPED'],
+    to: 'CANCELED',
+    actors: ['PLATFORM_ADMIN'],
   },
   CHURN_CONFIRMED: {
     from: ['CANCELED', 'SUSPENDED', 'EXPIRED'],

@@ -142,6 +142,38 @@ export async function reactivateAccount(
   return move(organizationId, 'REACTIVATED_BY_ADMIN', reason, admin.id)
 }
 
+/**
+ * End a free arrangement.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS NOT THE CANCEL BUTTON
+ * ---------------------------------------------------------------------------
+ * A comp has nothing in Stripe, so there is no period to schedule against and
+ * `scheduleCancellation` refuses it. This is the other half of that refusal:
+ * the one commercial ending that is purely a decision.
+ *
+ * It fires COMP_ENDED rather than SUBSCRIPTION_CANCELED, which the console is
+ * deliberately not permitted to fire at all — see the note in lifecycle.ts.
+ * The engine restricts COMP_ENDED to a COMPED tenant, so there is no
+ * precondition check here; writing one would be a second opinion about the
+ * rule, and two opinions is how they drift apart.
+ *
+ * Lands in CANCELED, not CHURNED. They keep working through the ordinary
+ * thirty days — a dealership on a comp still has customers booked in tomorrow.
+ */
+export async function endCompAccount(
+  _previous: TenantActionState,
+  formData: FormData,
+): Promise<TenantActionState> {
+  const admin = await requirePlatformAdmin()
+  const organizationId = String(formData.get('organizationId') ?? '')
+  const reason = reasonFrom(formData)
+  if (!reason) {
+    return { error: 'Say why the comp is ending. It is the counterpart to the reason it was granted.' }
+  }
+  return move(organizationId, 'COMP_ENDED', reason, admin.id)
+}
+
 export async function winBackAccount(
   _previous: TenantActionState,
   formData: FormData,
