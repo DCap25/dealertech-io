@@ -56,7 +56,9 @@ follow-up engine exists to serve. Nothing catches it: `reprice.ts` compares the
 frozen $449 against today's sheet, which is also $449, because both read the same
 stale field.
 
-**2. Opportunity ids are positional and reused.** `build.ts:610` assigns
+**2. Opportunity ids are positional and reused.** *(**FIXED** in `45db2f6`,
+verified — see the resolution note on F2. No migration needed: production held
+zero keyed rows.)* `build.ts:610` assigns
 `` `${o.type}-${index}` `` over the pre-sort array. Add one recall, or let a
 technician's MPI produce an alignment finding, and every later index shifts —
 onto a *different item of the same type*. Reproduced: `MAINTENANCE_DUE-0` is
@@ -251,7 +253,27 @@ it is the one place a customer-facing string is not the sanitised one.
 
 ### F2 — Opportunity ids are positional and get reused for different services · **Critical**
 
-**Where:** `src/lib/prep-sheet/build.ts:610`
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `45db2f6`. Ids are now
+> derived from what the opportunity *is* — `TYPE[:sourceId][:componentGroupKey]`,
+> assigned before the sort, sanitised to a URL/JSON-safe charset, with a stable
+> ordinal (`~2`) only where two rows are indistinguishable by every field the
+> sheet records (the documented residue, unreachable with the default interval
+> list). Verified adversarially: the original reproductions now show **zero** id
+> remaps across a recall arriving, an MPI landing, and a decline resolving; the
+> substitution case delivers the correct item; engineered collisions stay
+> unique and deterministic; hostile source ids are sanitised. +6 tests, each
+> proven to fail against the positional scheme; 1,037 passing.
+>
+> **The "migration tail" feared in §6 does not exist.** Traced in code and
+> checked read-only against production: `opportunityKey` is built from `o.id`
+> but nothing parses or joins it (it is only an upsert conflict target),
+> `cadence/` and `reconcile/` carry no opportunity keys at all, and production
+> holds **zero** `prep_sheet_outcomes` and zero `presentation_sessions` rows.
+> Two corrections to this review: `toOutcomeRecords` lives in
+> `src/lib/performance/visit-summary.ts`, not `command-center.ts`, and §6's
+> cadence-rows worry was unfounded. One observation, not a regression: the id
+> string embeds the `type` and `sourceId` *values* (the old scheme already
+> embedded `type`); a future nicety would be opaquing device-facing ids.
 ```ts
 .map((o, index) => ({ ...o, id: `${o.type}-${index}`, priorityScore: score(o) }))
 ```
