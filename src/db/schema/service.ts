@@ -414,7 +414,13 @@ export const prepSheetOutcomes = pgTable(
     customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
     vehicleId: uuid('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
 
-    /** Engine-assigned key, stable within one build of this visit's sheet. */
+    /**
+     * Engine-assigned identity for the opportunity — its type, the row it came
+     * from and the component group it acts on. Derived from what the work is,
+     * so it survives a rebuild of the sheet; rows written before that was true
+     * carry a positional key of the form `TYPE-3` and cannot be matched to
+     * anything on a sheet built today.
+     */
     opportunityKey: text('opportunity_key').notNull(),
     opportunityType: text('opportunity_type').notNull(),
     title: text('title').notNull(),

@@ -164,6 +164,98 @@ function score(o: Omit<Opportunity, 'priorityScore' | 'id'>): number {
   return Math.round(urgency + value + close + pocketBonus)
 }
 
+/** One opportunity before it has been given an identity or a rank. */
+type RawOpportunity = Omit<Opportunity, 'priorityScore' | 'id'>
+
+/**
+ * Opportunity identity.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS NOT AN ARRAY INDEX
+ * ---------------------------------------------------------------------------
+ * Ids used to be `${type}-${index}` over the pre-sort array below, which is
+ * built in fixed source order: recalls, declines, alignment, tyres, brakes,
+ * intervals, prepaid, warranty, upsell. Insert or remove one item and every
+ * later index shifted by one — and because the prefix was only the *type*, a
+ * shifted index usually landed on a different item of the same type. The id
+ * still parsed and still resolved, to the wrong service.
+ *
+ * That is not a rare race. The sheet is rebuilt on every server action, and
+ * the events that change its membership are the ordinary ones: a technician
+ * submits an MPI and an alignment and a tyre line appear *above* the interval
+ * services; a second recall arrives; reconcile resolves a decline in the
+ * background. Meanwhile the advisor's browser is still holding the ids it
+ * rendered with, and those ids are the only thing that crosses back to the
+ * server. Reproduced against these functions, all four of these followed: the
+ * customer was sent a $149 alignment where the advisor had ticked a $75 air
+ * filter; a decision came back marked ACCEPTED against a line nobody had been
+ * asked about; the re-pricing check compared two unrelated services and would
+ * have stamped "PRICE CHANGED SINCE THE CUSTOMER AGREED" on the repair order;
+ * and the frozen presentation snapshots — keyed on these ids, and outliving
+ * the build entirely — carried the mix-up forward for the whole session.
+ *
+ * So an id now says what the opportunity *is*: its type, the source row it
+ * came from, and the component group it acts on. All three are properties of
+ * the work, so they survive anything appearing or disappearing beside them,
+ * and they are decided before the sort, so ranking cannot move them either.
+ *
+ * Deliberately not part of the key:
+ *
+ *  - The title. `PPM_UNUSED` titles count remaining visits ("3 prepaid Oil
+ *    Change remaining") and interval details carry mileages — free text that
+ *    moves between two builds of the same visit is a worse key than no key.
+ *  - Anything hashed. These ids are read in logs, in decision maps and in
+ *    `prep_sheet_outcomes` rows; a readable key is worth a few characters.
+ */
+const ID_UNSAFE = /[^A-Za-z0-9_.-]+/g
+const ID_PART_MAX = 48
+
+/**
+ * Ids travel in JSON bodies, as object keys in decision maps, and into a text
+ * column. Source ids and campaign numbers come from other people's systems, so
+ * nothing free-form is trusted into one.
+ */
+function idPart(value: string): string {
+  const cleaned = value.trim().replace(ID_UNSAFE, '_').replace(/^_+|_+$/g, '')
+  return (cleaned || 'X').slice(0, ID_PART_MAX)
+}
+
+function identityKey(o: RawOpportunity): string {
+  const parts: string[] = [o.type]
+  // Both, when both exist. `sourceId` alone does not separate two prepaid
+  // entitlements sold on one contract, and the component group alone does not
+  // separate two declines for the same brakes.
+  if (o.sourceId) parts.push(idPart(o.sourceId))
+  if (o.componentGroupKey) parts.push(idPart(o.componentGroupKey))
+  return parts.join(':')
+}
+
+/**
+ * Identity, with collisions made explicit rather than assumed away.
+ *
+ * Most sites cannot collide — the two maintenance passes are mutually
+ * exclusive per interval, and warranty and upsell push at most one each. Some
+ * can: a caller-supplied interval list with the same component group twice, a
+ * duplicated recall campaign, an alignment recommendation beside an interval
+ * that also claims WHEEL_ALIGNMENT. Those get a stable ordinal within the
+ * colliding group — never the global array index, so an item appearing
+ * anywhere else on the sheet cannot reach them.
+ *
+ * Two items that collide are, by every field this sheet records, the same
+ * work, and the ordinal between them is the one thing here that a removal can
+ * still shift. That is the residue of an unanswerable question, and it is
+ * bounded to items we cannot tell apart in the first place.
+ */
+function assignIdentities(raw: RawOpportunity[]): (RawOpportunity & { id: string })[] {
+  const seen = new Map<string, number>()
+  return raw.map((o) => {
+    const key = identityKey(o)
+    const nth = (seen.get(key) ?? 0) + 1
+    seen.set(key, nth)
+    return { ...o, id: nth === 1 ? key : `${key}~${nth}` }
+  })
+}
+
 function urgencyForComponent(componentGroupKey: string | null | undefined): Urgency {
   if (!componentGroupKey) return 'MEDIUM'
   const group = getComponentGroup(componentGroupKey)
@@ -177,7 +269,7 @@ function urgencyForComponent(componentGroupKey: string | null | undefined): Urge
 export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
   const { asOf, vehicle, customer, store } = input
   const alerts: string[] = []
-  const raw: Omit<Opportunity, 'priorityScore' | 'id'>[] = []
+  const raw: RawOpportunity[] = []
 
   // ---- Project the odometer to the appointment, not the last known reading.
   const daysAhead = input.appointment
@@ -658,8 +750,8 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
   }
 
   // ------------------------------------------------------------ rank
-  const opportunities: Opportunity[] = raw
-    .map((o, index) => ({ ...o, id: `${o.type}-${index}`, priorityScore: score(o) }))
+  const opportunities: Opportunity[] = assignIdentities(raw)
+    .map((o) => ({ ...o, priorityScore: score(o) }))
     .sort((a, b) => b.priorityScore - a.priorityScore)
 
   const opportunityValue = opportunities.reduce((sum, o) => sum + o.estimatedAmount, 0)

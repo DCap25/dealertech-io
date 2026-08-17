@@ -11,7 +11,7 @@ import type { Opportunity } from '@/lib/prep-sheet'
 function outcome(over: Partial<OutcomeRecord> = {}): OutcomeRecord {
   return {
     appointmentId: 'a1',
-    opportunityKey: 'WEAR_PREDICTED-0',
+    opportunityKey: 'WEAR_PREDICTED:TIRES',
     opportunityType: 'WEAR_PREDICTED',
     title: 'Tires approaching replacement',
     urgency: 'HIGH',
@@ -309,7 +309,7 @@ describe('weekPeriod', () => {
 
 function opportunity(over: Partial<Opportunity> = {}): Opportunity {
   return {
-    id: 'WEAR_PREDICTED-0',
+    id: 'WEAR_PREDICTED:TIRES',
     type: 'WEAR_PREDICTED',
     title: 'Tires approaching replacement',
     detail: 'Worst corner RF at 4/32".',

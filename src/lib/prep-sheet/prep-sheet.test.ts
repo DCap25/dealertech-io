@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { buildPrepSheet } from './build'
 import { customerDetail } from './presentation'
 import type { PriceBook } from './pricing'
-import type { PrepSheetInput, InspectionSnapshot } from './types'
+import type {
+  MaintenanceInterval, PrepSheet, PrepSheetInput, InspectionSnapshot,
+} from './types'
 import type { Contract, PrepaidEntitlement } from '@/lib/coverage'
 import { buildMenu, defaultSelection } from '@/lib/menu/selection'
 
@@ -337,6 +339,218 @@ describe('prep sheet — alerts', () => {
       vehicle: { ...baseInput().vehicle, make: 'DELOREAN' },
     }))
     expect(sheet.alerts.join(' ')).toMatch(/No factory warranty reference data/i)
+  })
+})
+
+/**
+ * Opportunity identity.
+ *
+ * Ids were `${type}-${index}` over the pre-sort array, so a recall arriving or
+ * a technician's inspection landing shifted every later id onto a different
+ * item of the same type — and the id still resolved, to the wrong service.
+ *
+ * These pin the property rather than the format. The exact string is nobody's
+ * business outside `build.ts`; what must hold is that a line keeps its id
+ * while it is on the sheet, and that an id from one build never points at a
+ * different service on the next.
+ */
+describe('prep sheet — opportunity identity', () => {
+  /** Four interval services, every one of them due at 62,000 miles. */
+  const intervals: MaintenanceInterval[] = [
+    { description: 'Engine Air Filter', componentGroupKey: 'ENGINE_AIR_FILTER',
+      intervalMiles: 30_000, estimatedAmount: 75, opCode: 'ENG-FLT' },
+    { description: 'Cabin Air Filter', componentGroupKey: 'CABIN_AIR_FILTER',
+      intervalMiles: 30_000, estimatedAmount: 97, opCode: 'CAB-FLT' },
+    { description: 'Brake Fluid Exchange', componentGroupKey: 'BRAKE_FLUID_SERVICE',
+      intervalMiles: 45_000, estimatedAmount: 183, opCode: 'BRK-FLU' },
+    { description: 'Transmission Fluid Service', componentGroupKey: 'TRANS_FLUID_SERVICE',
+      intervalMiles: 60_000, estimatedAmount: 367, opCode: 'TRANS-SVC' },
+  ]
+
+  const lastServiceMileageByGroup = {
+    ENGINE_AIR_FILTER: 32_000,
+    CABIN_AIR_FILTER: 32_000,
+    BRAKE_FLUID_SERVICE: 17_000,
+    TRANS_FLUID_SERVICE: 2_000,
+  }
+
+  const brakeDecline = {
+    id: 'd1', description: 'Front Brake Pads & Rotors', componentGroupKey: 'BRAKE_PADS_SHOES',
+    quotedAmount: 449, declinedAt: new Date('2026-02-01T12:00:00Z'), mileageAtDecline: 55_000,
+  }
+  const cabinDecline = {
+    id: 'd2', description: 'Cabin air filter', componentGroupKey: 'CABIN_AIR_FILTER',
+    quotedAmount: 97, declinedAt: new Date('2026-03-01T12:00:00Z'), mileageAtDecline: 57_000,
+  }
+  const batteryDecline = {
+    id: 'd3', description: 'Battery replacement', componentGroupKey: 'BATTERY',
+    quotedAmount: 307, declinedAt: new Date('2026-04-01T12:00:00Z'), mileageAtDecline: 59_000,
+  }
+
+  const airbagRecall = {
+    campaignNumber: '24V-100', componentGroupKeys: ['AIRBAG_SRS'],
+    description: 'Inflator may rupture', isCandidate: true,
+  }
+  const wiringRecall = {
+    campaignNumber: '25V-222', componentGroupKeys: ['ELECTRICAL_SYSTEM'],
+    description: 'Wiring harness may chafe', isCandidate: false,
+  }
+
+  /** The sheet as it stands when the advisor opens the page. */
+  const sheetOf = (over: Partial<PrepSheetInput> = {}): PrepSheet =>
+    buildPrepSheet(baseInput({
+      maintenanceIntervals: intervals,
+      lastServiceMileageByGroup,
+      openDeclines: [brakeDecline, cabinDecline, batteryDecline],
+      openRecalls: [airbagRecall],
+      ...over,
+    }))
+
+  const idByTitle = (sheet: PrepSheet) =>
+    new Map(sheet.opportunities.map((o) => [o.title, o.id]))
+
+  /** Every line on both sheets kept the id it had. */
+  function expectSurvivorsKeepTheirIds(before: PrepSheet, after: PrepSheet) {
+    const was = idByTitle(before)
+    const now = idByTitle(after)
+    const survivors = [...was.keys()].filter((title) => now.has(title))
+    expect(survivors.length).toBeGreaterThan(3)
+    for (const title of survivors) {
+      expect(`${title} → ${now.get(title)}`).toBe(`${title} → ${was.get(title)}`)
+    }
+  }
+
+  /**
+   * The dangerous half, asserted the way the customer meets it: resolve each
+   * of yesterday's ids through the menu the customer would actually be shown.
+   * Same service, or nothing at all — never a different one.
+   */
+  function expectNoSubstitution(before: PrepSheet, after: PrepSheet) {
+    for (const original of before.opportunities) {
+      const resolved = after.opportunities.find((o) => o.id === original.id)
+      if (resolved) expect(resolved.title).toBe(original.title)
+
+      const menu = buildMenu(after.opportunities, { includedIds: [original.id] })
+      for (const item of menu.items) expect(item.opportunity.title).toBe(original.title)
+    }
+  }
+
+  it('keeps every id when a second recall arrives', () => {
+    const before = sheetOf()
+    const after = sheetOf({ openRecalls: [airbagRecall, wiringRecall] })
+    expect(after.opportunities.length).toBe(before.opportunities.length + 1)
+    expectSurvivorsKeepTheirIds(before, after)
+    expectNoSubstitution(before, after)
+  })
+
+  /*
+    The realistic trigger. A technician submits an MPI with uneven front tread,
+    which adds an alignment and a tyre line *above* the interval services in
+    source order — the exact shift that used to hand the customer a $149
+    alignment where the advisor had ticked a $75 air filter.
+  */
+  it('keeps every id when an inspection adds alignment and wear lines', () => {
+    const before = sheetOf()
+    const after = sheetOf({ inspectionHistory: tireHistory(4) })
+
+    const added = after.opportunities.filter((o) => !idByTitle(before).has(o.title))
+    expect(added.map((o) => o.title)).toContain('Four Wheel Alignment')
+    expect(added.map((o) => o.title)).toContain('Tires approaching replacement')
+
+    expectSurvivorsKeepTheirIds(before, after)
+    expectNoSubstitution(before, after)
+  })
+
+  /*
+    The quieter mode: reconcile resolves a decline in the background, with no
+    technician and no OEM pull involved. Under the positional scheme the ticked
+    "Rear brakes" became "Battery replacement" on the customer's phone.
+  */
+  it('keeps every id when a decline is resolved between builds', () => {
+    const before = sheetOf()
+    const after = sheetOf({ openDeclines: [brakeDecline, batteryDecline] })
+    expect(after.opportunities.length).toBe(before.opportunities.length - 1)
+    expectSurvivorsKeepTheirIds(before, after)
+    expectNoSubstitution(before, after)
+  })
+
+  it('is unmoved by ranking — the same sheet built twice reads the same', () => {
+    expect(idByTitle(sheetOf())).toEqual(idByTitle(sheetOf()))
+  })
+
+  /*
+    Uniqueness is guaranteed, not assumed. Everything here collides on some
+    part of the key: two intervals sharing a component group, an interval that
+    claims the group the alignment rule uses, a duplicated recall campaign, two
+    prepaid entitlements sold on one contract, and two entitlements identical
+    down to the group.
+  */
+  it('gives every line its own id on a sheet engineered to collide', () => {
+    const sheet = buildPrepSheet(baseInput({
+      maintenanceIntervals: [
+        ...intervals,
+        { description: 'Front Brake Pads & Rotors', componentGroupKey: 'BRAKE_PADS_SHOES',
+          intervalMiles: 30_000, estimatedAmount: 618, opCode: 'BRK-FR' },
+        { description: 'Rear Brake Pads & Rotors', componentGroupKey: 'BRAKE_PADS_SHOES',
+          intervalMiles: 30_000, estimatedAmount: 540, opCode: 'BRK-RR' },
+        { description: 'Wheel Alignment Check', componentGroupKey: 'WHEEL_ALIGNMENT',
+          intervalMiles: 30_000, estimatedAmount: 149, opCode: 'ALIGN' },
+        // No record and past the interval: lands in the second maintenance
+        // pass, which must not collide with the first.
+        { description: 'Spark Plug Replacement', componentGroupKey: 'SPARK_PLUGS',
+          intervalMiles: 60_000, estimatedAmount: 535, opCode: 'PLUGS' },
+      ],
+      lastServiceMileageByGroup: {
+        ...lastServiceMileageByGroup,
+        BRAKE_PADS_SHOES: 32_000,
+        WHEEL_ALIGNMENT: 32_000,
+      },
+      // Same brakes, twice, from two different repair orders.
+      openDeclines: [brakeDecline, { ...brakeDecline, id: 'd9' }, cabinDecline],
+      openRecalls: [airbagRecall, airbagRecall, wiringRecall],
+      prepaidEntitlements: [
+        { contractId: 'ppm1', componentGroupKey: 'OIL_CHANGE', label: 'Oil Change',
+          totalAllowed: 5, used: 2 },
+        { contractId: 'ppm1', componentGroupKey: 'TIRE_ROTATION', label: 'Tire Rotation',
+          totalAllowed: 5, used: 1 },
+        { contractId: 'ppm1', componentGroupKey: 'TIRE_ROTATION', label: 'Tire Rotation',
+          totalAllowed: 3, used: 0 },
+      ],
+      inspectionHistory: tireHistory(4),
+    }))
+
+    const ids = sheet.opportunities.map((o) => o.id)
+    expect(new Set(ids).size).toBe(ids.length)
+
+    // The pairs that would have shared a key are still separable.
+    const brakeIntervals = sheet.opportunities.filter((o) => o.type === 'MAINTENANCE_DUE'
+      && o.componentGroupKey === 'BRAKE_PADS_SHOES')
+    expect(brakeIntervals).toHaveLength(2)
+    expect(brakeIntervals[0]!.id).not.toBe(brakeIntervals[1]!.id)
+
+    const alignmentLines = sheet.opportunities.filter((o) => o.componentGroupKey === 'WHEEL_ALIGNMENT')
+    expect(alignmentLines).toHaveLength(2)
+
+    // Two entitlements on one contract are told apart by what they redeem
+    // against, not by where they sat in the array.
+    const oil = sheet.opportunities.find((o) => o.componentGroupKey === 'OIL_CHANGE')
+    const rotation = sheet.opportunities.find((o) => o.componentGroupKey === 'TIRE_ROTATION')
+    expect(oil!.id).not.toBe(rotation!.id)
+  })
+
+  /*
+    Campaign numbers and source ids come out of other people's systems and end
+    up in JSON keys, query strings and a text column.
+  */
+  it('keeps ids safe to put in a URL or a JSON key', () => {
+    const sheet = sheetOf({
+      openRecalls: [{ ...airbagRecall, campaignNumber: 'NHTSA 24V-999 / rev B & C' }],
+      openDeclines: [{ ...brakeDecline, id: 'ro#1182 line 3' }],
+    })
+    for (const o of sheet.opportunities) {
+      expect(o.id).toMatch(/^[A-Za-z0-9_.:~-]+$/)
+      expect(o.id).toBe(encodeURIComponent(o.id).replace(/%3A/g, ':'))
+    }
   })
 })
 
