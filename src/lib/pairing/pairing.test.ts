@@ -209,6 +209,122 @@ describe('buildDeviceSnapshot', () => {
     expect(snap.customerTotal).toBe(200)
     expect(snap.coveredTotal).toBe(100)
   })
+
+  /*
+    Badges.
+
+    Every snapshot test above this block runs on `likelyPayer: 'CUSTOMER_PAY'`,
+    so until these existed no test had ever produced a covered badge at all —
+    the branch that carries money to the tablet was the one branch the suite
+    never entered. These fixtures use $62 and $540 precisely because those
+    figures appear nowhere else in the payload.
+  */
+  const covered = (over: Partial<Opportunity> = {}) =>
+    opp({
+      title: 'Front brakes',
+      urgency: 'MEDIUM',
+      likelyPayer: 'VSC',
+      estimatedAmount: 540,
+      customerOutOfPocket: 62,
+      ...over,
+    })
+
+  it('says what the customer owes in the customer’s own words', () => {
+    const s2 = sheet([covered({ priceSource: 'STORE' })])
+    const snap = buildDeviceSnapshot(s2, { includedIds: ['o1'] })
+    expect(snap.tiers[0]!.items[0]!.badges).toEqual([
+      { label: 'Covered — you pay $62', tone: 'COVERED' },
+    ])
+
+    // The advisor's own register never crosses to the tablet. "Only $62 to
+    // them" is a sentence about the customer, read by the customer.
+    const json = JSON.stringify(snap)
+    expect(json).not.toContain('to them')
+    expect(json).not.toContain('Customer pays nothing')
+  })
+
+  it('calls full coverage covered, not “Customer pays nothing”', () => {
+    const s2 = sheet([covered({ priceSource: 'STORE', customerOutOfPocket: 0 })])
+    const snap = buildDeviceSnapshot(s2, { includedIds: ['o1'] })
+    expect(snap.tiers[0]!.items[0]!.badges).toEqual([
+      { label: 'Covered in full', tone: 'COVERED' },
+    ])
+  })
+
+  it('keeps the estimate out of the badge on an unpriced line', () => {
+    /*
+      The leak this closes, and why the whitelist test could not see it.
+
+      "Sends nothing the customer should not see" scans for forbidden *keys*.
+      A figure derived from `customerOutOfPocket` and baked into a label is a
+      forbidden *value* inside an allowed key, which that assertion cannot
+      catch by construction. So this one scans values: the price slot is
+      redacted for an unpriced line, and the numbers behind it must not reach
+      the screen by any other route.
+    */
+    const s2 = sheet([covered({ priceSource: 'ESTIMATE' })])
+    const snap = buildDeviceSnapshot(s2, { includedIds: ['o1'] })
+    const item = snap.tiers[0]!.items[0]!
+
+    expect(item.priceConfirmed).toBe(false)
+    expect(item.badges).toEqual([{ label: 'Coverage applies', tone: 'COVERED' }])
+
+    // Scanned as money *strings* across the whole payload rather than as bare
+    // digits, because the snapshot still ships `customerOutOfPocket` and
+    // `fullAmount` as raw numbers on an unpriced line — suppressed by every
+    // renderer, but present in the JSON. Whether they should be null is a
+    // separate question; nothing may render them either way.
+    const json = JSON.stringify(snap)
+    expect(json).not.toMatch(/\$\s?\d/)
+    expect(json).not.toContain('$62')
+    expect(json).not.toContain('$540')
+
+    const labels = JSON.stringify(snap.tiers.flatMap((t) => t.items.map((i) => i.badges)))
+    expect(labels).not.toContain('62')
+    expect(labels).not.toContain('540')
+  })
+
+  it('gives full coverage no price claim either when the price is unconfirmed', () => {
+    // "Covered in full" is a statement that the customer owes zero, which is
+    // the redacted figure said in words rather than digits.
+    const s2 = sheet([covered({ priceSource: 'ESTIMATE', customerOutOfPocket: 0 })])
+    const snap = buildDeviceSnapshot(s2, { includedIds: ['o1'] })
+    expect(snap.tiers[0]!.items[0]!.badges).toEqual([
+      { label: 'Coverage applies', tone: 'COVERED' },
+    ])
+  })
+
+  it('keeps the non-monetary coverage badges on an unpriced line', () => {
+    // Recall and prepaid say who pays, not how much, so there is nothing in
+    // them for the price rule to redact.
+    for (const [payer, label] of [
+      ['OEM_RECALL', 'Manufacturer pays'],
+      ['PPM', 'Already paid for'],
+    ] as const) {
+      const s2 = sheet([covered({ priceSource: 'ESTIMATE', likelyPayer: payer })])
+      const snap = buildDeviceSnapshot(s2, { includedIds: ['o1'] })
+      expect(snap.tiers[0]!.items[0]!.badges).toEqual([{ label, tone: 'COVERED' }])
+    }
+  })
+
+  it('still flags a safety item on an unpriced line', () => {
+    const s2 = sheet([
+      covered({ priceSource: 'ESTIMATE', urgency: 'SAFETY', likelyPayer: 'CUSTOMER_PAY' }),
+    ])
+    const snap = buildDeviceSnapshot(s2, { includedIds: ['o1'] })
+    expect(snap.tiers[0]!.items[0]!.badges).toEqual([{ label: 'Safety item', tone: 'SAFETY' }])
+  })
+
+  it('sends nothing about why the shop expects a yes', () => {
+    // Close rate and "declined before" are the shop's own reasons for pushing
+    // an item. They are on the advisor's list and must not be on the tablet's.
+    const s2 = sheet([
+      covered({ priceSource: 'STORE', type: 'DECLINED_SERVICE', closeProbability: 0.9 }),
+    ])
+    const json = JSON.stringify(buildDeviceSnapshot(s2, { includedIds: ['o1'] }))
+    expect(json).not.toContain('Declined before')
+    expect(json).not.toContain('High close rate')
+  })
 })
 
 describe('sanitizeDecisions', () => {

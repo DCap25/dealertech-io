@@ -278,6 +278,91 @@ export function easyYesReasons(o: Opportunity): EasyYesReason[] {
   return reasons.sort((a, b) => b.weight - a.weight)
 }
 
+export interface CustomerBadge {
+  label: string
+  tone: 'COVERED' | 'SAFETY'
+}
+
+/**
+ * What an unpriced line is allowed to claim.
+ *
+ * Coverage is true whether or not the store has a price on file — the payer
+ * comes from the contract, not from the price book — so the fact survives and
+ * only the figure goes.
+ */
+const COVERAGE_WITHOUT_A_PRICE = 'Coverage applies'
+
+/**
+ * The same reasons in the customer's own second person, and price-aware.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS NOT `easyYesReasons` WITH A FILTER
+ * ---------------------------------------------------------------------------
+ * It used to be exactly that: the device snapshot took `easyYesReasons`, kept
+ * the COVERED and SAFETY tones, and shipped the advisor's own labels to the
+ * tablet. Two things were wrong with it, and only one of them is about wording.
+ *
+ * The wording half. "Only $100 to them" and "Customer pays nothing" are
+ * sentences an advisor reads *about* a customer, and they were rendered on the
+ * device the customer is holding. Turning the tablet around and having nothing
+ * to hide does not survive the customer reading the shop's internal register
+ * for themselves.
+ *
+ * The serious half. A money-bearing badge is a price, and it was not obeying
+ * the price rule. An item the store has no op code for renders "Price to be
+ * confirmed" in the price slot — and carried a green badge two inches away
+ * reading "Only $62 to them", built from the very `customerOutOfPocket` the
+ * redaction exists to withhold. The whitelist test could not catch it: it scans
+ * the payload for forbidden *keys*, and this was a forbidden *value* embedded
+ * in a derived string, which a key scan cannot see by construction.
+ *
+ * So an unpriced covered line keeps the coverage fact and loses the figure,
+ * rather than losing the badge altogether — dropping it would cost the customer
+ * the most reassuring true thing on the line in order to fix a problem that is
+ * only about the number. Recall and prepaid never carried a figure and read the
+ * same either way.
+ */
+export function customerBadges(o: Opportunity): CustomerBadge[] {
+  const priceConfirmed = o.priceSource !== 'ESTIMATE'
+  const badges: CustomerBadge[] = []
+
+  // Driven off the advisor's list rather than re-deriving the payer branches,
+  // so the two surfaces can never disagree about which reasons an item has —
+  // only about how to say them.
+  for (const reason of easyYesReasons(o)) {
+    switch (reason.key) {
+      case 'recall':
+        badges.push({ label: 'Manufacturer pays', tone: 'COVERED' })
+        break
+      case 'prepaid':
+        badges.push({ label: 'Already paid for', tone: 'COVERED' })
+        break
+      case 'free':
+        badges.push({
+          label: priceConfirmed ? 'Covered in full' : COVERAGE_WITHOUT_A_PRICE,
+          tone: 'COVERED',
+        })
+        break
+      case 'mostly':
+        badges.push({
+          label: priceConfirmed
+            ? `Covered — you pay $${Math.round(o.customerOutOfPocket)}`
+            : COVERAGE_WITHOUT_A_PRICE,
+          tone: 'COVERED',
+        })
+        break
+      case 'safety':
+        badges.push({ label: 'Safety item', tone: 'SAFETY' })
+        break
+      // Everything else the advisor sees — close rate, declined before,
+      // measured not guessed — is why the *shop* expects a yes. None of it is
+      // the customer's business and none of it crosses.
+    }
+  }
+
+  return badges
+}
+
 // ===========================================================================
 
 /**

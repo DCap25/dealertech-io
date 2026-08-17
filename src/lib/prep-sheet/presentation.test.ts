@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
-  buildCoverageSegments, computeRunningTotals, customerDetail, easyYesReasons,
-  estimateGross, isCustomerFacing, termPercentRemaining, toneForPercent, vinLastSix,
-  type OpportunityDecision,
+  buildCoverageSegments, computeRunningTotals, customerBadges, customerDetail,
+  easyYesReasons, estimateGross, isCustomerFacing, termPercentRemaining, toneForPercent,
+  vinLastSix, type OpportunityDecision,
 } from './presentation'
 import type { Opportunity, PrepSheet } from './types'
 import type { TermStatus } from '@/lib/warranty'
@@ -125,6 +125,81 @@ describe('easy-yes reasons', () => {
       opportunity({ likelyPayer: 'CUSTOMER_PAY', urgency: 'MEDIUM', closeProbability: 0.3, type: 'MAINTENANCE_DUE' }),
     )
     expect(reasons.some((r) => r.tone === 'COVERED')).toBe(false)
+  })
+
+  it('keeps the advisor’s own wording, which is third person on purpose', () => {
+    // The customer-facing split lives in `customerBadges`. This list is read
+    // over an advisor's shoulder and should not have moved an inch.
+    expect(
+      easyYesReasons(opportunity({ likelyPayer: 'VSC', customerOutOfPocket: 0 }))[0]?.label,
+    ).toBe('Customer pays nothing')
+    expect(
+      easyYesReasons(
+        opportunity({ likelyPayer: 'VSC', estimatedAmount: 2000, customerOutOfPocket: 100 }),
+      ).find((r) => r.key === 'mostly')?.label,
+    ).toBe('Only $100 to them')
+  })
+
+  it('is unmoved by a price the store cannot bill', () => {
+    // `priceSource` is the customer surface's problem. The advisor is shown the
+    // estimate along with the fact that it is one.
+    const reasons = easyYesReasons(
+      opportunity({ likelyPayer: 'VSC', estimatedAmount: 2000, customerOutOfPocket: 100, priceSource: 'ESTIMATE' }),
+    )
+    expect(reasons.find((r) => r.key === 'mostly')?.label).toBe('Only $100 to them')
+  })
+})
+
+describe('customer badges', () => {
+  const vsc = (over: Partial<Opportunity> = {}) =>
+    opportunity({
+      likelyPayer: 'VSC',
+      urgency: 'MEDIUM',
+      closeProbability: 0.3,
+      type: 'MAINTENANCE_DUE',
+      estimatedAmount: 540,
+      customerOutOfPocket: 62,
+      ...over,
+    })
+
+  it('addresses the customer rather than talking about them', () => {
+    expect(customerBadges(vsc({ priceSource: 'STORE' }))).toEqual([
+      { label: 'Covered — you pay $62', tone: 'COVERED' },
+    ])
+    expect(customerBadges(vsc({ priceSource: 'STORE', customerOutOfPocket: 0 }))).toEqual([
+      { label: 'Covered in full', tone: 'COVERED' },
+    ])
+  })
+
+  it('drops the figure, not the coverage, when the price is unconfirmed', () => {
+    // A badge carrying money is a price. The price slot beside it reads "price
+    // to be confirmed"; the badge is not a way around that.
+    expect(customerBadges(vsc({ priceSource: 'ESTIMATE' }))).toEqual([
+      { label: 'Coverage applies', tone: 'COVERED' },
+    ])
+    expect(customerBadges(vsc({ priceSource: 'ESTIMATE', customerOutOfPocket: 0 }))).toEqual([
+      { label: 'Coverage applies', tone: 'COVERED' },
+    ])
+  })
+
+  it('leaves the badges that never carried a figure alone', () => {
+    expect(customerBadges(vsc({ priceSource: 'ESTIMATE', likelyPayer: 'OEM_RECALL' }))).toEqual([
+      { label: 'Manufacturer pays', tone: 'COVERED' },
+    ])
+    expect(customerBadges(vsc({ priceSource: 'ESTIMATE', likelyPayer: 'PPM' }))).toEqual([
+      { label: 'Already paid for', tone: 'COVERED' },
+    ])
+    expect(customerBadges(vsc({ priceSource: 'ESTIMATE', urgency: 'SAFETY' }))).toEqual([
+      { label: 'Safety item', tone: 'SAFETY' },
+      { label: 'Coverage applies', tone: 'COVERED' },
+    ])
+  })
+
+  it('sends none of the shop’s own reasons for pushing an item', () => {
+    const badges = customerBadges(
+      opportunity({ type: 'DECLINED_SERVICE', closeProbability: 0.9, urgency: 'HIGH' }),
+    )
+    expect(badges).toEqual([])
   })
 })
 

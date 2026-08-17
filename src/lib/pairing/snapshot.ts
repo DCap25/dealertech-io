@@ -1,5 +1,7 @@
 import { buildMenu, TIER_COPY, type MenuSelection } from '@/lib/menu/selection'
-import { customerDetail, easyYesReasons } from '@/lib/prep-sheet/presentation'
+import {
+  customerBadges, customerDetail, type CustomerBadge,
+} from '@/lib/prep-sheet/presentation'
 import { explainerFor, worstReadingFor, type Reading } from '@/lib/explainer'
 import type { PrepSheet } from '@/lib/prep-sheet'
 import {
@@ -34,7 +36,14 @@ export interface DeviceItem {
   customerOutOfPocket: number
   /** Struck through beside the price when coverage carries part of it. */
   fullAmount: number
-  badges: { label: string; tone: 'COVERED' | 'SAFETY' }[]
+  /**
+   * Coverage and safety, in the customer's own words.
+   *
+   * A badge carrying a dollar figure is a price and obeys `priceConfirmed` the
+   * same as the price slot does — built by `customerBadges`, never by filtering
+   * the advisor's list.
+   */
+  badges: CustomerBadge[]
   /** Present when there is an animated explanation for this component. */
   explainerKey: string | null
   /** This vehicle's own measurement, if one was taken. */
@@ -116,9 +125,9 @@ export function buildDeviceSnapshot(
           customerOutOfPocket: o.customerOutOfPocket,
           fullAmount: o.estimatedAmount,
           priceConfirmed: o.priceSource !== 'ESTIMATE',
-          badges: easyYesReasons(o)
-            .filter((r) => r.tone === 'COVERED' || r.tone === 'SAFETY')
-            .map((r) => ({ label: r.label, tone: r.tone as 'COVERED' | 'SAFETY' })),
+          // Customer-voice and price-aware, not the advisor's reasons filtered
+          // by tone. See `customerBadges` for what that used to leak.
+          badges: customerBadges(o),
           explainerKey: explainer?.key ?? null,
           reading: explainer ? worstReadingFor(explainer, sheet.inspectionHistory) : null,
         }
