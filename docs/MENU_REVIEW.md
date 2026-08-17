@@ -40,6 +40,9 @@ comment.
 
 ### The three I would fix first
 
+*(All three independently re-verified by a second model on fresh fixtures — see
+§8. Nothing refuted; each held or came out slightly worse.)*
+
 **1. A declined service is quoted from its old record and marked as a
 confirmed price.** *(Assigned to Opus — see the side note on F1.)*
 `build.ts:267–285` never calls `resolvePrice`, so
@@ -947,7 +950,56 @@ re-authorisation flow that is subtly wrong is worse than a phone call.
 
 ---
 
+## 8. Verification — second-model pass on the three critical findings
+
+The audit above was performed by Opus 5. The three critical findings were then
+independently re-verified by Fable 5 as an adversarial pass: fresh fixtures,
+different trigger scenarios, and a deliberate attempt to *refute* each finding
+rather than re-derive it. Nothing was refuted; each came out the same or
+slightly worse than written.
+
+**F1 — CONFIRMED, and upgraded.** Reproduced on a different fixture (a $289
+transmission-service decline from 2023 against a book price of $367): `priceSource`
+undefined → `priceConfirmed: true` → on the default menu unasked → in
+`customerTotal` → `reprice` verdict `UNCHANGED`. Refutation attempts failed: the
+only five `priceSource` writers in the repository are the `resolvePrice` call
+sites, and the mapper (`map.ts:254–262`) passes `quotedAmount` through verbatim.
+Two additions that make it worse than the finding states:
+
+- `service.ts:219` comments `quotedAmount` with *"Re-quote before re-offering"*,
+  and `PLAN.md` leak #1 says *"Persist every decline, re-price it, resurface
+  it."* The code violates its own recorded intent — the comment is the evidence,
+  which under this repo's rules makes this a broken invariant, not just a bug.
+- Confirmed there is no op-code field on the decline anywhere (schema, wire
+  type, mapper), so the fix genuinely requires new data or a lookup, as the
+  finding says.
+
+**F2 — CONFIRMED, with a quieter trigger class.** The original pass demonstrated
+substitution via *additions* (a recall arriving, an MPI landing). Reproduced here
+via a *removal* — `reconcile/` resolving a decline in the background, which needs
+no technician and no OEM pull: advisor ticks `DECLINED_SERVICE-1` ("Rear brake
+pads and rotors, $540"), customer receives `DECLINED_SERVICE-1` ("Battery
+replacement, $307") — marked *confirmed*, because F1 and F2 compound. Removals
+also have a second mode the finding did not call out: when the shifted index
+falls off the end entirely, the advisor's tick is **silently dropped**
+(itemCount 0, no error) — the safe direction, but still a menu that quietly
+disagrees with what was approved.
+
+**F3 — CONFIRMED, with a sharper boundary.** Reproduced at the snapshot
+(`priceConfirmed=false`, badge `"Only $62 to them"`) and verified at the render
+layer: `service-menu.tsx:137` shows badges whenever `badges.length > 0`,
+independent of the `priceConfirmed` ternary. Two refinements that narrow the fix:
+
+- **The leak is payer-dependent.** Recall- and PPM-covered unpriced items get
+  non-monetary badges ("Manufacturer pays", "Already paid for") because those
+  branches win in `easyYesReasons` — clean. Money leaks only through the `free`
+  and `mostly` branches, i.e. VSC/warranty-style coverage. The badge fix can
+  target exactly those two.
+- **Paper is clean** — `PrintableMenu` renders no badges at all.
+
+---
+
 *Reviewed against `main` at `1cab528`. Test suite green: 1,024 passing, 31 skipped.
 All reproductions executed outside the repository; no repository file other than
 this document was added, changed or deleted, and no write was made to the
-database.*
+database. §8 verification pass (Fable 5) run against the same commit.*
