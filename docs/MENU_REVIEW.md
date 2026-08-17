@@ -67,7 +67,9 @@ The frozen snapshot, the decisions, the reprice comparison and the hand-off all
 key on that id, and the link flow is explicitly designed to span exactly the
 window in which the MPI lands.
 
-**3. The estimate reaches the customer as a badge.** `easyYesReasons`
+**3. The estimate reaches the customer as a badge.** *(**FIXED** in `963f90f`,
+verified — see the resolution note on F3. The raw-numbers-in-JSON tail remains
+a product call.)* `easyYesReasons`
 (`presentation.ts:256–262`) emits `Only $100 to them`, tone `COVERED`;
 `snapshot.ts:119–121` keeps every `COVERED` badge regardless of `priceSource`.
 Reproduced: an unpriced item renders "Price to be confirmed" in the price slot
@@ -353,8 +355,26 @@ system knows the id was supposed to mean something.
 
 ### F3 — The estimate reaches the customer in a badge, in the advisor's voice · **High**
 
-**Where:** `src/lib/prep-sheet/presentation.ts:254–263` (`easyYesReasons`);
-`src/lib/pairing/snapshot.ts:119–121` (badge filter).
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `963f90f`. The
+> snapshot now builds badges from `customerBadges()`, a pure helper driven off
+> `easyYesReasons` (one home for the payer branches, so the surfaces cannot
+> disagree about *which* reasons exist — only how to say them), with
+> customer-voice labels: "Covered — you pay $62", "Covered in full",
+> degrading to a figure-free "Coverage applies" on unpriced lines — degrade
+> rather than drop, because coverage comes from the contract, not the price
+> book. "Covered in full" degrades too: asserting zero out-of-pocket is the
+> redacted figure said in words. `easyYesReasons` is byte-identical and all
+> three advisor consumers are unchanged by construction. Verified across the
+> full payer × priceSource matrix: voice and money-string scans clean in all
+> six cells, recall/PPM/safety badges unchanged, advisor wording still emitted
+> to advisor surfaces. +13 tests (8 proven to fail pre-fix); 1,050 passing.
+>
+> **Still open from this finding:** the raw `customerOutOfPocket`/`fullAmount`
+> *numbers* still ride the JSON on unpriced lines (only their money-string
+> forms are gone), so the value-scan test is a money-string scan. Closing it
+> is the "related, smaller thing" below — ship `null` when unconfirmed —
+> which touches every renderer plus the authorisation totals in
+> `link-store.ts`, and stays a product decision.
 
 **What is wrong.** The snapshot redacts the price of an unpriced item and then
 copies a label containing that same figure into `badges`. The filter keeps
