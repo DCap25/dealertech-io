@@ -3,7 +3,8 @@
 import { useActionState, useState } from 'react'
 import {
   compAccount, extendTrial, grantSupportAccess, reactivateAccount, revokeSupportAccess,
-  suspendAccount, winBackAccount, type TenantActionState,
+  reverseCancellationAction, scheduleCancellationAction, suspendAccount, winBackAccount,
+  type TenantActionState,
 } from '../actions'
 
 const INITIAL: TenantActionState = {}
@@ -175,6 +176,75 @@ export function LifecycleActions({
         />
       )}
     </div>
+  )
+}
+
+/**
+ * Giving notice, and taking it back.
+ *
+ * ---------------------------------------------------------------------------
+ * THE SCHEDULED STATE IS THE POINT OF THIS COMPONENT
+ * ---------------------------------------------------------------------------
+ * `cancel_at_period_end` was mirrored, reconciled nightly and never rendered
+ * anywhere. A dealer group who cancelled — in the Stripe dashboard, by hand,
+ * which was the only way to do it — appeared on this page as "ACTIVE · 3
+ * rooftops", identical to a group renewing next month. The console could not
+ * answer the single most important commercial question about a tenant.
+ *
+ * So the notice comes first and the button second. When something is scheduled,
+ * the date is stated in full before anything else on the block, because the
+ * failure being fixed is not "there was no way to cancel" — it is that nobody
+ * could see one had happened.
+ */
+export function CancellationControls({
+  organizationId,
+  scheduled,
+  effectiveAt,
+}: {
+  organizationId: string
+  scheduled: boolean
+  /** ISO, or null when Stripe has not set a period end yet. */
+  effectiveAt: string | null
+}) {
+  const [state, formAction, pending] = useActionState(reverseCancellationAction, INITIAL)
+
+  if (scheduled) {
+    return (
+      <div className="rounded-lg border border-rose-300 bg-rose-50 p-3 dark:border-rose-800 dark:bg-rose-950">
+        <p className="text-sm font-semibold text-rose-900 dark:text-rose-200">
+          Cancelling{effectiveAt ? ` on ${effectiveAt.slice(0, 10)}` : ' at the end of the period'}
+        </p>
+        <p className="mt-0.5 text-xs text-rose-800 dark:text-rose-300">
+          They keep full access until then. No further invoice after the current period.
+        </p>
+        <form action={formAction} className="mt-3">
+          <input type="hidden" name="organizationId" value={organizationId} />
+          <input
+            name="reason"
+            className={field}
+            placeholder="What changed their mind (optional)"
+          />
+          <button type="submit" disabled={pending} className={`${button} mt-2`}>
+            {pending ? 'Working…' : 'Let it renew instead'}
+          </button>
+        </form>
+        <Result state={state} />
+      </div>
+    )
+  }
+
+  return (
+    <ActionForm
+      action={scheduleCancellationAction}
+      organizationId={organizationId}
+      title="Cancel at period end"
+      description={
+        'Ends the subscription when the period they have paid for runs out — not today. '
+        + 'They keep working until then and are billed once more. Reversible until it lands.'
+      }
+      submitLabel="Schedule cancellation"
+      danger
+    />
   )
 }
 

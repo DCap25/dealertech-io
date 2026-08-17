@@ -1,11 +1,8 @@
 import Link from 'next/link'
-import { headers } from 'next/headers'
 import { requirePlatformAdmin } from '@/lib/auth/session'
 import { signOut } from '@/app/login/actions'
 import { loadLeads, loadNeedsAttention, loadRecentJobRuns, loadTenants } from '@/lib/platform/load'
-import { knownMakes } from '@/lib/warranty'
-import { ProvisionForm } from './provision-form'
-import { LifecycleBadge } from './ui'
+import { LifecycleBadge, ago } from './ui'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Platform' }
@@ -25,23 +22,13 @@ export const metadata = { title: 'Platform' }
  */
 const nowMs = () => Date.now()
 
-/**
- * Every relative time on this page is measured from one instant.
- *
- * `now` is taken once when the page renders and threaded down rather than each
- * helper reading the clock for itself. Two badges rendered a millisecond apart
- * disagreeing is not a bug anybody would ever notice, but a page that reads the
- * clock in four places is one where "36 hours" quietly means four different
- * things — and it is the reason the linter objects to calling Date.now() during
- * a render at all.
- */
-function ago(d: Date | null, now: number): string {
-  if (!d) return 'never'
-  const hours = Math.floor((now - d.getTime()) / 3_600_000)
-  if (hours < 1) return 'just now'
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
+/*
+  `ago` comes from ./ui, where the tenant pages already take it from.
+
+  A byte-identical copy lived here, in a file that was already importing its
+  neighbour from that module. Two implementations of "how long ago" is how the
+  console ends up rounding the same timestamp two different ways on two pages.
+*/
 
 /**
  * A sync older than this is not "recent", it is "not running".
@@ -90,17 +77,12 @@ export default async function AdminPage() {
   const now = nowMs()
   const [tenants, leads, runs, attention] = await Promise.all([
     loadTenants(),
-    loadLeads(20),
+    // Five, because five are shown. The count on the tile above comes from its
+    // own aggregate, so this is not what any number on the page is derived from.
+    loadLeads(5),
     loadRecentJobRuns(10),
     loadNeedsAttention(),
   ])
-
-  // Built server-side so the copied invitation link is right behind a proxy
-  // or on a custom domain rather than whatever the browser happens to think.
-  const host = (await headers()).get('host') ?? ''
-  const protocol = host.startsWith('localhost') || host.startsWith('127.') ? 'http' : 'https'
-  const origin = `${protocol}://${host}`
-  const makes = knownMakes()
 
   const needAttention = tenants.filter(
     (t) => !awaitingFirstSync(t.createdAt, t.lastSyncAt, now)
@@ -197,6 +179,12 @@ export default async function AdminPage() {
           label="Leads not contacted"
           value={String(attention.uncontactedLeads)}
           tone={attention.uncontactedLeads > 0 ? 'warn' : 'good'}
+          /*
+            The only tile that goes anywhere, because it is the only one whose
+            work lives on a page of its own. The rest resolve into a tenant,
+            which is one click further down and needs the list to choose from.
+          */
+          href="/admin/leads?filter=new"
         />
         <Stat
           label="Stale integrations"
@@ -262,50 +250,53 @@ export default async function AdminPage() {
         )}
       </Section>
 
-      <Section title={`Signups and demo requests (${leads.length})`}>
+      {/*
+        A preview, with the work on its own page.
+
+        This was the full list with a provisioning form under every row, which
+        pushed the job health this page exists for below the fold — and it was
+        silently capped at twenty, so an older lead was simply not on the
+        screen with nothing to say so. Five and a link is honest about being a
+        summary.
+      */}
+      <Section title="Leads">
         {leads.length === 0 ? (
           <Empty>No inbound requests yet.</Empty>
         ) : (
-          <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
-            {leads.map((l) => (
-              <li key={l.id} className="flex flex-wrap items-start justify-between gap-3 p-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">
-                    {l.dealershipName}
-                    {!l.contacted && (
-                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                        new
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs text-neutral-500">
-                    {l.name}
-                    {l.role ? ` · ${l.role}` : ''} · {l.email}
-                    {l.phone ? ` · ${l.phone}` : ''}
-                  </p>
-                  <p className="mt-0.5 text-xs text-neutral-500">
-                    {[
-                      l.rooftops ? `${l.rooftops} rooftop${l.rooftops === 1 ? '' : 's'}` : null,
-                      l.dms ? `DMS: ${l.dms}` : null,
-                    ].filter(Boolean).join(' · ')}
-                  </p>
-                  {l.message && (
-                    <p className="mt-1 max-w-2xl text-xs italic text-neutral-600 dark:text-neutral-400">
-                      “{l.message}”
-                    </p>
-                  )}
-                  <ProvisionForm
-                    leadId={l.id}
-                    dealershipName={l.dealershipName}
-                    email={l.email}
-                    makes={makes}
-                    origin={origin}
-                  />
-                </div>
-                <span className="shrink-0 text-xs text-neutral-500">{ago(l.createdAt, now)}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+              {leads.map((l) => (
+                <li key={l.id}>
+                  <Link
+                    href="/admin/leads"
+                    className="flex flex-wrap items-start justify-between gap-3 p-3 hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">
+                        {l.dealershipName}
+                        {!l.contacted && (
+                          <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                            new
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        {l.name}
+                        {l.role ? ` · ${l.role}` : ''}
+                        {l.rooftops ? ` · ${l.rooftops} rooftop${l.rooftops === 1 ? '' : 's'}` : ''}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-xs text-neutral-500">{ago(l.createdAt, now)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <div className="border-t border-neutral-100 p-3 dark:border-neutral-800">
+              <Link href="/admin/leads" className="text-sm font-semibold hover:underline">
+                All leads, and what was said →
+              </Link>
+            </div>
+          </>
         )}
       </Section>
 
@@ -343,18 +334,32 @@ export default async function AdminPage() {
   )
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'warn' | 'bad' }) {
+function Stat({ label, value, tone, href }: {
+  label: string; value: string; tone?: 'good' | 'warn' | 'bad'; href?: string
+}) {
   const colour = tone === 'bad'
     ? 'text-rose-700 dark:text-rose-400'
     : tone === 'warn'
       ? 'text-amber-700 dark:text-amber-400'
       : ''
-  return (
-    <div className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+
+  const body = (
+    <>
       <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">{label}</p>
       <p className={`mt-1 text-3xl font-bold tabular-nums ${colour}`}>{value}</p>
-    </div>
+    </>
   )
+
+  const shell = 'rounded-xl border border-neutral-200 p-4 dark:border-neutral-800'
+
+  if (href) {
+    return (
+      <Link href={href} className={`${shell} block hover:bg-neutral-50 dark:hover:bg-neutral-900`}>
+        {body}
+      </Link>
+    )
+  }
+  return <div className={shell}>{body}</div>
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

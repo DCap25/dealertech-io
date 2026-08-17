@@ -4,7 +4,7 @@ import { requirePlatformAdmin } from '@/lib/auth/session'
 import { loadTenantDetail } from '@/lib/platform/load'
 import { resolveAccess } from '@/lib/billing/access'
 import { LifecycleBadge, ago } from '../../ui'
-import { LifecycleActions, SupportAccess } from './actions-ui'
+import { CancellationControls, LifecycleActions, SupportAccess } from './actions-ui'
 import { QuantityForm } from './quantity-form'
 import { InvoiceRailForm } from './invoice-rail-form'
 import { StripeLink } from '../../stripe-links'
@@ -128,6 +128,20 @@ export default async function TenantPage({ params }: { params: Promise<{ orgId: 
           <Field label="Plan">{subscription?.planKey ?? 'none'}</Field>
           <Field label="Subscription">
             {subscription ? `${subscription.status} · ${subscription.rooftopQuantity} rooftops` : 'none'}
+            {/*
+              Said on the field itself, not only in the block further down.
+
+              Somebody scanning this page for the commercial state reads these
+              four lines and stops. A group who has given notice reading as a
+              plain "ACTIVE · 3 rooftops" here is the exact failure the
+              cancellation work exists to close, and repeating it costs a
+              clause.
+            */}
+            {subscription?.cancelAtPeriodEnd && (
+              <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-xs font-semibold text-rose-800 dark:bg-rose-950 dark:text-rose-200">
+                ends {subscription.currentPeriodEnd?.toISOString().slice(0, 10) ?? 'this period'}
+              </span>
+            )}
           </Field>
           <Field label="Billing">
             {billing ? `${billing.collectionMode} · ${billing.billingEmail}` : 'no billing account'}
@@ -195,6 +209,22 @@ export default async function TenantPage({ params }: { params: Promise<{ orgId: 
                 activeStores={stores.filter((s) => s.isActive).length}
                 periodStart={null}
                 periodEnd={subscription.currentPeriodEnd?.toISOString() ?? null}
+              />
+            </div>
+          )}
+
+          {/*
+            Only where there is a subscription to end. A comped or
+            never-converted tenant has nothing in Stripe to schedule against,
+            and the engine refuses them — offering a button that can only
+            refuse is how a console teaches people to distrust its buttons.
+          */}
+          {subscription && subscription.status !== 'COMPED' && (
+            <div className="sm:col-span-2">
+              <CancellationControls
+                organizationId={org.id}
+                scheduled={subscription.cancelAtPeriodEnd}
+                effectiveAt={subscription.currentPeriodEnd?.toISOString() ?? null}
               />
             </div>
           )}

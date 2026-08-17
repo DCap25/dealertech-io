@@ -189,6 +189,7 @@ they discount the brake warning too — which was the one that mattered.
 | `performance/` | Visit outcomes and advisor scorecards. |
 | `pairing/` | Tablet pairing codes and the customer-safe device snapshot. |
 | `dms/` | The adapter contract, mappers, hand-off records, authorization notes. |
+| `billing/` | The commercial layer: the lifecycle state machine, the access ladder it drives, Stripe mapping and webhooks, reconciliation, proration, and cancellation. Everything that decides is pure; `subscription-ops.ts` and `run.ts` do the I/O. |
 | `team/`, `invites/`, `manager/`, `platform/` | Roster, invitations, department board, tenant provisioning. |
 | `copilot/` | Claude-backed assistant over the prep sheet context (falls back to a mock provider with no API key). |
 
@@ -220,9 +221,12 @@ the UI has one shape to render regardless of vendor. `DMS_ADAPTER=mock` with
 - Staff roles: `ADVISOR`, `BDC`, `TECHNICIAN`, `DISPATCHER`, `PARTS`,
   `CASHIER`, `SERVICE_MANAGER`, `FIXED_OPS_DIRECTOR`, `ADMIN`. Managing staff
   requires one of the last three, with last-manager lockout guards.
-- `/admin` is the platform console — leads, tenants, provisioning, sync runs.
-  It returns **404** to a non-platform-admin rather than 403, so it does not
-  announce itself.
+- `/admin` is the platform console — the morning read (a needs-attention
+  rollup), tenants, provisioning, sync runs. `/admin/tenants/[orgId]` is one
+  dealer group in full, with every commercial action on it; `/admin/leads` is
+  the inbound demo requests and what was said on the call. All of it returns
+  **404** to a non-platform-admin rather than 403, so it does not announce
+  itself.
 
 ### Scheduled work
 
@@ -254,7 +258,7 @@ scripts/        migrations, seeds, RLS verification, sync runners, smoke
 netlify/        the scheduled pricing sync
 ```
 
-**~770 unit tests across 37 files.** Every engine has one.
+**~1,020 unit tests across 50 files.** Every engine has one.
 
 ### Security model
 

@@ -6,7 +6,9 @@ import { and, eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { requirePlatformAdmin } from '@/lib/auth/session'
 import { applyTransition } from '@/lib/billing/store'
-import { setRooftopQuantity } from '@/lib/billing/subscription-ops'
+import {
+  reverseCancellation, scheduleCancellation, setRooftopQuantity,
+} from '@/lib/billing/subscription-ops'
 import { putOnInvoiceRail } from '@/lib/billing/invoice-rail'
 import { buildAuditRow } from '@/lib/audit/events'
 import type { LifecycleEvent } from '@/lib/billing/lifecycle'
@@ -254,6 +256,86 @@ export async function setInvoiceRail(
       ? `On net-${netTermsDays} invoicing. First invoice: ${result.invoiceUrl}`
       : `On net-${netTermsDays} invoicing. Stripe will issue the first invoice at the start of the period.`,
   }
+}
+
+// ===========================================================================
+
+/**
+ * End the subscription when the period they paid for does.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS NOT A LIFECYCLE BUTTON
+ * ---------------------------------------------------------------------------
+ * Every other control on this page moves a status. This one deliberately moves
+ * none: the dealership stays ACTIVE, keeps everything, and is billed exactly
+ * once more. Stripe deletes the subscription when the period runs out and the
+ * webhook does the transition then, which is what starts the churn clock from
+ * the right moment rather than thirty days too early.
+ *
+ * The revalidation is wider than the tenant page on purpose. A group who has
+ * given notice should stop looking healthy on the tenant list the moment
+ * somebody records it — that list is what gets read on a Monday morning.
+ */
+export async function scheduleCancellationAction(
+  _previous: TenantActionState,
+  formData: FormData,
+): Promise<TenantActionState> {
+  const admin = await requirePlatformAdmin()
+  const organizationId = String(formData.get('organizationId') ?? '')
+  const reason = reasonFrom(formData)
+
+  if (!reason) {
+    return {
+      error: 'Say why they are leaving. This is the only record of it, and it is the '
+        + 'question every renewal conversation for the next year starts from.',
+    }
+  }
+
+  const result = await scheduleCancellation(organizationId, {
+    changedByUserId: admin.id,
+    reason,
+  })
+  if (!result.ok) return { error: result.reason }
+
+  revalidatePath(`/admin/tenants/${organizationId}`)
+  revalidatePath('/admin/tenants')
+  revalidatePath('/admin')
+
+  return {
+    ok: result.effectiveAt
+      ? `Set to end on ${result.effectiveAt.toISOString().slice(0, 10)}. `
+        + 'They keep working until then, and will be billed once more.'
+      : 'Set to end when the current period does. Stripe will confirm the date on the next invoice.',
+  }
+}
+
+/**
+ * They changed their mind.
+ *
+ * No reason required, matching `reactivateAccount`. The reasons are demanded on
+ * the acts that take something away — a restorative one that a support engineer
+ * abandons because the form asked them a question is the worse outcome, and the
+ * cancellation it reverses already carries the explanation of what happened.
+ */
+export async function reverseCancellationAction(
+  _previous: TenantActionState,
+  formData: FormData,
+): Promise<TenantActionState> {
+  const admin = await requirePlatformAdmin()
+  const organizationId = String(formData.get('organizationId') ?? '')
+  const reason = reasonFrom(formData) || 'Cancellation withdrawn.'
+
+  const result = await reverseCancellation(organizationId, {
+    changedByUserId: admin.id,
+    reason,
+  })
+  if (!result.ok) return { error: result.reason }
+
+  revalidatePath(`/admin/tenants/${organizationId}`)
+  revalidatePath('/admin/tenants')
+  revalidatePath('/admin')
+
+  return { ok: 'The subscription will renew as normal. Nothing had lapsed, so nothing was rebuilt.' }
 }
 
 // ===========================================================================

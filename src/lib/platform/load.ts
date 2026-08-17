@@ -295,7 +295,19 @@ export interface Lead {
   rooftops: number | null
   dms: string | null
   message: string | null
+  /**
+   * Where they came from, captured without cookies or third-party scripts.
+   *
+   * Carried on the full leads page and not on the operations summary. It is
+   * the difference between a referral and a cold form fill, which changes how
+   * the call opens — but it is not worth a line on the morning read.
+   */
+  source: string | null
+  referrer: string | null
   contacted: boolean
+  contactedAt: Date | null
+  /** What happened when somebody rang them. */
+  notes: string | null
   createdAt: Date
 }
 
@@ -303,15 +315,22 @@ export interface Lead {
  * Inbound demo requests.
  *
  * These have been captured since the marketing site went up and never shown
- * anywhere, which means every one of them has sat unread. Ordered newest first
- * and uncontacted first, because a three-day-old lead nobody rang is worth more
- * attention than a fresh one somebody already has.
+ * anywhere, which means every one of them has sat unread. Ordered uncontacted
+ * first and newest first within that, because a three-day-old lead nobody rang
+ * is worth more attention than a fresh one somebody already has.
+ *
+ * Reads under the console's own row-level security, which works here and is
+ * worth saying why: migration 0016 grants platform staff a read policy on
+ * `demo_requests`, and 0017 added the table grant that policy needed to mean
+ * anything. Both were required — a policy without a grant raises "permission
+ * denied", which looks nothing like a policy problem.
  */
-export async function loadLeads(limit = 50): Promise<Lead[]> {
+export async function loadLeads(limit = 50, opts: { uncontactedOnly?: boolean } = {}): Promise<Lead[]> {
   return withCurrentUserScope(async (db) => {
     const rows = await db
       .select()
       .from(schema.demoRequests)
+      .where(opts.uncontactedOnly ? eq(schema.demoRequests.contacted, false) : undefined)
       .orderBy(schema.demoRequests.contacted, desc(schema.demoRequests.createdAt))
       .limit(limit)
 
@@ -325,9 +344,39 @@ export async function loadLeads(limit = 50): Promise<Lead[]> {
       rooftops: r.rooftops,
       dms: r.dms,
       message: r.message,
+      source: r.source,
+      referrer: r.referrer,
       contacted: r.contacted,
+      contactedAt: r.contactedAt,
+      notes: r.notes,
       createdAt: r.createdAt,
     }))
+  })
+}
+
+/**
+ * How many leads there are, and how many nobody has rung.
+ *
+ * Two aggregates rather than counting a loaded list, because the list is
+ * filtered — with "not contacted" selected, the rows in hand cannot say how
+ * many contacted ones exist, and a tab reading "All (4)" next to "Not
+ * contacted (4)" is a plausible wrong number of exactly the kind this console
+ * has shipped before. Counting separately is also what keeps the page from
+ * loading five hundred rows to render two integers.
+ */
+export async function loadLeadCounts(): Promise<{ total: number; uncontacted: number }> {
+  return withCurrentUserScope(async (db) => {
+    const [row] = await db
+      .select({
+        total: sql<number>`count(*)::int`,
+        // Parenthesised before the cast. `count(*) filter (...)::int` leans on
+        // how tightly `::` binds against the FILTER clause, and a query that
+        // parses by luck is one that stops parsing when somebody edits it.
+        uncontacted: sql<number>`(count(*) filter (where contacted = false))::int`,
+      })
+      .from(schema.demoRequests)
+
+    return { total: row?.total ?? 0, uncontacted: row?.uncontacted ?? 0 }
   })
 }
 

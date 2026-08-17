@@ -1,10 +1,20 @@
 // Not `server-only`: reachable from a CLI when a group is reconciled by hand,
 // and the guard throws outside a React Server Component context. The lesson
 // from lib/billing/store.ts, which shipped with exactly that fault.
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+/*
+  The pure builder, not `recordAudit` from @/lib/audit/record — that wrapper is
+  marked `server-only` and this module has to stay reachable from a CLI. Same
+  reasoning, at more length, in the header of ./store.ts.
+*/
+import { buildAuditRow } from '@/lib/audit/events'
+import type { AuditAction } from '@/lib/audit/events'
 import { getStripe } from './stripe'
 import { toMirror } from './stripe-map'
+import {
+  planCancellation, planReversal, type CancellationSubject, type SubscriptionStatus,
+} from './cancellation'
 
 /**
  * Changing a subscription, and remembering that somebody did.
@@ -175,6 +185,189 @@ export async function setRooftopQuantity(
   return { ok: true, from: row.rooftopQuantity, to: mirror.rooftopQuantity }
 }
 
+// ===========================================================================
+
+export type CancellationResult =
+  | { ok: true; scheduled: boolean; effectiveAt: Date | null }
+  | { ok: false; reason: string }
+
+/**
+ * Set — or clear — the flag that ends a subscription when the paid period does.
+ *
+ * ---------------------------------------------------------------------------
+ * ONE FUNCTION FOR BOTH DIRECTIONS
+ * ---------------------------------------------------------------------------
+ * Scheduling and un-scheduling are the same Stripe call with a different
+ * boolean, the same mirror write and the same history row with a different
+ * kind. Writing them twice would be two chances to get the Stripe-first
+ * ordering wrong, and the second copy is the one that would be missed when the
+ * first is fixed.
+ *
+ * Stripe first, then our tables — the same choice `setRooftopQuantity` makes
+ * above and for the same reason. If Stripe accepts and our write fails, the
+ * nightly reconciler sees CANCEL_FLAG_DRIFT and repairs the mirror. If we wrote
+ * first and Stripe failed, the console would show a cancellation that is not
+ * booked anywhere, the dealership would be billed again, and nothing would
+ * notice — the mirror would agree with itself.
+ *
+ * What this deliberately does NOT do is touch the lifecycle status. See the
+ * header of ./cancellation.ts: moving a tenant to CANCELED here starts the
+ * thirty-day churn clock against a period they have already paid for. Stripe
+ * deletes the subscription when the period actually ends, and the webhook
+ * fires the transition then.
+ */
+async function setCancelAtPeriodEnd(
+  organizationId: string,
+  next: boolean,
+  opts: { changedByUserId?: string | null; reason?: string | null } = {},
+): Promise<CancellationResult> {
+  const db = getDb()
+
+  const [row] = await db
+    .select({
+      id: schema.subscriptions.id,
+      stripeSubscriptionId: schema.subscriptions.stripeSubscriptionId,
+      status: schema.subscriptions.status,
+      cancelAtPeriodEnd: schema.subscriptions.cancelAtPeriodEnd,
+      currentPeriodEnd: schema.subscriptions.currentPeriodEnd,
+    })
+    .from(schema.subscriptions)
+    .innerJoin(
+      schema.billingAccounts,
+      eq(schema.billingAccounts.id, schema.subscriptions.billingAccountId),
+    )
+    .where(eq(schema.billingAccounts.organizationId, organizationId))
+    .limit(1)
+
+  if (!row) return { ok: false, reason: 'This dealer group has no subscription to change.' }
+
+  const subject: CancellationSubject = {
+    stripeSubscriptionId: row.stripeSubscriptionId,
+    status: row.status as SubscriptionStatus,
+    cancelAtPeriodEnd: row.cancelAtPeriodEnd,
+    currentPeriodEnd: row.currentPeriodEnd,
+  }
+
+  const plan = next ? planCancellation(subject) : planReversal(subject)
+  if (!plan.ok) return { ok: false, reason: plan.reason }
+
+  // Narrowed by the plan — both refuse a null id — but asserted rather than
+  // assumed, because the two files could drift apart later.
+  const stripeSubscriptionId = row.stripeSubscriptionId
+  if (!stripeSubscriptionId) {
+    return { ok: false, reason: 'This subscription has no Stripe counterpart.' }
+  }
+
+  let mirror
+  try {
+    /*
+      `update` returns the subscription it changed, so there is no re-fetch
+      here — unlike the quantity path, which has to ask again because
+      `subscriptionItems.update` hands back an item.
+    */
+    const updated = await getStripe().subscriptions.update(stripeSubscriptionId, {
+      cancel_at_period_end: next,
+    })
+    mirror = toMirror(updated as never)
+  } catch (cause) {
+    const why = cause instanceof Error ? cause.message : String(cause)
+    return { ok: false, reason: `Stripe refused the change, so nothing was altered: ${why}` }
+  }
+
+  const kind = next ? 'CANCEL_SCHEDULED' : 'CANCEL_REVERSED'
+  const action: AuditAction = next
+    ? 'SUBSCRIPTION_CANCEL_SCHEDULED'
+    : 'SUBSCRIPTION_CANCEL_REVERSED'
+
+  await db.transaction(async (tx) => {
+    await tx.update(schema.subscriptions).set({
+      cancelAtPeriodEnd: mirror.cancelAtPeriodEnd,
+      status: mirror.status,
+      currentPeriodEnd: mirror.currentPeriodEnd,
+      updatedAt: new Date(),
+    }).where(eq(schema.subscriptions.id, row.id))
+
+    await recordChange(tx, {
+      subscriptionId: row.id,
+      kind,
+      before: { cancelAtPeriodEnd: row.cancelAtPeriodEnd },
+      after: {
+        cancelAtPeriodEnd: mirror.cancelAtPeriodEnd,
+        effectiveAt: mirror.currentPeriodEnd?.toISOString() ?? null,
+      },
+      changedByUserId: opts.changedByUserId,
+      reason: opts.reason,
+    })
+
+    /*
+      Audited as well as recorded, per SAAS_PLAN §7 — every console mutation
+      leaves an audit row. `subscription_changes` above answers "what did the
+      arrangement look like in March"; this answers "who touched what" across
+      the whole product. storeId is null: ending a subscription is an
+      organization-level act, and naming one rooftop would imply the others
+      were untouched.
+    */
+    const auditRow = buildAuditRow({
+      action,
+      entityType: 'subscriptions',
+      entityId: row.id,
+      storeId: null,
+      userId: opts.changedByUserId ?? null,
+      changes: {
+        organizationId,
+        stripeSubscriptionId,
+        effectiveAt: mirror.currentPeriodEnd?.toISOString() ?? null,
+        reason: opts.reason ?? null,
+      },
+    })
+    if (auditRow) {
+      /*
+        Swallowed, matching `recordAudit` and `applyTransition`. The audit log
+        is a record of the work, not a precondition for it — an unanticipated
+        constraint must not roll back a cancellation Stripe has already
+        accepted, which would leave the mirror disagreeing with Stripe for no
+        reason anybody could see.
+      */
+      try {
+        await tx.insert(schema.auditLog).values(auditRow)
+      } catch (error) {
+        console.error(`[audit] could not record ${action}:`, error)
+      }
+    }
+  })
+
+  return {
+    ok: true,
+    scheduled: mirror.cancelAtPeriodEnd,
+    effectiveAt: mirror.currentPeriodEnd,
+  }
+}
+
+/**
+ * End this subscription when the period they have paid for runs out.
+ *
+ * Not immediately, and there is deliberately no option to make it immediate.
+ * Cutting a dealership off on the day they cancel charges for time that is not
+ * delivered, and it is the last impression the product leaves — see the
+ * CANCELED arm of `resolveAccess`, which is written for exactly this.
+ */
+export function scheduleCancellation(
+  organizationId: string,
+  opts: { changedByUserId?: string | null; reason?: string | null } = {},
+): Promise<CancellationResult> {
+  return setCancelAtPeriodEnd(organizationId, true, opts)
+}
+
+/** They changed their mind. Nothing had happened yet, so nothing is undone. */
+export function reverseCancellation(
+  organizationId: string,
+  opts: { changedByUserId?: string | null; reason?: string | null } = {},
+): Promise<CancellationResult> {
+  return setCancelAtPeriodEnd(organizationId, false, opts)
+}
+
+// ===========================================================================
+
 /** The commercial history of a group's subscription, newest first. */
 export async function changeHistory(organizationId: string, limit = 25) {
   const db = getDb()
@@ -199,6 +392,15 @@ export async function changeHistory(organizationId: string, limit = 25) {
     )
     .leftJoin(schema.users, eq(schema.users.id, schema.subscriptionChanges.changedByUserId))
     .where(eq(schema.billingAccounts.organizationId, organizationId))
-    .orderBy(schema.subscriptionChanges.createdAt)
+    /*
+      Newest first, and the `desc` is load-bearing rather than cosmetic.
+
+      This read ascending, which with a limit meant the console showed the
+      OLDEST twenty-five changes — so the moment a group had more than that,
+      the most recent thing done to their subscription stopped being on the
+      page. Reading a stale list as the current arrangement is the failure this
+      table exists to prevent. `lifecycleHistory` next door had it right.
+    */
+    .orderBy(desc(schema.subscriptionChanges.createdAt))
     .limit(limit)
 }

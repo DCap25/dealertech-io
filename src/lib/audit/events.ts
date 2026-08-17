@@ -42,6 +42,20 @@ export const AUDIT_ACTIONS = [
   /** A dealership moved between commercial states — trialled, comped, suspended. */
   'TENANT_LIFECYCLE_CHANGED',
   /**
+   * A subscription was set to end when its paid period does, or that was
+   * called off.
+   *
+   * Separate from `TENANT_LIFECYCLE_CHANGED` because scheduling a cancellation
+   * moves no lifecycle status at all — the tenant stays ACTIVE until the
+   * period actually runs out. Without its own action, the single most
+   * consequential thing anybody does in the console would leave no audit trace
+   * until the day it took effect.
+   */
+  'SUBSCRIPTION_CANCEL_SCHEDULED',
+  'SUBSCRIPTION_CANCEL_REVERSED',
+  /** Somebody rang a lead back and wrote down what happened. */
+  'LEAD_OUTCOME_RECORDED',
+  /**
    * DealerTech staff granted themselves a role at a dealership.
    *
    * The single mechanism by which anyone outside a store can reach its
