@@ -44,7 +44,8 @@ comment.
 §8. Nothing refuted; each held or came out slightly worse.)*
 
 **1. A declined service is quoted from its old record and marked as a
-confirmed price.** *(Assigned to Opus — see the side note on F1.)*
+confirmed price.** *(**FIXED** in `b8051c7` per Q1(c), verified — see the
+resolution note on F1. Apply migration 0026 before running this code.)*
 `build.ts:267–285` never calls `resolvePrice`, so
 `priceSource` is `undefined`, and `snapshot.ts:118` reads `undefined !== 'ESTIMATE'`
 as **true**. Reproduced: a decline quoted $449 in 2024 is presented today as
@@ -160,16 +161,42 @@ functions via `tsx`, outside the repo.
 
 ### F1 — A declined service is priced from its old quote and presented as confirmed · **Critical**
 
-> **Side note — assigned to Opus.** Fix the declined-service pricing path. The
-> defect and the correct behaviour are described below; **Q1 in §7 decides the
-> shape of the fix and should be answered first**, because "quote today's price",
-> "honour the old quote" and "show both" are three different implementations and
-> only one of them is a pure change inside `buildPrepSheet`. My recommendation is
-> Q1(c) — old quote as history, today's op-code price as the price — which needs
-> an op code on the decline record and a fall-through to `ESTIMATE` where none
-> resolves. Whoever takes it should also read F2 first: both defects live in
-> `build.ts` and a decline's identity is part of the id question, so fixing the
-> price path without deciding the key scheme means touching the same block twice.
+> **RESOLVED — fixed by Opus per Q1(c), verified by Fable.** Commit `b8051c7`.
+> Declines now carry a nullable `op_code` (schema + wire type + mapper + mock
+> adapter + seed + the advisor decline path, which copies it off the RO line)
+> and resolve through `resolvePrice` like every other line: today's book price
+> marked `STORE`, the old quote kept as history in the detail ("quoted $449;
+> the same work is $618 today"), and a fall-through to `ESTIMATE` — redacted,
+> out of every total — where no code resolves. Declines also gained a
+> `customerDetail`, closing the secondary finding. Verified adversarially on
+> fresh fixtures: the reprice blindness is gone (`UNCHANGED` →
+> `NEEDS_REAUTHORISATION` against a stale frozen quote), all fall-throughs
+> (no code / no book / zero-priced code) land on `ESTIMATE`, the customer text
+> carries no dollar figure when the price is unconfirmed, and `opCode` never
+> reaches the snapshot. +7 tests; 1,031 passing.
+>
+> **Deploy sequencing — stricter than it looks:** migration
+> `0026_decline_op_code.sql` is written but not applied, and it must be applied
+> before this code runs *at all* — the schema change puts `op_code` into every
+> full-row select of `declined_services` (cadence, customer/vehicle records,
+> mock adapter), so reads break against an un-migrated database, not just
+> decline writes. Two adjacent stale-price sites were found and deliberately
+> left: `cadence/generate.ts:127` prices follow-up tasks from the same
+> `quotedAmount` (a worklist figure, not a customer quote), and the CSV import
+> has no op-code column, so imported declines all fall through to `ESTIMATE` —
+> the safe direction. The original side note follows for the record.
+>
+> *Original side note — assigned to Opus.* Fix the declined-service pricing
+> path. The defect and the correct behaviour are described below; **Q1 in §7
+> decides the shape of the fix and should be answered first**, because "quote
+> today's price", "honour the old quote" and "show both" are three different
+> implementations and only one of them is a pure change inside `buildPrepSheet`.
+> My recommendation is Q1(c) — old quote as history, today's op-code price as
+> the price — which needs an op code on the decline record and a fall-through
+> to `ESTIMATE` where none resolves. Whoever takes it should also read F2
+> first: both defects live in `build.ts` and a decline's identity is part of
+> the id question, so fixing the price path without deciding the key scheme
+> means touching the same block twice.
 
 **Where:** `src/lib/prep-sheet/build.ts:267–285` (no `priceSource`, no
 `resolvePrice`); `src/lib/pairing/snapshot.ts:118`
