@@ -217,6 +217,24 @@ export const declinedServices = pgTable(
     componentGroupKey: text('component_group_key'),
     /** Price at the moment it was declined. Re-quote before re-offering. */
     quotedAmount: numeric('quoted_amount', { precision: 10, scale: 2 }).notNull().default('0'),
+    /**
+     * The store operation this work would be billed under today.
+     *
+     * The line above has always said "re-quote before re-offering" and nothing
+     * could: the prep sheet resurfaced a decline at `quotedAmount` — the figure
+     * written on a repair order however many years ago — and presented it as a
+     * confirmed price, because there was nothing on the row to ask the price
+     * book with. A component group is not enough on its own; front and rear
+     * brakes share BRAKE_PADS_SHOES and cost different money. The op code is,
+     * and the morning price sync does the rest.
+     *
+     * Nullable, and that is the normal case for anything recorded before this
+     * column existed or imported from a system that does not carry a code. A
+     * null resolves to our own estimate, which reads "price to be confirmed" to
+     * the customer and stays out of every total — the honest answer rather than
+     * a number the invoice will not match.
+     */
+    opCode: text('op_code'),
     declinedAt: timestamp('declined_at', { withTimezone: true }).notNull().defaultNow(),
     declineReason: text('decline_reason'),
     mileageAtDecline: integer('mileage_at_decline'),

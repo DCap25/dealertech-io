@@ -109,7 +109,23 @@ export interface OpenDecline {
   id: string
   description: string
   componentGroupKey: string | null
+  /**
+   * What they were told it cost on the day they said no.
+   *
+   * History, not a price. It is worth saying out loud at the podium — and it is
+   * the fallback when nothing else can price the work — but the number the
+   * customer is quoted comes from the price book, like every other line.
+   */
   quotedAmount: number
+  /**
+   * The store operation this work would be billed under today.
+   *
+   * Absent on anything recorded before the field existed, and on imports from a
+   * system that does not carry one. Absent means the price falls through to the
+   * old quote marked `ESTIMATE`, which keeps it off the customer's menu until an
+   * advisor has priced it rather than quoting a stale figure as firm.
+   */
+  opCode?: string | null
   declinedAt: Date
   mileageAtDecline: number | null
 }

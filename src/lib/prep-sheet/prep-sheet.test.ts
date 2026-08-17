@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { buildPrepSheet } from './build'
+import { customerDetail } from './presentation'
+import type { PriceBook } from './pricing'
 import type { PrepSheetInput, InspectionSnapshot } from './types'
 import type { Contract, PrepaidEntitlement } from '@/lib/coverage'
+import { buildMenu, defaultSelection } from '@/lib/menu/selection'
 
 /**
  * Midday, not midnight. date-fns compares in LOCAL time, so a midnight-UTC
@@ -66,23 +69,103 @@ describe('prep sheet — mileage projection', () => {
 })
 
 describe('prep sheet — declined services', () => {
+  /** Front brakes, turned down in February at what the store charged then. */
   const decline = {
     id: 'd1', description: 'Front Brake Pads & Rotors', componentGroupKey: 'BRAKE_PADS_SHOES',
-    quotedAmount: 618, declinedAt: new Date('2026-02-01T12:00:00Z'), mileageAtDecline: 55_000,
+    opCode: 'BRK-FR', quotedAmount: 449,
+    declinedAt: new Date('2026-02-01T12:00:00Z'), mileageAtDecline: 55_000,
   }
 
-  it('resurfaces an open decline with its original quote', () => {
-    const sheet = buildPrepSheet(baseInput({ openDeclines: [decline] }))
-    const opp = sheet.opportunities.find((o) => o.type === 'DECLINED_SERVICE')
+  /** The same job in the store's book today: $618. */
+  const priceBook: PriceBook = {
+    'BRK-FR': {
+      code: 'BRK-FR', description: 'Front Brake Pads & Rotors',
+      laborAmount: 333, partsAmount: 285,
+    },
+  }
+
+  const declineOn = (input: Partial<PrepSheetInput>) =>
+    buildPrepSheet(baseInput(input)).opportunities.find((o) => o.type === 'DECLINED_SERVICE')
+
+  it('resurfaces an open decline', () => {
+    const opp = declineOn({ openDeclines: [decline] })
     expect(opp?.title).toBe('Front Brake Pads & Rotors')
-    expect(opp?.estimatedAmount).toBe(618)
     expect(opp?.detail).toContain('6 months ago')
     expect(opp?.detail).toContain('55,000 miles')
   })
 
+  /*
+    The one that put a wrong number in front of a customer. The decline was
+    quoted from its own record and, having no price source, read as a confirmed
+    price on every customer surface — $449 on the tablet, $618 on the invoice.
+  */
+  it('quotes the store book today rather than the price on the old repair order', () => {
+    const opp = declineOn({ openDeclines: [decline], priceBook })
+    expect(opp?.estimatedAmount).toBe(618)
+    expect(opp?.priceSource).toBe('STORE')
+    expect(opp?.customerOutOfPocket).toBe(618)
+  })
+
+  it('keeps the old quote in the advisor detail and names the movement', () => {
+    const opp = declineOn({ openDeclines: [decline], priceBook })
+    expect(opp?.detail).toContain('quoted $449')
+    expect(opp?.detail).toContain('$618 today')
+    expect(opp?.talkTrack).toContain('$618')
+  })
+
+  it('says nothing about a price that has not moved', () => {
+    const opp = declineOn({ openDeclines: [{ ...decline, quotedAmount: 618 }], priceBook })
+    expect(opp?.estimatedAmount).toBe(618)
+    expect(opp?.detail).not.toContain('today')
+  })
+
+  /*
+    A decline the store cannot price is the ordinary case for a real
+    integration, and it must land where every other unpriced line lands: our
+    estimate, marked, redacted to "price to be confirmed" and off the menu until
+    an advisor has looked at it.
+  */
+  it('falls through to the old quote as an estimate when nothing names the operation', () => {
+    const opp = declineOn({ openDeclines: [{ ...decline, opCode: null }], priceBook })
+    expect(opp?.estimatedAmount).toBe(449)
+    expect(opp?.priceSource).toBe('ESTIMATE')
+  })
+
+  it('keeps an unpriceable decline off the default menu and out of the total', () => {
+    const unpriced = buildPrepSheet(baseInput({
+      openDeclines: [{ ...decline, opCode: null }], priceBook,
+    }))
+    const menu = buildMenu(unpriced.opportunities, defaultSelection(unpriced.opportunities))
+    expect(menu.items).toHaveLength(0)
+    expect(menu.customerTotal).toBe(0)
+
+    // The same decline, priced by the store, is on the menu at the store's number.
+    const priced = buildPrepSheet(baseInput({ openDeclines: [decline], priceBook }))
+    const pricedMenu = buildMenu(priced.opportunities, defaultSelection(priced.opportunities))
+    expect(pricedMenu.items).toHaveLength(1)
+    expect(pricedMenu.customerTotal).toBe(618)
+  })
+
+  /*
+    The customer used to be handed the advisor's sentence by omission — the one
+    customer-facing string on the sheet that was not the sanitised one.
+  */
+  it('gives the customer history rather than the advisor’s wording', () => {
+    const opp = declineOn({ openDeclines: [decline], priceBook })!
+    const shown = customerDetail(opp)
+    expect(shown).not.toBe(opp.detail)
+    expect(shown).toContain('Recommended on a previous visit')
+    expect(shown).not.toMatch(/declined|lead with|reference the exact/i)
+  })
+
+  it('shows the customer no figure for a price we cannot confirm', () => {
+    const opp = declineOn({ openDeclines: [{ ...decline, opCode: null }], priceBook })!
+    expect(opp.priceSource).toBe('ESTIMATE')
+    expect(customerDetail(opp)).not.toMatch(/\$/)
+  })
+
   it('tempers close probability because they already said no', () => {
-    const sheet = buildPrepSheet(baseInput({ openDeclines: [decline] }))
-    const opp = sheet.opportunities.find((o) => o.type === 'DECLINED_SERVICE')
+    const opp = declineOn({ openDeclines: [decline] })
     expect(opp?.closeProbability).toBeLessThan(0.5)
   })
 
@@ -97,7 +180,10 @@ describe('prep sheet — declined services', () => {
     }
     const sheet = buildPrepSheet(baseInput({
       contracts: [vsc],
-      openDeclines: [{ ...decline, id: 'd2', description: 'A/C Compressor', componentGroupKey: 'AC_COMPRESSOR', quotedAmount: 1850 }],
+      openDeclines: [{
+        ...decline, id: 'd2', description: 'A/C Compressor',
+        componentGroupKey: 'AC_COMPRESSOR', opCode: null, quotedAmount: 1850,
+      }],
     }))
     const opp = sheet.opportunities.find((o) => o.type === 'DECLINED_SERVICE')
     expect(opp?.likelyPayer).toBe('VSC')

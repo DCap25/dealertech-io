@@ -258,6 +258,9 @@ export function toPrepSheetInputs(
           description: d.description,
           componentGroupKey: d.componentGroupKey,
           quotedAmount: d.quotedAmount,
+          // Carried so the engine re-prices the work rather than re-offering
+          // the figure on the old repair order.
+          opCode: d.opCode ?? null,
           declinedAt: d.declinedAt,
           mileageAtDecline: d.mileageAtDecline,
         })),

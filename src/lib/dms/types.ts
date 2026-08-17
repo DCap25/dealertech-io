@@ -180,6 +180,15 @@ export interface DmsDeclinedService {
   description: string
   componentGroupKey: string | null
   quotedAmount: number
+  /**
+   * The store operation this work would be billed under today.
+   *
+   * Carried so the engine can re-price the decline instead of re-offering the
+   * figure on the old repair order. Optional because a source system need not
+   * have one — where it is absent the price falls through to our estimate and
+   * is presented as unconfirmed, which is the honest answer.
+   */
+  opCode?: string | null
   declinedAt: Date
   mileageAtDecline: number | null
   resolvedAt: Date | null

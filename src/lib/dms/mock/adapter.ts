@@ -3,9 +3,9 @@ import { and, desc, eq, gte, inArray, isNull, lt } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import type { DmsAdapter } from '../adapter'
 import type {
-  DateRange, DmsCapabilities, DmsCoverage, DmsCoverageProduct, DmsCustomer, DmsDriveBundle,
-  DmsPriceBookEntry, DmsPushResult, DmsVehicle, DmsVehicleDetail, FollowUpOutcomePayload,
-  HandOffPayload,
+  DateRange, DmsCapabilities, DmsCoverage, DmsCoverageProduct, DmsCustomer, DmsDeclinedService,
+  DmsDriveBundle, DmsPriceBookEntry, DmsPushResult, DmsVehicle, DmsVehicleDetail,
+  FollowUpOutcomePayload, HandOffPayload,
 } from '../types'
 import { emptyBundle } from '../map'
 import { applyCoverageScenario, isCoverageScenario, type CoverageScenario } from './scenarios'
@@ -140,6 +140,48 @@ function mapCoverage(c: typeof schema.contracts.$inferSelect): DmsCoverage {
     perTireLimit: c.perTireLimit ? num(c.perTireLimit) : null,
     source: c.source,
     verifiedAt: c.verifiedAt,
+  }
+}
+
+/**
+ * The op code a real DMS would have written on the declined line.
+ *
+ * `declined_services.op_code` is nullable and every row the seed has ever
+ * written predates it, so a mock that only passed the column through would make
+ * every demo decline unpriceable — which is the fall-through, not the normal
+ * case, and would hide the behaviour this exists to show.
+ *
+ * The seed builds each decline *from* one of the store's own operations, so the
+ * component group names the code it came from. Groups with no honest answer are
+ * left null on purpose: the price then falls back to the old quote, marked as an
+ * estimate, and the customer is told the price is to be confirmed rather than
+ * quoted a figure from a repair order two years old.
+ */
+const MOCK_DECLINE_OP_CODES: Record<string, string> = {
+  // Front and rear brakes share this group and cost different money, which is
+  // exactly why a group is not a price key. The seed only ever declines the
+  // front job, so for mock data this one is not a guess.
+  BRAKE_PADS_SHOES: 'BRK-FR',
+  TIRES: 'TIRE4',
+  WHEEL_ALIGNMENT: 'ALIGN',
+  TRANS_FLUID_SERVICE: 'TRANS-SVC',
+  SPARK_PLUGS: 'PLUGS',
+  COOLANT_SERVICE: 'COOL-FL',
+}
+
+function mapDecline(d: typeof schema.declinedServices.$inferSelect): DmsDeclinedService {
+  return {
+    id: d.id,
+    vehicleId: d.vehicleId,
+    customerId: d.customerId,
+    description: d.description,
+    componentGroupKey: d.componentGroupKey,
+    quotedAmount: num(d.quotedAmount),
+    opCode: d.opCode
+      ?? (d.componentGroupKey ? MOCK_DECLINE_OP_CODES[d.componentGroupKey] ?? null : null),
+    declinedAt: d.declinedAt,
+    mileageAtDecline: d.mileageAtDecline,
+    resolvedAt: d.resolvedAt,
   }
 }
 
@@ -309,17 +351,7 @@ export class MockDmsAdapter implements DmsAdapter {
             position: item.wheelPosition,
           })),
       })),
-      declinedServices: declineRows.map((d) => ({
-        id: d.id,
-        vehicleId: d.vehicleId,
-        customerId: d.customerId,
-        description: d.description,
-        componentGroupKey: d.componentGroupKey,
-        quotedAmount: num(d.quotedAmount),
-        declinedAt: d.declinedAt,
-        mileageAtDecline: d.mileageAtDecline,
-        resolvedAt: d.resolvedAt,
-      })),
+      declinedServices: declineRows.map(mapDecline),
       recalls: recallRows.map((r) => ({
         vehicleId: r.vehicleId,
         campaignNumber: r.campaignNumber,
@@ -497,17 +529,7 @@ export class MockDmsAdapter implements DmsAdapter {
         amount: num(l.laborAmount) + num(l.partsAmount),
         customerAmount: num(l.customerAmount),
       })),
-      declinedServices: declineRows.map((d) => ({
-        id: d.id,
-        vehicleId: d.vehicleId,
-        customerId: d.customerId,
-        description: d.description,
-        componentGroupKey: d.componentGroupKey,
-        quotedAmount: num(d.quotedAmount),
-        declinedAt: d.declinedAt,
-        mileageAtDecline: d.mileageAtDecline,
-        resolvedAt: d.resolvedAt,
-      })),
+      declinedServices: declineRows.map(mapDecline),
       recalls: recallRows.map((r) => ({
         vehicleId: r.vehicleId,
         campaignNumber: r.campaignNumber,

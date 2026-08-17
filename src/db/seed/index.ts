@@ -626,6 +626,9 @@ export async function seed(connectionString?: string) {
           declineRows.push({
             storeId, repairOrderId: roId, customerId: veh.customerId, vehicleId: veh.id,
             description: op.description, componentGroupKey: op.componentGroupKey,
+            // The operation it was quoted from, so resurfacing it re-prices the
+            // work instead of re-offering a figure from an old repair order.
+            opCode: code,
             quotedAmount: amount.toFixed(2), declinedAt: visitDate,
             mileageAtDecline: mileageAtVisit,
             declineReason: pick(['Not today', 'Will think about it', 'Doing it elsewhere', 'Cost']),

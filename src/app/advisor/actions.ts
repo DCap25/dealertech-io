@@ -469,6 +469,23 @@ export async function recordLineDecision(
         status: 'DECLINED', updatedAt: now,
       }).where(eq(schema.roLines.id, lineId))
 
+      /*
+        The operation this line was written from, copied onto the decline.
+
+        This is the last moment anybody knows it. Months later the decline is
+        resurfaced on a prep sheet and has to be re-priced from the store's book
+        — quoting the amount below is quoting a number the invoice will not
+        match, which is the whole argument for the product. Null where the line
+        was typed by hand rather than picked from an op code; the sheet then
+        presents it as an estimate rather than as a firm price.
+      */
+      let opCode: string | null = null
+      if (line.opCodeId) {
+        const [op] = await db.select({ code: schema.opCodes.code }).from(schema.opCodes)
+          .where(eq(schema.opCodes.id, line.opCodeId)).limit(1)
+        opCode = op?.code ?? null
+      }
+
       await db.insert(schema.declinedServices).values({
         storeId: ro.storeId,
         repairOrderId: ro.id,
@@ -477,6 +494,7 @@ export async function recordLineDecision(
         vehicleId: ro.vehicleId,
         description: line.description,
         componentGroupKey: line.componentGroupKey,
+        opCode,
         quotedAmount: String(Number(line.laborAmount) + Number(line.partsAmount)),
         declinedAt: now,
         declineReason: reason || null,

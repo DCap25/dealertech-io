@@ -260,18 +260,66 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
   // -------------------------------------------------- 2. declined services
   for (const decline of input.openDeclines) {
     const monthsAgo = differenceInCalendarMonths(asOf, decline.declinedAt)
-    const determination = coverageFor(decline.description, decline.componentGroupKey, decline.quotedAmount)
+    /*
+      The old quote is history. The price comes from the price book.
+
+      This block used to quote `quotedAmount` — the figure written on a repair
+      order however many years ago — and set no `priceSource` at all, which the
+      customer snapshot reads as a *confirmed* price. Work declined at $449 in
+      2024 was presented today as a firm $449 while the store's own book priced
+      it at $618, counted in the customer's total, and nothing caught it: the
+      re-pricing check compares the frozen number against today's sheet, and
+      both sides were reading the same stale field.
+
+      So it resolves like every other line on this sheet. Where the decline
+      names an operation the store prices, that is the price and it is marked
+      STORE. Where it names none — everything recorded before the field existed,
+      and every import from a system that does not carry one — `resolvePrice`
+      hands back the old quote marked ESTIMATE, which keeps it off the
+      customer's menu and out of every total until an advisor has priced it.
+      That fall-through is the intended behaviour, not a gap.
+    */
+    const { amount, source: priceSource } = resolvePrice(
+      input.priceBook, decline.opCode ?? undefined, decline.quotedAmount,
+    )
+    const determination = coverageFor(decline.description, decline.componentGroupKey, amount)
     const covered = determination.payer !== 'CUSTOMER_PAY'
     const urgency = urgencyForComponent(decline.componentGroupKey)
+    // Only worth two numbers when today's is the store's own and it has actually
+    // moved. Rounded, because the display rounds and "$618 today" beside "$618"
+    // reads as a mistake.
+    const priceMoved = priceSource === 'STORE' && Math.round(amount) !== Math.round(decline.quotedAmount)
+    const when = monthsAgo <= 0 ? 'this month' : `${monthsAgo} month${monthsAgo === 1 ? '' : 's'} ago`
+    const atMileage = decline.mileageAtDecline
+      ? ` at ${decline.mileageAtDecline.toLocaleString()} miles`
+      : ''
 
     raw.push({
       type: 'DECLINED_SERVICE',
       title: decline.description,
-      detail: `Declined ${monthsAgo <= 0 ? 'this month' : `${monthsAgo} month${monthsAgo === 1 ? '' : 's'} ago`}` +
-        `${decline.mileageAtDecline ? ` at ${decline.mileageAtDecline.toLocaleString()} miles` : ''}` +
-        ` — quoted ${money(decline.quotedAmount)}.`,
+      /*
+        Both numbers, honestly labelled. A price that has risen since they said
+        no is an argument for doing the work now, and it is only an ambush if
+        they first hear it on the invoice.
+      */
+      detail: `Declined ${when}${atMileage} — quoted ${money(decline.quotedAmount)}` +
+        (priceMoved ? `; the same work is ${money(amount)} today.` : '.'),
+      /*
+        The customer's version is history, with nothing in it that reads as
+        pressure. Until now they were handed the advisor's sentence by omission
+        — the only customer-facing string on the sheet that was not the
+        sanitised one.
+
+        The old quote appears only when today's price is the store's own: an
+        unpriced line renders "price to be confirmed", and printing a dollar
+        figure in the sentence underneath would put the redacted number straight
+        back on the screen.
+      */
+      customerDetail: `Recommended on a previous visit${atMileage}.` +
+        (priceMoved ? ` Quoted ${money(decline.quotedAmount)} at the time.` : ''),
       componentGroupKey: decline.componentGroupKey ?? undefined,
-      estimatedAmount: decline.quotedAmount,
+      estimatedAmount: amount,
+      priceSource,
       customerOutOfPocket: determination.customerOutOfPocket,
       likelyPayer: determination.payer,
       urgency,
@@ -279,8 +327,12 @@ export function buildPrepSheet(input: PrepSheetInput): PrepSheet {
       // pays for it, which is a genuinely different conversation.
       closeProbability: covered ? 0.7 : urgency === 'HIGH' ? 0.4 : 0.3,
       talkTrack: covered
-        ? `They declined this before at ${money(decline.quotedAmount)}. It is now covered — their cost is ${money(determination.customerOutOfPocket)}. Lead with that.`
-        : `Reference the exact item and how long it has been outstanding. Lead with safety, not discount.`,
+        ? `They declined this before at ${money(decline.quotedAmount)}.` +
+          (priceMoved ? ` It books at ${money(amount)} today.` : '') +
+          ` It is now covered — their cost is ${money(determination.customerOutOfPocket)}. Lead with that.`
+        : `Reference the exact item and how long it has been outstanding.` +
+          (priceMoved ? ` It was ${money(decline.quotedAmount)} then and ${money(amount)} now — say so yourself before they find it.` : '') +
+          ` Lead with safety, not discount.`,
       sourceId: decline.id,
     })
   }
