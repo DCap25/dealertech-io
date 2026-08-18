@@ -75,6 +75,9 @@ gets tested, because an appointment book has to be writable, and the
   every scheduler API is different, some don't exist, and a half-working push
   is worse than none (two books that *almost* agree).
 
+**DECIDED (Dan, 2026-08-18): (a) — DealerTech owns the book.** The
+recommendation below stands as the reasoning of record.
+
 **Recommendation: (a), stated as policy in the adapter's own vocabulary.**
 `PLAN.md`'s locked decisions already put appointments in DealerTech's scope
 ("Appointments + coverage arbitration + opportunity engine. DMS keeps the RO,
@@ -98,14 +101,21 @@ doesn't persist" — plainly, once, where it's true.
 
 **D2 — What the advisor and the manager each see.**
 
-Best practice in service scheduling is settled on two points that matter here.
-First: **the day view is a worklist, the week view is a capacity view** — an
-advisor works today as a ranked list of conversations (which the drive already
-is); nobody works Thursday-after-next as a list, they look at it as *load*.
-Second: **you schedule the shop, not the advisor** — a dealership sells
-appointment slots against shop capacity, and the advisor is an assignment on
-the appointment, not the resource being booked. Advisor "calendars" are how
-lanes starve while one writer drowns.
+**DECIDED (Dan, 2026-08-18): the schedule is the advisor's, not the tech's.**
+This overrides the shop-capacity framing an earlier draft of this section
+carried. The scheduling unit in DealerTech is the **advisor's book**: an
+appointment is booked into a named advisor's schedule (or the unassigned
+pool), the week reads as advisors' books side by side, and technician
+capacity is not modelled here at all — that is dispatch, and dispatch is the
+DMS's (D3). The product line that settles it: *DealerTech is a service
+advisor sales tool, a CRM, and a scheduler layer.* The advisor is the unit of
+everything else in this product — the drive, the scorecard, the hand-off, the
+owning relationship — so the advisor is the unit of the schedule too.
+
+One point from the earlier framing survives, demoted from structure to
+guardrail: books that fill unevenly are how lanes starve while one writer
+drowns. That is handled by D4's balanced assignment and D3's per-advisor
+caps, not by pretending the schedule belongs to the shop.
 
 So, three views over one query surface:
 
@@ -113,13 +123,15 @@ So, three views over one query surface:
    totals. Becomes the `day` case of the range loader. Default for `ADVISOR`,
    filtered to *their* appointments plus the unassigned pool (see D4) — an
    advisor's day is their book plus what they might claim.
-2. **Week** — seven columns, appointment cards by time, colour by status,
-   with per-day capacity bars (booked slots vs available — D3). Default view
-   for `SERVICE_MANAGER` / `FIXED_OPS_DIRECTOR`, dealership-wide. The advisor
-   sees the same view scoped to themselves via a toggle: **Mine / Everyone**.
-   The toggle is a filter, not a permission — any advisor may look at the
-   store's week (they cover for each other; hiding it buys nothing), but
-   *editing* another advisor's assignment is manager-gated (D4).
+2. **Week** — the advisor's book across seven days: appointment cards by
+   time, colour by status, a per-day load bar against *their* capacity (D3).
+   The dealership week — default for `SERVICE_MANAGER` /
+   `FIXED_OPS_DIRECTOR` — is the same days with **one column per advisor's
+   book** (plus the unassigned pool), which is also where uneven books become
+   visible at a glance. The toggle is **Mine / Everyone**, and it is a
+   filter, not a permission — any advisor may look at the store's week (they
+   cover for each other; hiding it buys nothing), but *editing* another
+   advisor's assignment is manager-gated (D4).
 3. **Vehicle/customer's next visit** — not a calendar; the CRM timeline's
    forward edge (D6). The same appointment rows, read from the other end.
 
@@ -140,40 +152,53 @@ screenshot-stable like everything else.
 
 **D3 — What "full" means.**
 
+**DECIDED (Dan, 2026-08-18): tech hours are DMS territory.** *DealerTech is a
+service advisor sales tool, a CRM, and a scheduler layer* — capacity here
+means the capacity of the advisor's book, never the shop floor's. Recast
+accordingly: with D2's decision that the schedule is the advisor's, "full"
+is a fact about a *book*, not about the building.
+
 Options, in ascending fidelity:
 
 - *(a) Nothing.* Book anything anywhere. That is today, minus the UI. It is
-  also how a store double-books its Monday 8am and the product gets blamed.
-- *(b) Slot grid + caps.* Store scheduling rules: open hours per weekday,
-  slot length (15/30 min), **max appointments per slot**, **max waiters per
-  slot** (waiters are the constraint that hurts — a lounge holds so many
-  people, and `transportType` already knows who waits), optionally max per
-  advisor per day (a soft writes-per-day number). One small table, pure
-  functions over it, warnings not blockers.
-- *(c) Tech-hours dispatch.* Real capacity is technician hours by skill,
-  which is dispatching — DMS territory, explicitly out of scope in `PLAN.md`
-  ("DMS keeps the RO, parts…"), and a swamp of per-store truth we cannot see.
+  also how one advisor's Monday 8am takes five write-ups and the product gets
+  blamed.
+- *(b) Advisor-book caps over store hours.* Store scheduling rules give the
+  frame (open hours per weekday, slot length); the caps live on the book:
+  **max appointments per advisor per slot** (how many customers one writer
+  can greet at 8:00 — usually 1–2) and **max per advisor per day** (a
+  writes-per-day number, which is also the number D4's balanced assignment
+  weighs against). A store-level **max waiters per slot** stays as the one
+  building-level warning worth keeping — the lounge holds so many people
+  whoever's books they sit in, and `transportType` already knows who waits.
+  The dealership-week totals are *derived* — the sum of the books plus the
+  unassigned pool — never a separately-managed shop number that can disagree
+  with them.
+- *(c) Tech-hours dispatch.* Real shop capacity is technician hours by
+  skill, which is dispatching — the DMS's, per the decision above and
+  `PLAN.md`'s locked scope ("DMS keeps the RO, parts…"), and a swamp of
+  per-store truth we cannot see.
 
-**Recommendation: (b), with (c) explicitly refused** in the same voice the
-engine refuses timing belts: adding something you cannot be right about is
-worse than leaving it off. And per the menu builder's own precedent
-(`menuWarnings`): **capacity warns, it does not block.** "Tuesday 8:00 is
-over capacity — 5 of 4 slots, 3 waiters" is a sentence for the booker; a
-hard refusal teaches them to book it as a phone note instead, and the system
-loses the appointment *and* the truth. The one hard stop worth having is
-outside open hours, and even that needs a manager override for the 7am
-tow-in, because tow-ins happen.
+**Recommendation within the decision: (b).** And per the menu builder's own
+precedent (`menuWarnings`): **capacity warns, it does not block.** "Marcus is
+at 4 of 4 write-ups for Tuesday morning" is a sentence for the booker — who
+may know exactly why a fifth is fine; a hard refusal teaches them to book it
+as a phone note instead, and the system loses the appointment *and* the
+truth. The one hard stop worth having is outside store hours, and even that
+needs a manager override for the 7am tow-in, because tow-ins happen.
 
 New table sketch (one, plus a pure engine `src/lib/scheduling/`):
 
 ```
 scheduling_rules  store_id · weekday · open_time · close_time · slot_minutes
-                  max_per_slot · max_waiters_per_slot · max_per_advisor_day
+                  max_per_advisor_slot · max_per_advisor_day · max_waiters_per_slot
 ```
 
-Pure and tested like everything else that decides: `slotsForDay(rules, day)`,
-`loadFor(slots, appointments)`, `capacityWarnings(slot, appointment)` — the
-UI renders over it, the booking action calls the same functions.
+Per-advisor overrides (a senior writer who takes more, a trainee capped low)
+can be a later nullable column on the roster, not a v1 table. Pure and tested
+like everything else that decides: `slotsForDay(rules, day)`,
+`bookLoad(slots, appointments, advisorId)`, `capacityWarnings(...)` — the UI
+renders over it, the booking action calls the same functions.
 
 **The booking surface** is one form used by every role that books (advisor,
 BDC, manager, sales — D5): customer/vehicle search-or-create, date + slot
