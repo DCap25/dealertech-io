@@ -492,6 +492,29 @@ authorisation block for a channel whose answers never reached the lines.
 
 ### F5 — `CALL_ME` is discarded on the tablet mirror · **High**
 
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `11cdf62`. The
+> mirror's hand-written value list is replaced by `isDecision` — pure, already
+> tested, and unable to drift from the `Decision` type — and the "answered"
+> counter shares the same guard. `PENDING` stays forwarded, with the asymmetry
+> against the link path's `answersToApply` recorded in the comment (a live
+> mirror narrates a cleared choice; an hours-later link answer would blank an
+> advisor's decision). +2 pins (CALL_ME admitted, SKIPPED refused); 1,070
+> passing. This unlocks what already existed downstream: `command-center.ts`'s
+> "CUSTOMER ASKED TO BE CALLED" note block and `deferred` payload array were
+> keyed on `CALL_ME` and simply unreachable from a tablet tap.
+>
+> **New finding surfaced by this verification — the outcome layer cannot
+> express a call-me.** This review's F5 text claimed "`toOutcomeRecords`
+> writes no outcome"; that was wrong. It always writes one — `toOutcome`
+> (`performance/visit-summary.ts`) maps `CALL_ME` through its `default`
+> branch to `SKIPPED`, because `OpportunityOutcome` is only
+> `ACCEPTED | DECLINED | SKIPPED`. So a call-me is durably recorded as "never
+> raised", before and after this fix. Related: `needsFollowUp` and
+> `followUpPriority` in `decisions.ts` have **no callers anywhere** — the
+> follow-up engine this review assumed consumes decisions does not exist yet.
+> Extending the outcome vocabulary (and building its consumer) is its own
+> piece of work, out of F5's scope.
+
 **Where:** `src/components/prep-sheet/send-to-tablet.tsx:67–71`
 ```ts
 if (value === 'ACCEPTED' || value === 'DECLINED' || value === 'PENDING') {
