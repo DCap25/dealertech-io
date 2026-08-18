@@ -1,5 +1,5 @@
 import { linkSessionFromToken } from '@/lib/presentation/link-store'
-import { linkStatusMessage } from '@/lib/presentation/link'
+import { linkStatusMessage, linkStatusTitle } from '@/lib/presentation/link'
 import { CustomerMenu } from './customer-menu'
 
 export const dynamic = 'force-dynamic'
@@ -58,7 +58,7 @@ export default async function MenuLinkPage({
 
   if (session.status !== 'OPEN' && session.status !== 'AUTHORIZED') {
     return (
-      <Centre title={session.status === 'EXPIRED' ? 'This link has expired' : 'This list is closed'}>
+      <Centre title={linkStatusTitle(session.status)}>
         {linkStatusMessage(session.status)}
       </Centre>
     )

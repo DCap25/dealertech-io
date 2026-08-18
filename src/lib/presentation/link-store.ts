@@ -12,6 +12,7 @@ import {
   createLinkToken, hashLinkToken, linkExpiryFrom, linkStatus,
   type LinkStatus,
 } from './link'
+import { nextPresentationSequence } from './sequence'
 import type { DeviceSnapshot } from '@/lib/pairing/snapshot'
 import { comparePrices, type PricedLine, type RepriceReport } from './reprice'
 
@@ -54,21 +55,9 @@ export async function createLinkPresentation(input: {
   const db = getDb()
   const { token, tokenHash } = createLinkToken()
 
-  /*
-    Which conversation on this visit this is.
-
-    Counted from what already exists rather than assumed to be the second: a
-    busy day can produce three, and a visit where the tablet was never used
-    should still call the first link "1".
-  */
-  const [prior] = await db
-    .select({ n: sql<number>`coalesce(max(${schema.presentationSessions.sequence}), 0)::int` })
-    .from(schema.presentationSessions)
-    .where(input.appointmentId
-      ? eq(schema.presentationSessions.appointmentId, input.appointmentId)
-      : sql`false`)
-
-  const sequence = (prior?.n ?? 0) + 1
+  // Which conversation on this visit this is. Shared with the tablet push, so
+  // the two channels cannot disagree about what they are counting.
+  const sequence = await nextPresentationSequence(input.appointmentId)
 
   const [row] = await db.insert(schema.presentationSessions).values({
     storeId: input.storeId,
@@ -375,8 +364,12 @@ export async function repriceSinceAuthorisation(
  * lets the later conversation win. It used to order `desc` under a comment
  * claiming "oldest first" — harmless only because nothing called it, which was
  * the deeper problem: a customer's answers were written and never read by
- * anything (F4). `startedAt` breaks a tie on `sequence`, since tablet sessions
- * do not set one and all claim to be the first conversation.
+ * anything (F4). `startedAt` breaks a tie on `sequence`. That tiebreak was
+ * carrying the order on its own while tablet sessions never set a sequence at
+ * all (F10); now that both channels count the same way it is a backstop rather
+ * than the mechanism — rows written before that fix all claim to be the first
+ * conversation, and two menus sent for one visit at the same instant can still
+ * read the same maximum.
  *
  * Channel is filtered explicitly rather than left to the caller to remember. A
  * tablet's answers already reach the advisor live, through the poll in

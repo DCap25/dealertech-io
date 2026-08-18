@@ -79,8 +79,47 @@ export function linkStatus(record: LinkRecord, now: Date): LinkStatus {
   return 'OPEN'
 }
 
+/**
+ * Why the server would not take an answer.
+ *
+ * `UNKNOWN` is not a `LinkStatus` — it is the token not resolving to a row at
+ * all. A page that is already open has resolved its token once, so this is very
+ * nearly unreachable; it is enumerated anyway because a write refused for a
+ * reason nobody named is exactly how an answer comes to be dropped in silence.
+ */
+export type LinkRefusal = Exclude<LinkStatus, 'OPEN'> | 'UNKNOWN'
+
+/**
+ * What a write's outcome means for the screen the customer is looking at.
+ *
+ * Null is the good case: the link was open and the answer landed. Everything
+ * else is a sentence that has to be shown to them at the moment it happens,
+ * rather than saved up for the button at the bottom.
+ */
+export function refusalFromStatus(status: LinkStatus | null): LinkRefusal | null {
+  if (status === null) return 'UNKNOWN'
+  return status === 'OPEN' ? null : status
+}
+
+/**
+ * The heading over that sentence.
+ *
+ * Here rather than written out at each surface because there are two of them —
+ * the page a closed link loads into, and the notice that appears over a menu
+ * somebody is halfway through — and a customer who reads one and then reloads
+ * into the other must not be told two different things.
+ */
+export function linkStatusTitle(status: LinkRefusal): string {
+  switch (status) {
+    case 'EXPIRED': return 'This link has expired'
+    case 'ENDED': return 'This list is closed'
+    case 'AUTHORIZED': return 'Already sent to your advisor'
+    case 'UNKNOWN': return 'This link is no longer valid'
+  }
+}
+
 /** What to tell somebody whose link will not take an answer. */
-export function linkStatusMessage(status: Exclude<LinkStatus, 'OPEN'>): string {
+export function linkStatusMessage(status: LinkRefusal): string {
   switch (status) {
     case 'EXPIRED':
       return 'This link has expired. Your advisor can send a new one — nothing you chose has been lost.'
@@ -88,6 +127,8 @@ export function linkStatusMessage(status: Exclude<LinkStatus, 'OPEN'>): string {
       return 'Your advisor has closed this list. Give them a call if you would still like something done.'
     case 'AUTHORIZED':
       return 'You have already sent these answers to your advisor. Here is what you chose.'
+    case 'UNKNOWN':
+      return 'This link is no longer valid. Call your service advisor and they will send a new one.'
   }
 }
 

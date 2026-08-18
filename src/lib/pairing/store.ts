@@ -1,6 +1,8 @@
 import 'server-only'
 import { and, desc, eq, isNull, or } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+// One count for both channels — see the note on `pushToDevice`.
+import { nextPresentationSequence } from '@/lib/presentation/sequence'
 import {
   generateDeviceToken, generatePairingCode, hashToken, isPairingExpired, normalizePairingCode,
   pairingExpiry,
@@ -196,6 +198,12 @@ export async function revokeDevice(storeId: string, deviceId: string): Promise<v
  * stamped column would be wrong within seconds of being written and would read
  * as a second, disagreeing mechanism. The one clock is `lastActivityAt`, checked
  * on read below.
+ *
+ * `sequence` is counted, not defaulted. It used to be left off the insert and
+ * take the schema's default of 1, so every tablet menu on a visit claimed to be
+ * the first conversation while links counted properly — the one fact migration
+ * 0018 exists to record, wrong for one of the two channels (F10). The count is
+ * shared with the link path rather than repeated here.
  */
 export async function pushToDevice(input: {
   storeId: string
@@ -216,6 +224,8 @@ export async function pushToDevice(input: {
       ),
     )
 
+  const sequence = await nextPresentationSequence(input.appointmentId)
+
   const [row] = await db
     .insert(schema.presentationSessions)
     .values({
@@ -223,6 +233,7 @@ export async function pushToDevice(input: {
       deviceId: input.deviceId,
       appointmentId: input.appointmentId,
       advisorId: input.advisorId,
+      sequence,
       snapshot: input.snapshot,
       decisions: {},
       status: 'ACTIVE',

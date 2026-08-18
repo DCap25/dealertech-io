@@ -110,6 +110,31 @@ export function sanitizeDecisions(
 }
 
 /**
+ * Put an optimistic tap back the way it was.
+ *
+ * A customer's screen answers instantly and tells the server afterwards, which
+ * is right on a phone with two bars. When the server refuses — the link expired
+ * while the tab sat open, the advisor closed the list — the answer on screen is
+ * one the record does not have, and leaving it lit under a banner that says the
+ * link has expired is the same silence in miniature.
+ *
+ * `undefined` is not `PENDING`. Pending is an answer the customer took back and
+ * the server has; undefined is an item they had never touched, and the key has
+ * to go rather than be written as a decision nobody made.
+ */
+export function revertDecision(
+  decisions: Record<string, Decision>,
+  id: string,
+  previous: Decision | undefined,
+): Record<string, Decision> {
+  if (previous !== undefined) return { ...decisions, [id]: previous }
+
+  const out = { ...decisions }
+  delete out[id]
+  return out
+}
+
+/**
  * One presentation's answers, as they sit on the row.
  *
  * `decisions` is deliberately `unknown`: it comes out of a jsonb column that
@@ -145,8 +170,11 @@ export interface PresentedAnswers {
  * down, in `answersToApply`.
  *
  * Ties on `sequence` keep the order they arrived in, so a caller that reads
- * oldest-first gets oldest-first — which matters while tablet sessions all
- * still claim sequence 1.
+ * oldest-first gets oldest-first. Both channels now number their presentations
+ * off the same count (F10), so a tie is no longer the ordinary case — but it is
+ * still a real one: every tablet row written before that fix claims to be the
+ * first conversation, and two menus pushed for one visit in the same instant
+ * can still read the same maximum and land on the same number.
  */
 export function mergeCustomerAnswers(
   presentations: PresentedAnswers[],

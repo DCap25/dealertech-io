@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   LINK_TTL_HOURS, createLinkToken, hashLinkToken, isUsableAuthorisationName,
-  linkExpiryFrom, linkStatus, linkStatusMessage, type LinkRecord,
+  linkExpiryFrom, linkStatus, linkStatusMessage, linkStatusTitle, refusalFromStatus,
+  type LinkRecord,
 } from './link'
 
 const NOW = new Date('2026-08-15T12:00:00Z')
@@ -73,6 +74,35 @@ describe('linkStatus', () => {
   })
 })
 
+describe('refusalFromStatus', () => {
+  it('says nothing went wrong when the link is open', () => {
+    expect(refusalFromStatus('OPEN')).toBeNull()
+  })
+
+  it('names every way a write can be turned away', () => {
+    // The whole of F9 was a write being refused and nobody asking why. Each of
+    // these has to arrive as something the screen can put into a sentence.
+    expect(refusalFromStatus('EXPIRED')).toBe('EXPIRED')
+    expect(refusalFromStatus('ENDED')).toBe('ENDED')
+    expect(refusalFromStatus('AUTHORIZED')).toBe('AUTHORIZED')
+  })
+
+  it('treats a token that no longer resolves as a refusal, not a success', () => {
+    // Null is the one outcome that is not a `LinkStatus`. Reading it as "fine"
+    // is precisely the silence being fixed.
+    expect(refusalFromStatus(null)).toBe('UNKNOWN')
+  })
+})
+
+describe('linkStatusTitle', () => {
+  it('heads every refusal, including the ones only a live menu can hit', () => {
+    expect(linkStatusTitle('EXPIRED')).toBe('This link has expired')
+    expect(linkStatusTitle('ENDED')).toBe('This list is closed')
+    expect(linkStatusTitle('AUTHORIZED')).toMatch(/sent to your advisor/i)
+    expect(linkStatusTitle('UNKNOWN')).toMatch(/no longer valid/i)
+  })
+})
+
 describe('linkStatusMessage', () => {
   it('never leaves the customer at a dead end', () => {
     // Every one of these has to say what happens next. "This link is invalid"
@@ -85,6 +115,10 @@ describe('linkStatusMessage', () => {
 
   it('reassures rather than blames when a link runs out', () => {
     expect(linkStatusMessage('EXPIRED')).toMatch(/nothing you chose has been lost/i)
+  })
+
+  it('tells somebody whose token stopped resolving what to do next', () => {
+    expect(linkStatusMessage('UNKNOWN')).toMatch(/call your service advisor/i)
   })
 })
 

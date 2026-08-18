@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   answersToApply, authorisedLines, authorisedTotal, DECISIONS, followUpPriority,
-  isAuthorised, isDecision, mergeCustomerAnswers, needsFollowUp, sanitizeDecisions,
-  totalDecisions, type Decision, type PresentedItem,
+  isAuthorised, isDecision, mergeCustomerAnswers, needsFollowUp, revertDecision,
+  sanitizeDecisions, totalDecisions, type Decision, type PresentedItem,
 } from './decisions'
 
 describe('the three answers', () => {
@@ -193,6 +193,38 @@ describe('authorisedLines and authorisedTotal', () => {
     const old = [{ id: 'brakes', title: 'Front brakes', customerOutOfPocket: 618 }]
     expect(authorisedTotal(old, { brakes: 'ACCEPTED' })).toBe(618)
     expect(authorisedLines(old, { brakes: 'ACCEPTED' })).toHaveLength(1)
+  })
+})
+
+describe('revertDecision', () => {
+  it('takes back a tap the server refused', () => {
+    // The optimistic answer is on screen and nowhere else. Leaving it there
+    // under "this link has expired" is the same silence, in smaller print.
+    const after = revertDecision({ brakes: 'ACCEPTED', tyres: 'DECLINED' }, 'brakes', 'DECLINED')
+    expect(after).toEqual({ brakes: 'DECLINED', tyres: 'DECLINED' })
+  })
+
+  it('removes an item that had never been answered', () => {
+    // Undefined is not PENDING. Pending is an answer they took back and the
+    // server has; this item was never touched, so the key has to go rather
+    // than be written as a decision nobody made.
+    const after = revertDecision({ brakes: 'ACCEPTED' }, 'brakes', undefined)
+    expect(after).toEqual({})
+    expect('brakes' in after).toBe(false)
+  })
+
+  it('keeps a taken-back answer as PENDING rather than dropping it', () => {
+    const after = revertDecision({ brakes: 'ACCEPTED' }, 'brakes', 'PENDING')
+    expect(after).toEqual({ brakes: 'PENDING' })
+  })
+
+  it('leaves every other answer and the map it was given alone', () => {
+    // Everything that saved while the link was open stays on screen — that is
+    // what makes "nothing you chose has been lost" true rather than kind.
+    const before: Record<string, Decision> = { brakes: 'ACCEPTED', tyres: 'CALL_ME' }
+    const after = revertDecision(before, 'brakes', undefined)
+    expect(after).toEqual({ tyres: 'CALL_ME' })
+    expect(before).toEqual({ brakes: 'ACCEPTED', tyres: 'CALL_ME' })
   })
 })
 
