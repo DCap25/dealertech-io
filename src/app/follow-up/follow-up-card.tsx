@@ -160,6 +160,22 @@ export function FollowUpCard({
             </button>
           )}
 
+          {/*
+            The point of the whole list. `taskId` travels with it, and the
+            booking action writes `resulting_appointment_id` back to this task
+            in the same transaction — which is how "did the call produce a
+            booking" stops being a question nobody can answer. It also closes
+            the task, so nobody rings them again tomorrow.
+          */}
+          <Link
+            href={`/drive/book?customerId=${item.customerId}&taskId=${item.id}${
+              item.vehicleId ? `&vehicleId=${item.vehicleId}` : ''
+            }`}
+            className="touch-target rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold transition active:scale-[0.97] hover:border-neutral-900 dark:hover:border-neutral-300"
+          >
+            Book
+          </Link>
+
           <Link
             href={`/customers/${item.customerId}`}
             className="touch-target rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold transition active:scale-[0.97] hover:border-neutral-900 dark:hover:border-neutral-300"

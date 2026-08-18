@@ -103,6 +103,33 @@ export const appointments = pgTable(
     cancellationReason: text('cancellation_reason'),
 
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+
+    /**
+     * Who chose this advisor — which is not who booked the appointment.
+     *
+     * `createdBy` above is always the person at the keyboard. This one is null
+     * whenever a *rule* picked: the balancer, the owning relationship, or the
+     * store's claim-at-arrival setting. Null rather than a sentinel uuid
+     * standing for SYSTEM, which would need a login-shaped row in `users` that
+     * is not a person, or a foreign key that does not resolve. Null says the
+     * same thing in the type — nobody chose — and `assignmentReason` already
+     * says which rule did.
+     */
+    assignedBy: uuid('assigned_by').references(() => users.id, { onDelete: 'set null' }),
+    /**
+     * REQUESTED · OWNING · BALANCED · CLAIMED · MANUAL — DRIVE_PLAN D4.
+     *
+     * Text rather than an enum, following the `presentation_sessions.channel`
+     * precedent: this vocabulary is younger than the table and will grow (P3's
+     * delivery introduction is a REQUESTED today and may want its own name),
+     * and a text column costs an `ADD VALUE` migration less each time. The
+     * authority on the values is `AssignmentReason` in src/lib/scheduling.
+     *
+     * What it is for: an advisor's numbers mean nothing if nobody can say how
+     * their book was dealt.
+     */
+    assignmentReason: text('assignment_reason'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

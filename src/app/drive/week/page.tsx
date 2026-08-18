@@ -114,6 +114,8 @@ export default async function DriveWeekPage({
               <Link href={`/drive/week?week=${stepWeek(-1)}&view=${view}`} className="rounded-lg border border-neutral-200 px-2.5 py-1.5 dark:border-neutral-800" aria-label="Previous week">←</Link>
               <Link href={`/drive/week?view=${view}`} className="rounded-lg border border-neutral-200 px-2.5 py-1.5 dark:border-neutral-800">This week</Link>
               <Link href={`/drive/week?week=${stepWeek(1)}&view=${view}`} className="rounded-lg border border-neutral-200 px-2.5 py-1.5 dark:border-neutral-800" aria-label="Next week">→</Link>
+              {/* The week is where somebody notices a thin Thursday. */}
+              <Link href="/drive/book" className="rounded-lg bg-neutral-900 px-2.5 py-1.5 text-white dark:bg-white dark:text-neutral-900">Book</Link>
             </nav>
           </div>
         </div>
@@ -145,9 +147,19 @@ function MineWeek({
         const cards = byDay.get(dayKey(day)) ?? []
         return (
           <section key={dayKey(day)} className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
-            <Link href={`/drive?date=${dayKey(day)}`} className="block text-xs font-bold uppercase tracking-wide text-neutral-500 hover:underline">
-              {dayLabel(day)}
-            </Link>
+            <div className="flex items-baseline justify-between gap-2">
+              <Link href={`/drive?date=${dayKey(day)}`} className="text-xs font-bold uppercase tracking-wide text-neutral-500 hover:underline">
+                {dayLabel(day)}
+              </Link>
+              {/* Book into the day being looked at, not into today. */}
+              <Link
+                href={`/drive/book?date=${dayKey(day)}`}
+                className="text-sm font-bold leading-none text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100"
+                aria-label={`Book on ${dayLabel(day)}`}
+              >
+                +
+              </Link>
+            </div>
             <p className="mt-0.5 text-lg font-bold tabular-nums">{cards.length || '—'}</p>
             <ul className="mt-2 space-y-2">
               {cards.map((c) => (

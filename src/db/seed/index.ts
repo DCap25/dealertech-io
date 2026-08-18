@@ -145,7 +145,7 @@ export async function seed(connectionString?: string) {
     schema.callLogs, schema.customerNotes, schema.messages, schema.conversations,
     schema.messageTemplates, schema.consentEvents,
     schema.prepSheetOutcomes,
-    schema.appointments, schema.mileageReadings, schema.customerVehicles,
+    schema.appointments, schema.schedulingRules, schema.mileageReadings, schema.customerVehicles,
     schema.vehicles, schema.customers, schema.opCodes,
     schema.externalRefs, schema.syncRuns, schema.importBatches, schema.dmsConnections,
     schema.auditLog, schema.userStoreRoles, schema.users, schema.stores, schema.organizations,
@@ -164,6 +164,33 @@ export async function seed(connectionString?: string) {
     laborRate: '185.00', warrantyLaborRate: '142.00',
     partsTaxRate: '0.08250', laborTaxRate: '0.00000',
   })
+
+  /**
+   * When the drive is open, and how much a book holds.
+   *
+   * Seeded rather than left to the engine's defaults so the demo shows a store
+   * that has been *configured* — the booking screen reads differently when
+   * Saturday is genuinely short and Sunday is genuinely absent, which is what a
+   * real dealership's week looks like. The hours cover the seeded appointments
+   * (7:00 to about 13:30) with room either side, so nothing in the demo data
+   * lands outside its own store's hours.
+   *
+   * `autoAssign` is true on every day — DRIVE_PLAN §9 Q1's recommendation and
+   * the column default. A store that runs a first-free-writer line sets it
+   * false for the days it does.
+   */
+  await db.insert(schema.schedulingRules).values([
+    ...[1, 2, 3, 4, 5].map((weekday) => ({
+      storeId, weekday, openMinute: 7 * 60, closeMinute: 18 * 60, slotMinutes: 30,
+      maxPerAdvisorSlot: 2, maxPerAdvisorDay: 12, maxWaitersPerSlot: 3, autoAssign: true,
+    })),
+    {
+      storeId, weekday: 6, openMinute: 8 * 60, closeMinute: 14 * 60, slotMinutes: 30,
+      maxPerAdvisorSlot: 2, maxPerAdvisorDay: 8, maxWaitersPerSlot: 3, autoAssign: true,
+    },
+    // No Sunday row. That is how a closed day is expressed — see
+    // src/lib/scheduling/rules.ts.
+  ])
 
   // ------------------------------------------------------------- users
   const staff = [

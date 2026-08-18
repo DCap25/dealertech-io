@@ -380,6 +380,28 @@ export interface DmsCapabilities {
   canPullPriceBook: boolean
   canPushHandOff: boolean
   canPushFollowUpOutcome: boolean
+  /**
+   * Whether a booking made here can be written into the DMS scheduler.
+   *
+   * **False on every adapter, and there is no `pushAppointment` method behind
+   * it.** DealerTech owns the appointment book (DRIVE_PLAN D1, decided); the
+   * pull merges in whatever was booked on the other side, and an appointment
+   * reaches the DMS the way everything else does — as part of the hand-off when
+   * the visit is written up.
+   *
+   * So why declare a capability nobody can be granted? Because the honest thing
+   * for the booking screen to say is "this appointment is not in your DMS until
+   * the visit is handed off", and that sentence should stop being said the day
+   * a vendor supports the write, not the day somebody remembers to go looking
+   * for the surfaces that say it. The flag is the seam: the UI reads it now,
+   * the method and the `unsupported()` refusal arrive with the first vendor
+   * that has a scheduler API worth writing to, and no screen changes.
+   *
+   * This is the one additive change to the adapter contract that DRIVE_PLAN
+   * sanctions, called out in D1 rather than made casually — every adapter
+   * answers false in v1.
+   */
+  canPushAppointment: boolean
   /** True when writes go somewhere real rather than to a local log. */
   writesArePersisted: boolean
 }

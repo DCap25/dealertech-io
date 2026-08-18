@@ -33,6 +33,10 @@ const CAPABILITIES: DmsCapabilities = {
   canPullPriceBook: true,
   canPushHandOff: true,
   canPushFollowUpOutcome: true,
+  // False here and on every adapter: DealerTech owns the book (DRIVE_PLAN D1),
+  // and a booking reaches the DMS as part of the hand-off. The booking screen
+  // reads this to say so plainly.
+  canPushAppointment: false,
   // Honest: a real integration would set this true. Nothing here leaves the
   // process, and any UI that says "sent to your DMS" should read this first.
   writesArePersisted: false,

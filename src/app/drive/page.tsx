@@ -54,7 +54,17 @@ export default async function DrivePage({
           </p>
           <WorkspaceNav current="drive" />
         </div>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight">Today&rsquo;s drive</h1>
+        <div className="mt-1 flex flex-wrap items-baseline justify-between gap-3">
+          <h1 className="text-3xl font-bold tracking-tight">Today&rsquo;s drive</h1>
+          {/* Carries the day being viewed, so a walk-in on Thursday's drive
+              books onto Thursday. */}
+          <Link
+            href={params.date ? `/drive/book?date=${params.date}` : '/drive/book'}
+            className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-bold text-white dark:bg-white dark:text-neutral-900"
+          >
+            Book an appointment
+          </Link>
+        </div>
         <p className="mt-1 text-neutral-600 dark:text-neutral-400">
           {day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} ·{' '}
           {sheets.length} appointment{sheets.length === 1 ? '' : 's'}
