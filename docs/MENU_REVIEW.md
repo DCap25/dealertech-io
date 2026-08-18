@@ -1086,6 +1086,52 @@ authorisation claim; the customer is never re-asked by the software.
 eventually, but it needs the state-law question settled properly, and a
 re-authorisation flow that is subtly wrong is worse than a phone call.
 
+**Q6 — Self-serve tablet mode (added 2026-08-18, Dan's idea).** Hand the
+customer the tablet to work through the menu alone — the doctor's-office
+questionnaire — with the advisor going over the answers together afterwards.
+
+Assessment against the code as it now stands: **most of this is already
+built — it is the link flow's semantics on tablet hardware.** `/m/[token]` is
+exactly this pattern (answer alone, answers save per tap, explainers before
+each choice, name-confirm to finish, advisor reads it back with provenance
+since F4). What the tablet flow lacks for unattended use:
+
+1. *No "I'm done" affordance.* The tablet deliberately has no submit —
+   `tablet.tsx` assumes the advisor is standing next to it. Unattended, the
+   customer finishes into silence. The link flow's name-confirm bar is the
+   already-designed answer, and reusing it keeps both channels agreeing on
+   what finishing means.
+2. *No finished-vs-abandoned signal for the advisor.* The mirror shows taps;
+   self-serve wants a "Betty is done — 4 of 6 answered, 1 call-me" state.
+3. *Session hygiene is a prerequisite* — F7 (idle timeout, deliberately
+   idle-based so a customer actively working alone is never cut off) and F8
+   (no tap bleed between sessions) must land first.
+
+Product cautions: the thesis is an advisor selling with evidence, not a kiosk
+collecting checkboxes — the doctor's-office model works because the doctor
+reviews the questionnaire *with* you, which is exactly the proposed shape.
+`CALL_ME` becomes the star answer (alone and unpressured, customers will use
+it more, and post-F5 it actually arrives). One wrinkle: `decide()` refuses to
+re-decide an answered line, so the go-over-it-together conversation runs
+through the reversible present-menu surface, not the card stack. And a tablet
+handed over unattended is a shared device — the name-confirm step matters
+more, not less.
+
+- *(a) Build the small version:* a "hand it over" push variant rendering the
+  existing `ServiceMenu` with the link flow's done/confirm bar, plus a
+  finished state in the advisor's mirror. No new engine, no new schema —
+  `presentation_sessions` already models it (`channel: 'TABLET'`;
+  `authorizedAt`/`authorizedName` exist on the row, used only by links today).
+- *(b) Skip the tablet variant and lean on links* — the phone already does
+  this; a waiting-room customer can be sent the link instead.
+- *(c) Full kiosk mode* (auto-reset, attract screen, multiple customers per
+  device unattended) — a bigger product with bigger shared-device risks.
+
+**Recommendation: (a), after F9–F14 land** — it leans on the session
+lifecycle being hardened now, reuses two proven surfaces instead of building
+a third, and (b) undersells the moment: the tablet is in the customer's
+hands at the dealership, which is the one place the link cannot be.
+
 ---
 
 ## 8. Verification — second-model pass on the three critical findings
