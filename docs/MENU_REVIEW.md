@@ -682,6 +682,21 @@ footers disagree.
 
 ### F9 — Answers tapped after a link expires are silently discarded · **Medium**
 
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `0acdfdb`, jointly
+> with F10. `saveAnswer` returns the status the write was judged under
+> (`OPEN` = saved; unknown token maps to `UNKNOWN` rather than silently
+> benign), and the menu reacts at the **first** refused tap: the tap reverts
+> (`revertDecision` — an answer the record does not hold must not sit under an
+> "expired" banner), one banner in the load path's own `linkStatusMessage`
+> words, menu read-only, confirm bar gone. Answers that saved stay visible —
+> the copy's "nothing you chose has been lost" is now literally true on that
+> screen. `authorise` shares the same copy and outcome. One deliberate
+> behaviour change beyond the finding, commented in place: per-tap
+> `revalidatePath` removed (page renders from the token at load; the
+> authorise success-path revalidate stays). Verified: refusal mapping total
+> across all five statuses, revert restores-or-removes correctly; +12 tests
+> across F9/F10; 1,096 passing.
+
 **Where:** `src/app/m/[token]/actions.ts:18–21` (`saveAnswer` returns `void`);
 `src/lib/presentation/link-store.ts:129` (returns the session unchanged when not
 `OPEN`).
@@ -705,6 +720,19 @@ in this path, is not currently true).
 ---
 
 ### F10 — `sequence` is never set for a tablet presentation · **Medium**
+
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `0acdfdb`, jointly
+> with F9. Both inserts into `presentation_sessions` now share one
+> implementation — `nextPresentationSequence` in `presentation/sequence.ts`,
+> owned by neither store since both write the column — with the pure rule
+> (`null → 1`) extracted and tested, and the null-appointment behaviour
+> preserved. The concurrent-push exposure is documented rather than solved
+> (two simultaneous sends can claim one number; readers tie-break on
+> `startedAt`; the real fix is a unique index + retry, a schema change not
+> worth buying before a store produces the collision). The F4 merge
+> machinery's "tablets all claim sequence 1" comments now describe the
+> tiebreak as a backstop for pre-fix rows and races. Verified single-sourced
+> by grep: exactly two callers, both channels.
 
 **Where:** `src/lib/pairing/store.ts:185–195`. `createLinkPresentation` computes
 `max(sequence) + 1` (`link-store.ts:61–68`); `pushToDevice` inserts without the
