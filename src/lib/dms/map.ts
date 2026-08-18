@@ -248,6 +248,11 @@ export function toPrepSheetInputs(
         transportType: appointment.transportType,
         concerns: appointment.customerConcerns,
         advisorName: appointment.advisorName,
+        // Whose book, and where in the lifecycle. The wire type always carried
+        // both; dropping them here is why the drive could not answer "whose
+        // customer is at 8:00" without a second query.
+        advisorId: appointment.advisorId,
+        status: appointment.status,
       },
       contracts: (coveragesByVehicle.get(vehicle.id) ?? []).map(toContract),
       prepaidEntitlements: (entitlementsByVehicle.get(vehicle.id) ?? []).map(toPrepaidEntitlement),

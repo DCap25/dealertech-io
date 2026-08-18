@@ -189,6 +189,15 @@ export interface PrepSheetInput {
     transportType: string
     concerns: string | null
     advisorName: string | null
+    /**
+     * Whose book this visit sits on. Nullable — an unassigned appointment is
+     * the pool an advisor claims from at write-up. Carried for the week views
+     * (DRIVE_PLAN D2: the schedule is the advisor's book); the DMS wire type
+     * always had it and the mapper used to drop it.
+     */
+    advisorId?: string | null
+    /** Appointment lifecycle status as the source system reports it. */
+    status?: string
   }
   contracts: Contract[]
   prepaidEntitlements: (PrepaidEntitlement & { label: string })[]

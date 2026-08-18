@@ -12,7 +12,7 @@ import { canManageStaff } from '@/lib/team/roster'
  * are not allowed reads as a broken promise. Managers get the extra link;
  * nobody else knows it exists.
  */
-export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' | 'billing' | 'import' | 'setup' }) {
+export async function WorkspaceNav({ current }: { current?: 'drive' | 'week' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' | 'billing' | 'import' | 'setup' }) {
   const user = await getCurrentUser()
   /*
     The same predicate the pages and the actions use.
@@ -26,6 +26,9 @@ export async function WorkspaceNav({ current }: { current?: 'drive' | 'follow-up
 
   const links: { key: NonNullable<typeof current>; href: string; label: string }[] = [
     { key: 'drive', href: '/drive', label: 'Today’s drive' },
+    // Beside Today, because they are the same book at two zooms: today is the
+    // worklist, the week is the load (DRIVE_PLAN D2).
+    { key: 'week', href: '/drive/week', label: 'Week' },
     ...(isManager
       ? [{ key: 'manager' as const, href: '/manager', label: 'Department' }]
       : []),

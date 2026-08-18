@@ -64,7 +64,27 @@ export async function loadDriveDay(
   const from = startOfDay(day)
   const to = new Date(from)
   to.setDate(to.getDate() + 1)
+  return loadDriveRange(storeId, from, to, asOf)
+}
 
+/**
+ * A date range of prep sheets — the week views' loader (DRIVE_PLAN P1).
+ *
+ * One `pullDriveBundle` call for the whole range; `buildPrepSheet` is pure CPU
+ * and cheap at a week's scale, so the range builds full sheets and the week
+ * view derives its light cards from them (`src/lib/drive/week.ts`) rather than
+ * growing a second derivation that could disagree with the engine. If a real
+ * store's week ever makes this the slow path, the split to make is in the
+ * adapter pull, not a parallel opportunity engine.
+ *
+ * `to` is exclusive, matching how the day loader always called the adapter.
+ */
+export async function loadDriveRange(
+  storeId: string,
+  from: Date,
+  to: Date,
+  asOf: Date = new Date(),
+): Promise<PrepSheet[]> {
   const adapter = getDmsAdapter()
 
   const [bundle, profile, priced] = await Promise.all([
