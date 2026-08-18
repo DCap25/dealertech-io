@@ -15,6 +15,19 @@ reason, I say so. The test suite was run: **1,024 passing, 31 skipped, 50 files*
 
 ## 1. Verdict
 
+> **STATUS, 2026-08-18 — all fourteen findings are fixed and verified.**
+> Every fix was written by Opus and adversarially verified by Fable
+> (`b8051c7` … `b3a2e92`), each with tests proven to fail against the pre-fix
+> code; the suite grew 1,024 → 1,105 with none skipped along the way. The
+> verdict below is preserved as written on 2026-08-17 — it describes the code
+> *before* the campaign. What remains open is listed in §7 (product calls:
+> null-when-unconfirmed, paper's answers, advisor-side hand-off totals, the
+> outcome vocabulary's missing call-me, Q6 self-serve mode) plus the two
+> F1-adjacent follow-ups (cadence prices, import op-code column).
+> **Deploy gate: migrations `0026` and `0027` must be applied
+> (`npm run db:apply`) before this code reaches the database — 0026 breaks
+> reads without it; 0027 merely leaves the collision case unprotected.**
+
 **Not yet. Two of these put a wrong number or a wrong service in front of a
 customer without anything going visibly wrong, and one of them fires on the
 product's flagship feature with no race and no unusual configuration.**
@@ -825,6 +838,20 @@ and whoever does it will read that comment first.
 
 ### F13 — `/api/device` `enroll` is unauthenticated and unlimited · **Low**
 
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `b3a2e92`, jointly
+> with F14. Ten enrolments an hour per caller via the existing limiter (keyed
+> on the Netlify client IP, then first XFF hop — verified against a live
+> limiter probe including window reset and per-caller isolation); an
+> opportunistic sweep of enrolments abandoned 24+ hours, scoped so it can only
+> ever touch unclaimed, unclaimable rows — the actual bound on the table; and
+> migration **`0027`** (written, **not applied**) adds the unique partial
+> index on live pairing codes with a dedupe preamble, closing the
+> arbitrary-claim edge. `enrollDevice` retries a unique violation up to three
+> times with both credential halves redrawn, and rethrows anything else. The
+> migration's sequencing note is deliberately weaker than 0026's: an
+> unapplied index breaks nothing — the collision case is merely unprotected
+> until it lands.
+
 **Where:** `src/app/api/device/route.ts:46–49`.
 
 `enroll` runs before the bearer check (correctly — a new tablet has no token) and
@@ -848,6 +875,18 @@ their store is arbitrary. A unique partial index on `pairing_code WHERE status =
 ---
 
 ### F14 — A tap racing a take-back is dropped with no error to anyone · **Low**
+
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `b3a2e92`, jointly
+> with F13. The tablet reads the decide response: a refused tap is un-painted
+> (`withoutTap`, pure, identity-preserving) and an immediate re-poll converges
+> the screen through F8's transition within one round trip. `endSession`
+> returns the final decisions off its own `UPDATE … RETURNING` — the row as it
+> stood at the instant it closed, deliberately avoiding a second `SELECT` that
+> F7's lazy-idle path would second-guess — and `takeBackMenu` hands them to
+> the advisor's mirror through F5's `isDecision` guard before the poll dies.
+> One correction to this finding, from the fix: the final poll didn't
+> "*may* never run" — it reliably never ran. A tap that races past the end
+> stays honestly lost from both screens, and the code says so.
 
 **Where:** `src/app/present/tablet.tsx:119–123` (ignores the response of
 `decide`); `src/components/prep-sheet/send-to-tablet.tsx:184–187` (tears down the
