@@ -137,6 +137,115 @@ describe('move', () => {
     const start = excludeAll()
     expect(move(start, items, 'high', -1)).toEqual(start)
   })
+
+  it('ignores an id the sheet no longer carries', () => {
+    // A selection outlives the sheet it was made against. There is no tier to
+    // move a vanished item inside of, so there is no move.
+    const stale = { includedIds: ['deleted-item', 'safety', 'high'] }
+    expect(move(stale, items, 'deleted-item', 1)).toEqual(stale)
+  })
+})
+
+/*
+  Reordering after the most ordinary thing an advisor does in the builder.
+
+  The list is not always grouped by tier — `toggle` returns a re-included id to
+  the end, and `includeAll` rebuilds in priority order, where a big "coming up
+  soon" job outranks a safety item. `move` used to look only at the adjacent id
+  and refuse when it belonged to another tier, so both of those left arrows dead
+  with no explanation.
+*/
+describe('move across an ungrouped list', () => {
+  const SAFETY_2 = opp({ id: 'safety2', title: 'Rear brakes at 4mm', urgency: 'SAFETY', priorityScore: 90 })
+  const TWO_NOW = [SAFETY, SAFETY_2, HIGH, LOW]
+  const items = presentableItems(TWO_NOW)
+
+  it('still reorders after an untick and a re-tick', () => {
+    const start = defaultSelection(TWO_NOW)
+    expect(start.includedIds).toEqual(['safety', 'safety2', 'high', 'low'])
+
+    const reticked = toggle(toggle(start, 'safety'), 'safety')
+    expect(reticked.includedIds).toEqual(['safety2', 'high', 'low', 'safety'])
+
+    // Two tier-mates with a whole tier's worth of other items between them.
+    // Both arrows have to reach past that.
+    expect(move(reticked, items, 'safety', -1).includedIds)
+      .toEqual(['safety', 'high', 'low', 'safety2'])
+    expect(move(reticked, items, 'safety2', 1).includedIds)
+      .toEqual(['safety', 'high', 'low', 'safety2'])
+  })
+
+  it('puts a re-ticked item last in its own tier, not last on the menu', () => {
+    // Where it lands in the flat list is not what anyone sees. Every surface
+    // groups by tier first, so "end of the list" reads as "end of its group".
+    const reticked = toggle(toggle(defaultSelection(TWO_NOW), 'safety'), 'safety')
+    const menu = buildMenu(TWO_NOW, reticked)
+    expect(menu.tiers[0]!.items.map((i) => i.opportunity.id)).toEqual(['safety2', 'safety'])
+  })
+
+  it('leaves the tiers it reached over exactly as they were', () => {
+    // Swapping two non-adjacent ids moves nothing in between, and everything in
+    // between is from another tier — so no other tier's internal order changes.
+    const scrambled = { includedIds: ['low', 'safety', 'high', 'safety2'] }
+    const moved = move(scrambled, items, 'safety2', -1)
+
+    expect(moved.includedIds).toEqual(['low', 'safety2', 'high', 'safety'])
+    const menu = buildMenu(TWO_NOW, moved)
+    expect(menu.tiers.map((t) => t.items.map((i) => i.opportunity.id))).toEqual([
+      ['safety2', 'safety'],
+      ['high'],
+      ['low'],
+    ])
+  })
+
+  it('still refuses at the top and bottom of a tier', () => {
+    // The refusal is kept, and now says what it always claimed: nothing of
+    // yours that way. Not "something of someone else's is in the way".
+    const start = defaultSelection(TWO_NOW)
+    expect(move(start, items, 'safety', -1).includedIds).toEqual(start.includedIds)
+    expect(move(start, items, 'safety2', 1).includedIds).toEqual(start.includedIds)
+
+    // Alone in its tier with other tiers on both sides — not at either end of
+    // the list, and still refused. Both arrows dead, and rightly so.
+    const LOW_2 = opp({ id: 'low2', title: 'Wiper blades', urgency: 'LOW', priorityScore: 5 })
+    const withFiller = presentableItems([...TWO_NOW, LOW_2])
+    const scrambled = { includedIds: ['safety', 'low', 'high', 'safety2', 'low2'] }
+    expect(move(scrambled, withFiller, 'high', -1).includedIds).toEqual(scrambled.includedIds)
+    expect(move(scrambled, withFiller, 'high', 1).includedIds).toEqual(scrambled.includedIds)
+  })
+
+  it('cannot change what tier anything is in, however it is prodded', () => {
+    // Invariant 3. Tier comes from a measurement, and no sequence of the two
+    // things an advisor can do — include, exclude, nudge — may touch it.
+    let selection = defaultSelection(TWO_NOW)
+    const ids = ['safety', 'safety2', 'high', 'low']
+
+    for (const id of ids) {
+      selection = toggle(selection, id)
+      for (const other of ids) {
+        selection = move(selection, items, other, -1)
+        selection = move(selection, items, other, 1)
+      }
+      selection = toggle(selection, id)
+      for (const other of [...ids].reverse()) {
+        selection = move(selection, items, other, 1)
+        selection = move(selection, items, other, -1)
+      }
+    }
+
+    const menu = buildMenu(TWO_NOW, selection)
+    for (const item of menu.items) expect(item.tier).toBe(tierOf(item.opportunity))
+
+    // And each group holds exactly the included members of that tier — nothing
+    // gained, nothing lost, nothing duplicated.
+    expect(new Set(selection.includedIds).size).toBe(selection.includedIds.length)
+    for (const group of menu.tiers) {
+      const expected = selection.includedIds.filter(
+        (id) => tierOf(TWO_NOW.find((o) => o.id === id)!) === group.tier,
+      )
+      expect(group.items.map((i) => i.opportunity.id)).toEqual(expected)
+    }
+  })
 })
 
 describe('buildMenu', () => {

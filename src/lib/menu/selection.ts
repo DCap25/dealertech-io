@@ -144,6 +144,15 @@ export function isIncluded(selection: MenuSelection, id: string): boolean {
   return selection.includedIds.includes(id)
 }
 
+/**
+ * Take a line off the menu or put it back.
+ *
+ * A re-included id goes on the end, and stays there: it left the menu and comes
+ * back as the newest member of its tier, which is where every surface draws it,
+ * because they all group by tier before they read this order. Putting it back
+ * where it was would mean remembering a position this function was never told.
+ * `move` no longer cares where in the list it lands.
+ */
 export function toggle(selection: MenuSelection, id: string): MenuSelection {
   return isIncluded(selection, id)
     ? { includedIds: selection.includedIds.filter((x) => x !== id) }
@@ -156,6 +165,28 @@ export function toggle(selection: MenuSelection, id: string): MenuSelection {
  * Refuses to cross a tier boundary rather than clamping silently: an advisor
  * pressing "up" on the first item of a tier should see nothing happen, not
  * watch it jump into a more urgent group.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY IT SEARCHES FOR ITS TIER-MATE INSTEAD OF LOOKING NEXT DOOR
+ * ---------------------------------------------------------------------------
+ * This used to compare the item with whatever sat beside it in `includedIds`
+ * and refuse if that neighbour was in another tier — which assumed the list is
+ * always grouped by tier. It is not. `toggle` puts a re-included id back at the
+ * end, and `includeAll` rebuilds the list in priority order, where a $3,000
+ * "coming up soon" job legitimately outranks a safety item. Either one leaves
+ * tiers interleaved, and then every arrow in the affected tiers went dead: the
+ * guard saw a cross-tier neighbour and refused, correctly by its own logic, at
+ * an advisor who had done nothing but untick a line and tick it back.
+ *
+ * So the item now swaps with the next id *of its own tier* in that direction,
+ * however far away it happens to be. Nothing between the two moves, and
+ * everything between the two is — by the way we found it — from other tiers,
+ * so those tiers' internal order is untouched: their members' positions
+ * relative to each other never change. Within the moving tier the two ids are
+ * neighbours, which is exactly the one-place step the advisor asked for.
+ *
+ * Refusal survives, and now means what it says: no tier-mate that way, so the
+ * item is already at the top or bottom of its group.
  */
 export function move(
   selection: MenuSelection,
@@ -168,12 +199,14 @@ export function move(
   const from = ids.indexOf(id)
   if (from === -1) return selection
 
-  const to = from + direction
-  if (to < 0 || to >= ids.length) return selection
+  // An id the sheet no longer carries has no tier to stay inside, so there is
+  // no move that could be within it. The selection outlives the sheet.
+  const tier = byId.get(id)?.tier
+  if (!tier) return selection
 
-  const movingTier = byId.get(ids[from]!)?.tier
-  const targetTier = byId.get(ids[to]!)?.tier
-  if (movingTier !== targetTier) return selection
+  let to = from + direction
+  while (to >= 0 && to < ids.length && byId.get(ids[to]!)?.tier !== tier) to += direction
+  if (to < 0 || to >= ids.length) return selection
 
   ;[ids[from], ids[to]] = [ids[to]!, ids[from]!]
   return { includedIds: ids }
