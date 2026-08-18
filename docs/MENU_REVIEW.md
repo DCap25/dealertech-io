@@ -523,6 +523,23 @@ needs to exclude is `SKIPPED`, not `CALL_ME`.
 
 ### F6 — Unpriced items are counted in the amount written to the permanent DMS record · **High**
 
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `23db36d`. Both
+> permanent-record reads now go through pure, tested helpers
+> (`authorisedLines` / `authorisedTotal` in `decisions.ts`): accepted **and**
+> priced, with the item still counted as accepted — only the money excludes
+> it, and the audit row's `itemsAccepted` stays whole. The absent-field guard
+> is `!== false`, matching all four customer surfaces (a snapshot missing the
+> field renders its price, so a total claiming "at the prices shown" must
+> count it). Stated consequence, deliberate: an unpriced accepted line can
+> never trigger re-authorisation — its first real price is a first quote, not
+> a broken agreement. Verified on mixed-acceptance probes (unpriced excluded
+> from money, declined/CALL_ME contribute nothing, legacy items counted);
+> +7 tests with the guard pinned in both directions; 1,068 passing.
+>
+> **Still open from §5's totals family, advisor-facing:** `handoff-panel.tsx`'s
+> display total and `buildHandoffNote`'s per-line amounts remain unfiltered —
+> a product call about the advisor's paste block, not the customer record.
+
 **Where:** `src/lib/presentation/link-store.ts:263–267`
 ```ts
 const authorisedAmount = items
