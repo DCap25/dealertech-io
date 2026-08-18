@@ -596,6 +596,19 @@ there is what makes this a slip rather than a disagreement.
 
 ### F7 — A tablet session never expires, and unpairing does not end it · **Medium**
 
+> **RESOLVED — fixed by Opus per Q4 (30 minutes idle), verified by Fable.**
+> Commit `2b74062`, jointly with F8. A pure idle window (`session.ts`, clock
+> runs from the last tap — idle-based deliberately, so a self-serve customer
+> is never cut off) is enforced on read in `activeSessionForDevice` **and**
+> `sessionForAdvisor`, with the row lazily ended in the same call; `endedAt`
+> is the deadline, not the read time, so racing readers agree and a session
+> read next morning didn't "run all night". `revokeDevice` ends the device's
+> active sessions in the same transaction. Links are exempt (own clock;
+> lunchtime idleness is legitimate). `expiresAt` stays null on tablets, with
+> the reason recorded: the deadline moves with every tap, so a stamped column
+> would be a second, disagreeing clock. Verified at the boundary (29:59 live,
+> 30:00 ended, matching the pairing `>=` convention) and overnight.
+
 **Where:** `src/lib/pairing/store.ts:185–198` (`pushToDevice` sets no
 `expiresAt`); `src/app/devices/actions.ts:45` (`unpairDevice` revokes the device
 and leaves the session `ACTIVE`).
@@ -627,6 +640,19 @@ end the device's active sessions in the same statement.
 ---
 
 ### F8 — Stale taps reappear on a re-pushed tablet menu · **Medium**
+
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `2b74062`, jointly
+> with F7. The poll transition is now pure (`tablet-state.ts`,
+> `nextTabletState`): pending taps survive **iff the session id is
+> unchanged** — a re-push drops them even when the stable ids collide, which
+> post-F2 is exactly the re-curate case; take-back behaviour unchanged. The
+> footer counts (`menuTotals`) are scoped to the snapshot's own items, same
+> derivation as `present-menu.tsx`, closing the related ghost-count bug —
+> which the CALL_ME count had identically. Verified: same-session keeps
+> pending, new-session drops it despite matching item ids, ghost ids cannot
+> inflate the counts, an unpriced yes counts as an answer worth $0. One extra
+> caught in the same commit: `recordDeviceDecisions` judged a tap against one
+> clock and stamped it with another; both halves now share one instant.
 
 **Where:** `src/app/present/tablet.tsx:88` (`setPending({})` only when the
 session is `null`) and `:162` (`{ ...state.decisions, ...pending }`).
