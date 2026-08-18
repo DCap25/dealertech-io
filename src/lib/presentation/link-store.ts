@@ -4,7 +4,10 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { recordAudit } from '@/lib/audit/record'
-import { mergeCustomerAnswers, sanitizeDecisions, type Decision } from './decisions'
+import {
+  authorisedLines, authorisedTotal, mergeCustomerAnswers, sanitizeDecisions,
+  type Decision,
+} from './decisions'
 import {
   createLinkToken, hashLinkToken, linkExpiryFrom, linkStatus,
   type LinkStatus,
@@ -262,9 +265,20 @@ export async function latestAuthorization(
 
   const items = frozen?.snapshot?.tiers.flatMap((t) => t.items) ?? []
   const decisions = frozen?.decisions ?? {}
-  const authorisedAmount = items
-    .filter((i) => decisions[i.id] === 'ACCEPTED')
-    .reduce((sum, i) => sum + i.customerOutOfPocket, 0)
+  /*
+    Accepted, and priced on their screen.
+
+    The note this feeds says "$X approved at the prices shown". An item that
+    showed "Price to be confirmed" showed no price, so it adds nothing here —
+    exactly as it added nothing to the running total underneath it on the
+    customer's own screen. The item is still accepted; it is the figure that
+    leaves it out, never the answer.
+
+    Every other total in the system already worked this way, including the
+    audit row 60 lines above in this file. This one and the comparison below —
+    the two that write to the permanent record — were the ones that did not.
+  */
+  const authorisedAmount = authorisedTotal(items, decisions)
 
   return {
     name: row.authorizedName ?? 'the customer',
@@ -315,18 +329,29 @@ export async function repriceSinceAuthorisation(
 
   const decisions = frozen?.decisions ?? {}
   /*
-    Only what they actually approved.
+    Only what they actually approved, at a price they were actually given.
 
     A line they declined or asked to be called about was never agreed to at any
     price, so its price moving is not a broken agreement — it is just a
     different number on a recommendation nobody accepted.
-  */
-  const authorisedLines: PricedLine[] = (frozen?.snapshot?.tiers ?? [])
-    .flatMap((t) => t.items)
-    .filter((i) => decisions[i.id] === 'ACCEPTED')
-    .map((i) => ({ id: i.id, title: i.title, customerPrice: i.customerOutOfPocket }))
 
-  if (authorisedLines.length === 0) return null
+    A line they accepted while it read "Price to be confirmed" is the same
+    thing for the same reason: they agreed to the work, not to a figure. Its
+    price "moving" from our estimate to the store's first real number is not a
+    broken agreement, it is the first quote. Including it produced an
+    `authorisedTotal` in the "PRICE CHANGED" warning that nobody had ever been
+    told (F6).
+
+    The consequence, stated so nobody reads it as an omission: such a line can
+    never trigger a re-authorisation. That is correct — the advisor prices it
+    with the customer directly, which is what "to be confirmed" promised.
+  */
+  const lines: PricedLine[] = authorisedLines(
+    (frozen?.snapshot?.tiers ?? []).flatMap((t) => t.items),
+    decisions,
+  )
+
+  if (lines.length === 0) return null
 
   const [store] = await db
     .select({
@@ -337,7 +362,7 @@ export async function repriceSinceAuthorisation(
     .where(eq(schema.stores.id, storeId))
     .limit(1)
 
-  return comparePrices(authorisedLines, currentLines, {
+  return comparePrices(lines, currentLines, {
     percent: Number(store?.percent ?? 0),
     amount: Number(store?.amount ?? 0),
   })

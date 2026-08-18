@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  answersToApply, DECISIONS, followUpPriority, isAuthorised, isDecision,
-  mergeCustomerAnswers, needsFollowUp, sanitizeDecisions, totalDecisions,
-  type Decision,
+  answersToApply, authorisedLines, authorisedTotal, DECISIONS, followUpPriority,
+  isAuthorised, isDecision, mergeCustomerAnswers, needsFollowUp, sanitizeDecisions,
+  totalDecisions, type Decision, type PresentedItem,
 } from './decisions'
 
 describe('the three answers', () => {
@@ -125,6 +125,74 @@ describe('totalDecisions', () => {
       { brakes: 'ACCEPTED' },
     )
     expect(totals.authorisedAmount).toBe(618)
+  })
+})
+
+describe('authorisedLines and authorisedTotal', () => {
+  /*
+    The two reads that write to the permanent record — the DMS authorisation
+    note and the "PRICE CHANGED" warning — used to take these unfiltered, so an
+    item the customer was shown as "Price to be confirmed" went into a record
+    that said "$X approved at the prices shown" (F6).
+  */
+  const frozen: PresentedItem[] = [
+    { id: 'brakes', title: 'Front brakes', customerOutOfPocket: 618, priceConfirmed: true },
+    { id: 'align', title: 'Alignment', customerOutOfPocket: 149, priceConfirmed: false },
+    { id: 'tyres', title: 'Four tyres', customerOutOfPocket: 1_100, priceConfirmed: true },
+  ]
+  const accepted: Record<string, Decision> = {
+    brakes: 'ACCEPTED', align: 'ACCEPTED', tyres: 'DECLINED',
+  }
+
+  it('leaves an accepted line out of the money when no price was shown', () => {
+    // Their screen said "Price to be confirmed" and their own running total
+    // left it out. The permanent record has to say the same thing they saw.
+    expect(authorisedTotal(frozen, accepted)).toBe(618)
+  })
+
+  it('still sums the lines that did carry a price', () => {
+    expect(authorisedTotal(frozen, { brakes: 'ACCEPTED', tyres: 'ACCEPTED' })).toBe(1_718)
+  })
+
+  it('excludes the money without unaccepting the item', () => {
+    // The item was accepted and the counts must go on saying so — only the
+    // figure excludes it. This is the `itemsAccepted` on the audit row.
+    const counted = totalDecisions(
+      frozen.map((i) => ({ id: i.id, customerPrice: i.customerOutOfPocket })),
+      accepted,
+    )
+    expect(counted.accepted).toBe(2)
+    expect(authorisedTotal(frozen, accepted)).toBe(618)
+  })
+
+  it('keeps an unpriced line out of the reprice comparison entirely', () => {
+    // Never agreed at any price, so its price moving from our estimate to the
+    // store's first real number is the first quote, not a broken agreement.
+    // The consequence is deliberate: it can never trigger a re-authorisation.
+    expect(authorisedLines(frozen, accepted)).toEqual([
+      { id: 'brakes', title: 'Front brakes', customerPrice: 618 },
+    ])
+  })
+
+  it('compares a priced accepted line as it always did', () => {
+    expect(authorisedLines(frozen, { tyres: 'ACCEPTED' })).toEqual([
+      { id: 'tyres', title: 'Four tyres', customerPrice: 1_100 },
+    ])
+  })
+
+  it('counts a declined or call-me line as neither money nor a line', () => {
+    expect(authorisedLines(frozen, { brakes: 'CALL_ME', tyres: 'DECLINED' })).toEqual([])
+    expect(authorisedTotal(frozen, {})).toBe(0)
+  })
+
+  it('trusts a snapshot that predates the field', () => {
+    // `priceConfirmed` has been on every snapshot the builder has ever
+    // written, so this is a shape question. It is answered the way every
+    // customer-facing surface answers it — `=== false` hides the price, so an
+    // absent field showed one — and the total must agree with the screen.
+    const old = [{ id: 'brakes', title: 'Front brakes', customerOutOfPocket: 618 }]
+    expect(authorisedTotal(old, { brakes: 'ACCEPTED' })).toBe(618)
+    expect(authorisedLines(old, { brakes: 'ACCEPTED' })).toHaveLength(1)
   })
 })
 

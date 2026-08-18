@@ -27,6 +27,8 @@
  * Pure and I/O-free.
  */
 
+import type { PricedLine } from './reprice'
+
 export type Decision = 'ACCEPTED' | 'DECLINED' | 'CALL_ME' | 'PENDING'
 
 export const DECISIONS: {
@@ -226,4 +228,85 @@ export function totalDecisions(
     }
   }
   return totals
+}
+
+/**
+ * An item as a presentation froze it, with the price it carried.
+ *
+ * Structurally typed rather than `DeviceItem` so this file does not take on the
+ * snapshot builder — the only import here is a type from its equally pure
+ * sibling. `priceConfirmed` is optional only because these come back out of a
+ * jsonb column: every snapshot the builder has ever written sets it
+ * (`snapshot.ts`), so an absent field is a shape question rather than a data
+ * one.
+ */
+export interface PresentedItem {
+  id: string
+  title: string
+  /** What the customer owes, as the snapshot froze it. */
+  customerOutOfPocket: number
+  /** False when the figure is our estimate and the screen said so instead. */
+  priceConfirmed?: boolean
+}
+
+/**
+ * Did the customer's screen actually show this line's price?
+ *
+ * `!== false` rather than a truthiness test, matching every surface that
+ * decides what a customer sees: the tablet footer (`tablet.tsx`), the phone
+ * footer (`customer-menu.tsx`), and both renderers (`service-menu.tsx`,
+ * `printable-menu.tsx`) all key off `priceConfirmed === false`. These totals
+ * exist to say what was on the screen, so on the one input the screen reads
+ * they have to answer the same way it does — a snapshot missing the field
+ * renders its price, and therefore counts.
+ */
+function priceWasShown(item: PresentedItem): boolean {
+  return item.priceConfirmed !== false
+}
+
+/**
+ * What the customer said yes to, at prices they were actually shown.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE PRICE FILTER IS HERE AND NOT AT THE CALL SITE
+ * ---------------------------------------------------------------------------
+ * Every total in the system excludes unpriced lines — the snapshot's own
+ * (`selection.ts`), all four surface footers, and the audit row written with
+ * the authorisation itself (`link-store.ts`, `MENU_AUTHORISED`). The two reads
+ * that feed the permanent DMS record did not, and they are the two that make a
+ * claim about a person: the note that says "$X approved at the prices shown"
+ * and the "PRICE CHANGED" warning that quotes what they authorised. A customer
+ * whose screen read "Price to be confirmed", and whose running total left the
+ * item out, tapped Yes — and our estimate went into the record as a figure
+ * they had agreed to.
+ *
+ * So the rule lives in one place both of them call.
+ *
+ * The *item* is still accepted. Only the money excludes it: a count of accepted
+ * items is the customer's answer and must never be price-filtered, which is why
+ * the audit row counts `itemsAccepted` whole and filters only its
+ * `acceptedAmount`.
+ */
+export function authorisedLines(
+  items: PresentedItem[],
+  decisions: Record<string, string | undefined>,
+): PricedLine[] {
+  return items
+    .filter((i) => decisions[i.id] === 'ACCEPTED' && priceWasShown(i))
+    .map((i) => ({ id: i.id, title: i.title, customerPrice: i.customerOutOfPocket }))
+}
+
+/**
+ * The money on those lines — the figure a permanent record attributes to a
+ * named person.
+ *
+ * An accepted line with no price contributes nothing rather than contributing
+ * our estimate. Zero is the honest answer: nobody quoted a number, so nobody
+ * agreed to one.
+ */
+export function authorisedTotal(
+  items: PresentedItem[],
+  decisions: Record<string, string | undefined>,
+): number {
+  return authorisedLines(items, decisions).reduce((sum, l) => sum + l.customerPrice, 0)
 }
