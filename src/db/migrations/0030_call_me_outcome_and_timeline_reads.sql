@@ -1,0 +1,122 @@
+-- Let the record say "they asked me to call them", and let the timeline read.
+--
+-- ===========================================================================
+-- WHY
+-- ===========================================================================
+-- Two things, both of them DRIVE_PLAN P4, and both of them the same shape:
+-- something the application has always believed it could express, and could
+-- not.
+--
+--   1. THE OUTCOME VOCABULARY (MENU_REVIEW F5's new finding). `opportunity_
+--      outcome` held three values, and `toOutcome` in
+--      src/lib/performance/visit-summary.ts mapped the customer's fourth
+--      answer — CALL_ME, "do the brakes, skip the tyres, and call me about the
+--      alignment" — through its `default` branch onto SKIPPED. SKIPPED means
+--      *the advisor never raised it*. So the highest-intent answer on the
+--      sheet was durably recorded as a conversation that did not happen: the
+--      capture rate counted a presented item as unpresented, its value was
+--      reported as money left on the table when it is money still in play, and
+--      the timeline that renders this history says "never raised" about the
+--      one line the advisor should be phoning about.
+--
+--      Note what this migration cannot do: every call-me already in
+--      prep_sheet_outcomes is a SKIPPED row and stays one. The two answers
+--      were the same value, so there is nothing in the row to tell them apart
+--      and no backfill is possible or attempted. The record is honest from
+--      here forward, which is the most that was ever available.
+--
+--   2. THE TIMELINE'S TENTH TABLE. The read-model in src/lib/timeline/ merges
+--      ten source tables per customer or vehicle. Nine of them are already
+--      read under the `authenticated` role. `presentation_sessions` is not —
+--      see below, and see the ledger.
+--
+-- ===========================================================================
+-- ENUM VALUES AND THE TRANSACTION THE RUNNER OPENS
+-- ===========================================================================
+-- `scripts/apply-migrations.ts` hands each file to `sql.unsafe(text)`, which
+-- Postgres wraps in an implicit transaction block. For `ALTER TYPE … ADD
+-- VALUE` that carries one live restriction, the same one 0029 recorded: **the
+-- new value cannot be used until the transaction commits.** Nothing below
+-- references 'CALL_ME' — no default, no CHECK, no backfill — and nothing
+-- could: see the note above about why a backfill does not exist. 0007 added a
+-- value to `contract_source` through this same runner and is the precedent.
+--
+-- `IF NOT EXISTS` per the idempotent-migration house rule.
+--
+-- ===========================================================================
+-- SEQUENCING
+-- ===========================================================================
+-- APPLY THIS BEFORE THE CODE THAT READS OR WRITES IT DEPLOYS. Both halves bite,
+-- and they bite differently:
+--
+--   * The GRANT breaks *reads*, loudly, like 0028 and 0029: without it the
+--     customer record, the vehicle record and every prep sheet on the drive
+--     fail with "permission denied for table presentation_sessions", because
+--     all three now load a timeline.
+--
+--   * The enum value breaks one *write*, quietly, which is the worse of the
+--     two. The insert lives in `recordVisitOutcomes`, which catches everything
+--     — an advisor walking away from a car must never be blocked by a write —
+--     and the outcomes go in one batch. So against a database without this
+--     value, a visit containing a single call-me records **no outcomes at
+--     all**, silently, and that advisor's scorecard loses the visit.
+--
+-- Idempotent — safe to run twice. Applied with `npm run db:apply`; see
+-- src/db/README.md.
+
+-- ---------------------------------------------------------------------------
+-- 1. The fourth answer.
+-- ---------------------------------------------------------------------------
+ALTER TYPE opportunity_outcome ADD VALUE IF NOT EXISTS 'CALL_ME';
+
+-- ---------------------------------------------------------------------------
+-- 2. A POLICY IS NOT A GRANT — THE SEVENTH TIME
+--
+-- `presentation_sessions` has carried FORCE ROW LEVEL SECURITY and a FOR ALL
+-- tenant-isolation policy since 0008, and no table privilege for
+-- `authenticated` has ever been stated for it. Harmless for exactly as long as
+-- nothing read it under that role — and nothing has. Every query in
+-- src/lib/presentation/link-store.ts uses `getDb()`, deliberately: a menu sent
+-- to a customer's phone is opened by somebody with no session at all, so there
+-- is no user to scope to and the token plus an explicit `store_id` predicate
+-- is the whole isolation. That is the right call for the customer-facing path
+-- and it is why this gap has never been felt.
+--
+-- The timeline is the first advisor-side read of the table. It follows the
+-- records machinery (src/lib/records/customer.ts, records/vehicle.ts), which
+-- runs scoped — so `presentation_sessions` is now selected as `authenticated`
+-- alongside the nine tables around it, and without this grant that select
+-- fails with "permission denied for table presentation_sessions". As 0021 put
+-- it, that failure "looks nothing like a policy problem and sends you reading
+-- the wrong file".
+--
+-- The other nine, checked rather than assumed:
+--   appointments, cadence_tasks, call_logs      — granted in 0028
+--   declined_services                           — granted in 0025
+--   prep_sheet_outcomes, dms_handoffs           — granted in 0021
+--   repair_orders, ro_lines, customer_notes,
+--   mileage_readings                            — no migration has ever stated
+--                                                 them; they are read scoped
+--                                                 today by loadCustomerRecord
+--                                                 and loadVehicleRecord, so
+--                                                 the privileges exist
+--
+-- SELECT only, on all of them. The timeline writes nothing — it is a
+-- read-model — and the surfaces that do write a presentation (the advisor
+-- pushing a menu, the customer tapping an answer) stay on the privileged
+-- connection where they already are. Granting more than the read needs would
+-- widen the customer-facing table's exposure to buy nothing.
+-- ---------------------------------------------------------------------------
+GRANT SELECT ON public.presentation_sessions TO authenticated;
+
+-- The four believed-but-unstated ones, restated for exactly the reason 0028
+-- restated `cadence_tasks` and `call_logs` and 0025 restated `vehicles` and
+-- `declined_services`: they are read through the scoped connection in
+-- production so the privileges are believed to exist, GRANT is idempotent, and
+-- saying so costs nothing next to discovering the gap when a customer record
+-- goes blank. This is a new read path over all four, which is the moment the
+-- belief is worth writing down.
+GRANT SELECT ON public.repair_orders    TO authenticated;
+GRANT SELECT ON public.ro_lines         TO authenticated;
+GRANT SELECT ON public.customer_notes   TO authenticated;
+GRANT SELECT ON public.mileage_readings TO authenticated;

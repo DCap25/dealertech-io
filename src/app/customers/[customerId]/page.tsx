@@ -1,6 +1,9 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { loadCustomerRecord } from '@/lib/records/customer'
+import { loadTimeline } from '@/lib/timeline/load'
+import { OpenThreadsPanel } from '@/components/timeline/open-threads'
+import { TimelineFeed } from '@/components/timeline/timeline-feed'
 import {
   ConsentBadge, Empty, formatPhone, money, Panel, shortDate, Stat, VehicleLink,
 } from '../../records-ui'
@@ -38,6 +41,17 @@ export default async function CustomerPage({
 
   const record = await loadCustomerRecord(store.id, customerId)
   if (!record) notFound()
+
+  /*
+    Loaded after the record rather than beside it.
+
+    Both run under `withCurrentUserScope`, and a scoped block is one
+    transaction on one connection — so awaiting them together would buy
+    concurrency the connection cannot deliver while making a failure in either
+    one harder to read. The record is what decides whether this page exists at
+    all; the timeline is what fills it.
+  */
+  const { events, threads } = await loadTimeline(store.id, { kind: 'CUSTOMER', customerId })
 
   const openDeclineValue = record.openDeclines.reduce((s, d) => s + d.quotedAmount, 0)
   const pinned = record.notes.filter((n) => n.isPinned)
@@ -128,6 +142,21 @@ export default async function CustomerPage({
               </ul>
             )}
           </Panel>
+
+          {/*
+            The story, and what it leaves owed.
+
+            Under the vehicle list rather than above it, because the vehicles
+            are this page's navigation — somebody arriving from a search is
+            usually one click from a car — and above everything else, because
+            a history read as one story is the thing D6 says these seven
+            tables could not previously give anybody.
+
+            Threads first. A record page answers two questions and "what am I
+            supposed to do about this customer" is the one people open it with.
+          */}
+          <OpenThreadsPanel threads={threads} />
+          <TimelineFeed events={events} />
 
           {/* ------------------------------------------ declined work */}
           <Panel title={`Open declined work (${record.openDeclines.length})`}>

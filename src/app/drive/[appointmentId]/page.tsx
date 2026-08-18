@@ -4,6 +4,8 @@ import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { firstServiceCue } from '@/lib/prep-sheet'
 import { vinLastSix } from '@/lib/prep-sheet/presentation'
 import { fenceSales } from '@/lib/auth/sales'
+import { loadVisitCard } from '@/lib/timeline/load'
+import { VisitCardStrip } from '@/components/timeline/visit-card'
 import { PrepSheetView } from '@/components/prep-sheet/prep-sheet-view'
 import { demoNow } from '@/lib/demo-day'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
@@ -55,6 +57,17 @@ export default async function PrepSheetPage({
   if (!sheet) notFound()
 
   const firstService = firstServiceCue(sheet, DAY())
+
+  /*
+    The compressed relationship card — DRIVE_PLAN D6.
+
+    Scoped to this car and deliberately the cheap loader: six queries rather
+    than the record page's fourteen, because this is the drive and the advisor
+    is walking. It renders nothing when there is nothing to say, which is the
+    ordinary case for a first-service customer and is why this and the emerald
+    cue below do not fight each other.
+  */
+  const visitCard = await loadVisitCard(store.id, sheet.vehicle.id, DAY())
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6 sm:py-8">
@@ -156,6 +169,18 @@ export default async function PrepSheetPage({
           </ul>
         </div>
       )}
+
+      {/*
+        Below both boxes and above the list, one line tall.
+
+        The cue above changes how the greeting starts and the alerts above it
+        are things that must not be missed; this is context, and context does
+        not outrank either. It sits directly on top of the ranked opportunities
+        because that is where an advisor's eye already is — and it is a strip
+        rather than a panel precisely so it does not push the first
+        opportunity down.
+      */}
+      <VisitCardStrip card={visitCard} recordHref={`/customers/${sheet.customer.id}`} />
 
       <div className="mt-4">
         <PrepSheetView sheet={sheet} />

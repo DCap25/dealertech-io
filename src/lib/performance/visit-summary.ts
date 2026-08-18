@@ -35,6 +35,18 @@ export function toOutcome(decision: OpportunityDecision): OpportunityOutcome {
       return 'ACCEPTED'
     case 'DECLINED':
       return 'DECLINED'
+    case 'CALL_ME':
+      /*
+        Recorded as itself, which it was not until now.
+
+        This case used to fall through to the branch below, so the customer's
+        highest-intent answer was stored as "never raised" — a sentence that is
+        false about the advisor and useless to whoever reads the timeline two
+        months later. Named explicitly rather than left to `default` so a
+        future value has to be thought about instead of quietly inheriting the
+        same fate.
+      */
+      return 'CALL_ME'
     default:
       // An item left PENDING at the end of a visit was never raised — the same
       // thing as skipping it, and counted as such rather than quietly dropped.
@@ -72,6 +84,13 @@ export function buildVisitSummary(
 ): VisitSummary {
   const records = toOutcomeRecords('visit', opportunities, decisions, new Date(0))
 
+  /*
+    Both lines split on SKIPPED and nothing else, which is now the whole point.
+    A call-me was raised, so it is presented; it is not a miss, so it never
+    reaches the coaching line below and never counts as money left on the
+    table. Before `CALL_ME` existed as an outcome it did both, and the advisor
+    was coached for the best answer they got all morning.
+  */
   const available = records.length
   const presented = records.filter((r) => r.outcome !== 'SKIPPED').length
   const skipped = records.filter((r) => r.outcome === 'SKIPPED')

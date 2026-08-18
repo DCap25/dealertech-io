@@ -6,7 +6,35 @@
  * layer knows another advisor exists.
  */
 
-export type OpportunityOutcome = 'ACCEPTED' | 'DECLINED' | 'SKIPPED'
+/**
+ * What became of one ranked opportunity on one visit.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THERE ARE FOUR
+ * ---------------------------------------------------------------------------
+ * There were three, and the missing one was the most valuable answer a
+ * customer gives. `CALL_ME` — "do the brakes, skip the tyres, and call me
+ * about the alignment" — reached this layer through `toOutcome`'s `default`
+ * branch and was durably written as `SKIPPED`, which means *nobody raised it*.
+ * So the one thread an owning advisor should be pulling on came back off the
+ * record as a conversation that never happened, the capture rate counted a
+ * presented item as unpresented, and its value was reported as money left on
+ * the table when it is money still in play.
+ *
+ * The distinctions, stated once because four values invite conflation:
+ *
+ *  - ACCEPTED — they authorised it. The only answer that authorises work.
+ *  - DECLINED — they were asked and said no. A real answer, and the follow-up
+ *    cadence exists for it.
+ *  - CALL_ME  — they were asked, they believe it, and they are not ready
+ *    today. Neither a win nor a loss: an open thread with a name on it.
+ *  - SKIPPED  — nobody asked. The advisor's own gap, and the only one of the
+ *    four that a capture rate is measuring.
+ *
+ * Every consumer in this folder treats CALL_ME deliberately; grep it here
+ * before adding a fifth.
+ */
+export type OpportunityOutcome = 'ACCEPTED' | 'DECLINED' | 'CALL_ME' | 'SKIPPED'
 
 /** One decision on one ranked opportunity, as recorded at the drive. */
 export interface OutcomeRecord {

@@ -3,7 +3,7 @@ import {
   averagePerRepairOrder, buildInsights, buildScorecard, buildStreaks, buildVisitSummary,
   captureRate, changeVsPrevious, coveredRevenueUnlocked, easyYesCaptureRate, isEasyYes,
   latestActivity, leftOnTable, monthToDatePeriod, periodIsEmpty, startOfWeek, toOutcome,
-  toOutcomeRecords, visitsWorked, weekPeriod,
+  toOutcomeRecords, visitsWorked, wasPresented, weekPeriod,
 } from './index'
 import type { OutcomeRecord, SoldLineRecord } from './types'
 import type { Opportunity } from '@/lib/prep-sheet'
@@ -333,6 +333,64 @@ describe('toOutcome', () => {
   it('maps the real decisions straight through', () => {
     expect(toOutcome('ACCEPTED')).toBe('ACCEPTED')
     expect(toOutcome('DECLINED')).toBe('DECLINED')
+  })
+
+  it('records a call-me as a call-me, not as never raised', () => {
+    expect(toOutcome('CALL_ME')).toBe('CALL_ME')
+  })
+})
+
+describe('a call-me through the aggregations', () => {
+  const callMe = outcome({ outcome: 'CALL_ME', estimatedAmount: 400 })
+
+  it('counts as presented — the advisor did their half', () => {
+    expect(wasPresented(callMe)).toBe(true)
+    expect(captureRate([callMe, outcome({ outcome: 'SKIPPED' })])).toBe(50)
+  })
+
+  it('is not money left on the table; it is money still in play', () => {
+    expect(leftOnTable([callMe])).toBe(0)
+  })
+
+  it('sits in the decline rate’s denominator and not its numerator', () => {
+    const declines = Array.from({ length: 8 }, () => outcome({ outcome: 'DECLINED' }))
+
+    // Eight of eight raised items refused: worth naming.
+    expect(buildInsights(declines).find((i) => i.key === 'high-decline')).toBeDefined()
+
+    // Four of those customers asked to be called instead. Eight of twelve is
+    // not a high decline rate, and an advisor who turns nos into call-mes
+    // should not still be told they are closing badly.
+    expect(
+      buildInsights([...declines, callMe, callMe, callMe, callMe])
+        .find((i) => i.key === 'high-decline'),
+    ).toBeUndefined()
+  })
+
+  it('gets named on the scorecard, however few there are', () => {
+    const insights = buildInsights([callMe])
+    const insight = insights.find((i) => i.key === 'wants-a-call')
+    expect(insight?.headline).toBe('1 customer asked to be called back')
+    // Above every coaching line except skipped safety.
+    expect(insight?.weight).toBe(95)
+  })
+
+  it('keeps a presentation streak alive', () => {
+    const streaks = buildStreaks([
+      outcome({ appointmentId: 'a1', outcome: 'CALL_ME', decidedAt: new Date('2026-08-12T12:00:00Z') }),
+      outcome({ appointmentId: 'a2', outcome: 'ACCEPTED', decidedAt: new Date('2026-08-11T12:00:00Z') }),
+    ])
+    expect(streaks.find((s) => s.key === 'full-presentation')?.current).toBe(2)
+  })
+
+  it('is not coached as a miss on the visit summary', () => {
+    const summary = buildVisitSummary(
+      [opportunity()],
+      { 'WEAR_PREDICTED:TIRES': 'CALL_ME' },
+    )
+    expect(summary.presented).toBe(1)
+    expect(summary.leftOnTable).toBe(0)
+    expect(summary.coaching).toBeNull()
   })
 })
 

@@ -32,9 +32,32 @@ export function isEasyYes(o: OutcomeRecord): boolean {
   return o.customerOutOfPocket / o.estimatedAmount <= EASY_YES_MAX_OUT_OF_POCKET_SHARE
 }
 
-/** Presented means raised with the customer at all — accepted or declined. */
+/**
+ * Presented means raised with the customer at all — accepted, declined, or
+ * answered with a call-me.
+ *
+ * Deliberately written as "not skipped" rather than as a list of the three
+ * answers, so extending the vocabulary cannot silently drop an answer out of
+ * the denominator the way `CALL_ME` used to be dropped out of it upstream.
+ * SKIPPED is the one value that means the conversation did not happen, and it
+ * is the only thing this metric is asking about.
+ */
 export function wasPresented(o: OutcomeRecord): boolean {
   return o.outcome !== 'SKIPPED'
+}
+
+/**
+ * The customer asked to be called back about this.
+ *
+ * Not a metric on the scorecard, on purpose: "more call-mes" is neither good
+ * nor bad — it is a queue, and whether it is healthy depends entirely on
+ * whether anyone worked it, which this layer cannot see. It is a *lead list*,
+ * which is what the timeline's open threads render it as. What it earns here
+ * is a named predicate so nothing has to hand-write the string, and the
+ * insight in `insights.ts` that puts a number in front of the advisor.
+ */
+export function wantsCallBack(o: OutcomeRecord): boolean {
+  return o.outcome === 'CALL_ME'
 }
 
 /**
@@ -66,7 +89,13 @@ export function coveredRevenueUnlocked(lines: SoldLineRecord[]): number {
   return lines.reduce((sum, l) => sum + Math.max(0, l.amount - l.customerAmount), 0)
 }
 
-/** Total value of everything the advisor never raised. */
+/**
+ * Total value of everything the advisor never raised.
+ *
+ * SKIPPED only. A decline is not left on the table — it was offered and
+ * refused — and neither is a call-me, which is still live and belongs to the
+ * follow-up list rather than to a regret figure.
+ */
 export function leftOnTable(outcomes: OutcomeRecord[]): number {
   return outcomes
     .filter((o) => o.outcome === 'SKIPPED')

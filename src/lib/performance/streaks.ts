@@ -10,7 +10,11 @@ import type { OutcomeRecord, Streak } from './types'
  * a prep sheet count.
  *
  * Both streaks measure presenting, never closing. A customer's no should not
- * cost an advisor a streak they earned by doing their job properly.
+ * cost an advisor a streak they earned by doing their job properly — and
+ * neither should a call-me, which reaches both predicates below through
+ * `wasPresented` and keeps a run alive exactly as an acceptance does. That is
+ * the whole point of the rule: the advisor controls the asking, and a call-me
+ * is the asking having gone well.
  */
 
 interface Visit {

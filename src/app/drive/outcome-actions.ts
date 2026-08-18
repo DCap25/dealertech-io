@@ -31,7 +31,20 @@ export interface RecordOutcomesResult {
   error?: string
 }
 
-const VALID_OUTCOMES = new Set<OpportunityOutcome>(['ACCEPTED', 'DECLINED', 'SKIPPED'])
+/**
+ * The values the column will accept, restated here because the client sends
+ * strings.
+ *
+ * `CALL_ME` joined the enum with migration 0030. Until it did, this list was
+ * complete *and* the vocabulary was not: the customer's answer arrived as
+ * `SKIPPED` from `toOutcome` and passed the filter, so nothing was ever
+ * rejected and nothing was ever right. Apply 0030 before this deploys — a
+ * `CALL_ME` reaching a database without the enum value fails the insert, and
+ * this action swallows the error so the advisor can finish the visit.
+ */
+const VALID_OUTCOMES = new Set<OpportunityOutcome>([
+  'ACCEPTED', 'DECLINED', 'CALL_ME', 'SKIPPED',
+])
 
 export async function recordVisitOutcomes(
   appointmentId: string,

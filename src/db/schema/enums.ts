@@ -243,12 +243,20 @@ export const syncEntityEnum = pgEnum('sync_entity', [
 ])
 
 /**
- * What the advisor did with a ranked opportunity.
+ * What became of a ranked opportunity on a visit.
+ *
  * SKIPPED means it was never raised with the customer — not that they said no.
+ * CALL_ME is the customer's own answer and is neither: they believe it and are
+ * not ready today. It was added by migration 0030, after the timeline made the
+ * cost of not having it visible — every call-me in the table before that is
+ * stored as SKIPPED and cannot be recovered, because the two were the same
+ * value. The authority on the meanings is `OpportunityOutcome` in
+ * src/lib/performance/types.ts.
  */
 export const opportunityOutcomeEnum = pgEnum('opportunity_outcome', [
   'ACCEPTED',
   'DECLINED',
+  'CALL_ME',
   'SKIPPED',
 ])
 

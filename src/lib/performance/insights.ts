@@ -1,4 +1,7 @@
-import { captureRate, easyYesCaptureRate, isEasyYes, leftOnTable, visitsWorked, wasPresented } from './metrics'
+import {
+  captureRate, easyYesCaptureRate, isEasyYes, leftOnTable, visitsWorked, wantsCallBack,
+  wasPresented,
+} from './metrics'
 import type { Insight, OutcomeRecord } from './types'
 
 /**
@@ -52,6 +55,38 @@ export function buildInsights(outcomes: OutcomeRecord[]): Insight[] {
     })
   }
 
+  /*
+    People who asked to be called.
+
+    Weighted just under skipped safety and above everything else, because it is
+    the only line on this page naming customers who are waiting on the advisor
+    rather than the other way round. No MIN_SAMPLE gate: one call-me is one
+    person who asked a direct question, and "too small a sample to mention" is
+    the wrong sentence about a person.
+
+    NEUTRAL rather than COACH. This layer sees outcomes, not calls — it cannot
+    know whether the advisor rang them that afternoon, and scolding somebody for
+    a gap that may not exist is how a scorecard loses its reader. The timeline's
+    open threads is where these become a worklist with a state; here they are a
+    count and a reminder of what they are worth.
+  */
+  const callMes = outcomes.filter(wantsCallBack)
+  if (callMes.length > 0) {
+    const value = callMes.reduce((s, o) => s + o.estimatedAmount, 0)
+    insights.push({
+      key: 'wants-a-call',
+      tone: 'NEUTRAL',
+      headline: `${callMes.length} customer${callMes.length === 1 ? '' : 's'} asked to be called back`,
+      detail: `${callMes
+        .slice(0, 2)
+        .map((o) => o.title)
+        .join(', ')}${callMes.length > 2 ? ` and ${callMes.length - 2} more` : ''}${
+        value > 0 ? `, worth ${money(value)}` : ''
+      }. Somebody who says "call me" believes the recommendation and is not ready today — that is the warmest lead on the sheet, and it goes cold faster than a decline does.`,
+      weight: 95,
+    })
+  }
+
   const skippedEasy = easy.filter((o) => !wasPresented(o))
   if (skippedEasy.length > 0 && easy.length >= MIN_SAMPLE && easyRate < EASY_YES_CONCERN) {
     const value = skippedEasy.reduce((s, o) => s + o.estimatedAmount, 0)
@@ -100,8 +135,16 @@ export function buildInsights(outcomes: OutcomeRecord[]): Insight[] {
     })
   }
 
-  // A high decline rate is not a failure — but it is worth naming, because the
-  // fix is upstream in how the work is framed rather than in trying harder.
+  /*
+    A high decline rate is not a failure — but it is worth naming, because the
+    fix is upstream in how the work is framed rather than in trying harder.
+
+    A call-me sits in the denominator and not in the numerator, which is the
+    honest arithmetic: it was raised, and it was not refused. That makes this
+    rate fall when a customer asks to be called, and it should — an advisor who
+    turns nos into "call me about it" is doing the thing this insight is
+    pointing them at.
+  */
   const presented = outcomes.filter(wasPresented)
   const declined = presented.filter((o) => o.outcome === 'DECLINED')
   if (presented.length >= MIN_SAMPLE && declined.length / presented.length > 0.7) {

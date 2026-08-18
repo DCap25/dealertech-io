@@ -1,6 +1,9 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { loadVehicleRecord } from '@/lib/records/vehicle'
+import { loadTimeline } from '@/lib/timeline/load'
+import { OpenThreadsPanel } from '@/components/timeline/open-threads'
+import { TimelineFeed } from '@/components/timeline/timeline-feed'
 import { WearPanel } from '@/components/wear/wear-panel'
 import type { TermStatus } from '@/lib/warranty'
 import type { WearPrediction } from '@/lib/prep-sheet'
@@ -133,6 +136,13 @@ export default async function VehiclePage({
   const terms = [v.warranty.basic, v.warranty.powertrain, v.warranty.emissionsLong,
     v.warranty.hybridEv, v.warranty.corrosion]
     .filter((t): t is TermStatus => Boolean(t))
+
+  /*
+    The same events as the customer's timeline, filtered to this car — and
+    filtered in the query rather than afterwards, so a household with four
+    vehicles does not pay to load three of them. See `TimelineScope`.
+  */
+  const { events, threads } = await loadTimeline(store.id, { kind: 'VEHICLE', vehicleId })
 
   const openDeclineValue = v.openDeclines.reduce((s, d) => s + d.quotedAmount, 0)
   const lifetimeService = v.serviceHistory.reduce((s, r) => s + r.customerPayTotal, 0)
@@ -272,6 +282,18 @@ export default async function VehiclePage({
               </div>
             )}
           </Panel>
+
+          {/*
+            Under the wear trends, which are this page's reason to exist — the
+            thing no DMS gives you — and above the service history, which the
+            timeline contains and then some. Both stay: the history is a list
+            of repair orders with money against them, and somebody looking for
+            an RO number should not have to read a story to find it.
+
+            `showVehicle` off: every row here is about the car in the heading.
+          */}
+          <OpenThreadsPanel threads={threads} showVehicle={false} />
+          <TimelineFeed events={events} title="Vehicle timeline" />
 
           <Panel title={`Service history (${v.serviceHistory.length})`}>
             {v.serviceHistory.length === 0 ? (
