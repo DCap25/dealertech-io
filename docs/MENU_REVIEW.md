@@ -754,6 +754,25 @@ two implementations are the drift this migration exists to prevent.
 
 ### F11 — Reordering dies after an advisor unticks and re-ticks an item · **Low**
 
+> **RESOLVED — fixed by Opus, verified by Fable.** Commit `3132484`. `move`
+> now swaps with the next id *of its own tier* in the direction of travel,
+> however far away — everything between the endpoints belongs to other tiers
+> by construction, so their internal order is untouched. Refuse-don't-clamp
+> survives with a truer meaning (no tier-mate that way = top/bottom of your
+> group), plus a stale-id guard. Invariant 3 pinned by an adversarial
+> 40-toggle/160-move test. Verified: the reproduction flips, the reached-over
+> tier stays put, tiers stay `tierOf`-exact throughout; +6 tests, 1,102
+> passing.
+>
+> **Correction to this finding, found by the fix and confirmed by probe:**
+> `toggle` was not the only scrambler. `includeAll` — the "Select all"
+> button — rebuilds the list in raw `priorityScore` order, which interleaves
+> tiers by construction (a well-scoring MEDIUM outranks a HIGH under the
+> scoring weights), so the dead arrows were reachable with no toggling at
+> all. This is why the review's candidate fix 1 (re-insert in tier order on
+> toggle) would **not** have closed the finding, and fix 2 was chosen.
+> The severity call stands: grouping was correct at every surface throughout.
+
 **Where:** `src/lib/menu/selection.ts:150` (`toggle` appends to the end) and
 `:160–180` (`move` refuses when the adjacent id is in another tier).
 
