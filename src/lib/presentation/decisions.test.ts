@@ -302,4 +302,20 @@ describe('isDecision', () => {
       expect(isDecision(bad)).toBe(false)
     }
   })
+
+  it('admits a call-me, because every surface that filters on this must', () => {
+    // Pinned on its own rather than left inside the loop above. This guard is
+    // what the tablet mirror uses to decide which taps reach the advisor's
+    // screen (`send-to-tablet.tsx`), and the bug it replaced was a hand-written
+    // list that answered false here — so the customer's highest-intent answer
+    // never left the tablet.
+    expect(isDecision('CALL_ME')).toBe(true)
+  })
+
+  it('refuses the advisor-only SKIPPED', () => {
+    // `OpportunityDecision` carries SKIPPED as well — the advisor saying they
+    // never raised the line. It is not something a customer can answer, so it
+    // must not arrive from a customer surface claiming to be one.
+    expect(isDecision('SKIPPED')).toBe(false)
+  })
 })

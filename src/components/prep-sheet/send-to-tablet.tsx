@@ -5,6 +5,7 @@ import {
   listPairedDevices, readSessionDecisions, sendMenuLink, sendMenuToDevice, takeBackMenu,
 } from '@/app/drive/present-actions'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
+import { isDecision } from '@/lib/presentation/decisions'
 
 /**
  * Getting the built menu in front of the customer.
@@ -63,18 +64,43 @@ export function SendToTablet({
     void listPairedDevices().then((d) => setDevices(d.map((x) => ({ id: x.id, name: x.name }))))
   }, [])
 
-  // Mirror the customer's taps onto the advisor's screen while it is live.
+  /**
+   * Mirror the customer's taps onto the advisor's screen while it is live.
+   *
+   * The guard is `isDecision` rather than a list of values written out here.
+   * The list this replaced read `ACCEPTED | DECLINED | PENDING`, which silently
+   * dropped `CALL_ME` — the one answer `decisions.ts` argues hardest for, and
+   * the only one nobody else recovers: the customer watched their card turn
+   * blue while the advisor's screen kept the line pending, counted it as still
+   * winnable, and handed off without the "customer asked to be called" block
+   * that `command-center.ts` writes for exactly this. The job the filter
+   * is actually doing is keeping junk and the advisor-only `SKIPPED` out of
+   * `decideFromCustomer`, and the shared guard does that without being able to
+   * fall behind the `Decision` type the way a literal list did.
+   *
+   * `PENDING` is forwarded on purpose. A tablet is mirrored while the customer
+   * is standing there, and tapping the same button twice clears the choice
+   * (`service-menu.tsx`) — an answer taken back in front of the advisor is
+   * something they should see happen. That is the opposite of the link path,
+   * where `answersToApply` drops `PENDING`: those answers land hours later, so
+   * a cleared line there would blank a decision the advisor has since made
+   * themselves rather than narrate a change they just watched.
+   *
+   * The server sanitises on write (`recordDeviceDecisions` → `sanitizeDecisions`),
+   * so this is belt-and-braces rather than the boundary that matters.
+   */
   useEffect(() => {
     if (!sessionId) return
     const id = setInterval(async () => {
       const result = await readSessionDecisions(sessionId)
       if (!result) return
       for (const [oppId, value] of Object.entries(result.decisions)) {
-        if (value === 'ACCEPTED' || value === 'DECLINED' || value === 'PENDING') {
-          onCustomerDecision(oppId, value)
-        }
+        if (isDecision(value)) onCustomerDecision(oppId, value)
       }
-      setSeen(Object.values(result.decisions).filter((d) => d !== 'PENDING').length)
+      // Counted with the same guard the mirror uses, so "answered" can only
+      // ever mean a value the advisor's screen actually took.
+      setSeen(Object.values(result.decisions)
+        .filter((d) => isDecision(d) && d !== 'PENDING').length)
       if (!result.active) setSessionId(null)
     }, POLL_MS)
     return () => clearInterval(id)
