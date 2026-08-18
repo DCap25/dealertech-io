@@ -126,7 +126,15 @@ export async function sendMenuLink(
   }
 }
 
-/** What the customer has tapped so far. Polled by the advisor's screen. */
+/**
+ * What the customer has tapped so far. Polled by the advisor's screen.
+ *
+ * `active` is the answer as of this instant, not as of the last write:
+ * `sessionForAdvisor` applies the tablet's idle window on read and ends a
+ * session that has gone quiet, so a menu left on a bench takes the panel down
+ * here as surely as pressing "take it back" does. The answers already given
+ * still come back with it — the caller drops its mirror, not the decisions.
+ */
 export async function readSessionDecisions(
   sessionId: string,
 ): Promise<{ decisions: Record<string, string>; active: boolean } | null> {

@@ -3,7 +3,9 @@ import {
   generateDeviceToken, generatePairingCode, hashToken, isPairingExpired, isWellFormedCode,
   normalizePairingCode, pairingExpiry, tokenMatches,
 } from './codes'
+import { isSessionIdle, SESSION_IDLE_MINUTES, sessionIdleDeadline } from './session'
 import { buildDeviceSnapshot, FORBIDDEN_KEYS, sanitizeDecisions } from './snapshot'
+import { menuTotals, nextTabletState, type TabletState } from './tablet-state'
 import { defaultSelection } from '@/lib/menu/selection'
 import type { Opportunity, PrepSheet } from '@/lib/prep-sheet'
 
@@ -65,6 +67,42 @@ describe('pairing window', () => {
     const expires = pairingExpiry(start)
     expect(isPairingExpired(expires, new Date('2026-08-12T09:09:00'))).toBe(false)
     expect(isPairingExpired(expires, new Date('2026-08-12T09:10:00'))).toBe(true)
+  })
+})
+
+describe('tablet idle window', () => {
+  const lastTap = new Date('2026-08-12T16:40:00')
+
+  it('is thirty minutes from the last tap', () => {
+    expect(SESSION_IDLE_MINUTES).toBe(30)
+    expect(sessionIdleDeadline(lastTap)).toEqual(new Date('2026-08-12T17:10:00'))
+  })
+
+  it('leaves a menu up while somebody is still answering it', () => {
+    expect(isSessionIdle(lastTap, new Date('2026-08-12T17:09:59'))).toBe(false)
+  })
+
+  it('ends it at the deadline', () => {
+    // `>=`, the same side of the boundary `isPairingExpired` takes.
+    expect(isSessionIdle(lastTap, new Date('2026-08-12T17:10:00'))).toBe(true)
+    expect(isSessionIdle(lastTap, new Date('2026-08-12T17:10:01'))).toBe(true)
+  })
+
+  it('clears a tablet left on a bench overnight', () => {
+    expect(isSessionIdle(lastTap, new Date('2026-08-13T07:30:00'))).toBe(true)
+  })
+
+  it('runs from the last tap, never from the push', () => {
+    /*
+      The property a customer working through the menu alone depends on. A
+      session pushed at 16:00 and answered steadily is still live at 17:00,
+      because each tap moved `lastActivityAt` — an absolute cap from the push
+      would blank the screen of somebody mid-answer.
+    */
+    const pushed = new Date('2026-08-12T16:00:00')
+    const now = new Date('2026-08-12T17:00:00')
+    expect(isSessionIdle(pushed, now)).toBe(true)
+    expect(isSessionIdle(new Date('2026-08-12T16:55:00'), now)).toBe(false)
   })
 })
 
@@ -353,5 +391,116 @@ describe('sanitizeDecisions', () => {
     expect(sanitizeDecisions(snapshot, null)).toEqual({})
     expect(sanitizeDecisions(snapshot, 'nope')).toEqual({})
     expect(sanitizeDecisions(snapshot, [])).toEqual({})
+  })
+})
+
+// ===========================================================================
+
+describe('what a poll does to the tablet', () => {
+  const s = sheet([opp(), opp({ id: 'o2', title: 'Cabin filter', urgency: 'LOW' })])
+  const snapshot = buildDeviceSnapshot(s, defaultSelection(s.opportunities))
+
+  const presenting = (sessionId: string): TabletState => ({
+    phase: 'PRESENTING',
+    sessionId,
+    deviceName: 'Lane 3',
+    snapshot,
+    decisions: {},
+  })
+
+  const polled = (id: string, decisions: Record<string, string> = {}) => ({
+    deviceName: 'Lane 3',
+    session: { id, snapshot, decisions },
+  })
+
+  it('keeps the taps in flight while the same session polls again', () => {
+    // The ordinary case, twice a second. Dropping the map here would make
+    // every answer flicker back to unanswered until the server caught up.
+    const next = nextTabletState(presenting('s1'), { o1: 'ACCEPTED' }, polled('s1'))
+    expect(next.pending).toEqual({ o1: 'ACCEPTED' })
+    expect(next.state.phase).toBe('PRESENTING')
+  })
+
+  it('drops them when a different session arrives', () => {
+    /*
+      F8. The advisor re-curates and sends again: a new session, a new snapshot,
+      no decisions on it — and the previous customer's in-flight taps were being
+      merged over it. Ids are stable per visit, so two sends of one re-curated
+      menu is exactly where they land on each other.
+    */
+    const next = nextTabletState(presenting('s1'), { o1: 'ACCEPTED' }, polled('s2'))
+    expect(next.pending).toEqual({})
+    expect(next.state).toMatchObject({ phase: 'PRESENTING', sessionId: 's2' })
+  })
+
+  it('drops them when the menu goes away', () => {
+    // Taken back by the advisor, or ended by the idle window on the server.
+    const next = nextTabletState(presenting('s1'), { o1: 'ACCEPTED' }, {
+      deviceName: 'Lane 3',
+      session: null,
+    })
+    expect(next.pending).toEqual({})
+    expect(next.state).toEqual({ phase: 'IDLE', deviceName: 'Lane 3' })
+  })
+
+  it('starts a menu arriving at an idle tablet with nothing carried over', () => {
+    const next = nextTabletState({ phase: 'IDLE', deviceName: 'Lane 3' }, { o1: 'ACCEPTED' }, polled('s1'))
+    expect(next.pending).toEqual({})
+  })
+
+  it('shows what the server says, not what the tablet remembered', () => {
+    const next = nextTabletState(presenting('s1'), {}, polled('s1', { o2: 'DECLINED' }))
+    expect(next.state).toMatchObject({ decisions: { o2: 'DECLINED' } })
+  })
+})
+
+describe('what the tablet footer counts', () => {
+  const s = sheet([
+    opp({ priceSource: 'STORE', customerOutOfPocket: 900 }),
+    opp({ id: 'o2', title: 'Cabin filter', urgency: 'LOW', priceSource: 'STORE', customerOutOfPocket: 120 }),
+  ])
+  const snapshot = buildDeviceSnapshot(s, defaultSelection(s.opportunities))
+
+  it('counts only what is on this menu', () => {
+    /*
+      The other half of F8. A decisions map can hold an id that is not on the
+      snapshot in front of the customer — an answer from the session before it,
+      or a line the advisor dropped when they re-curated — and counting those
+      told the customer they had said yes to more than the screen showed.
+    */
+    const totals = menuTotals(snapshot, {
+      o1: 'ACCEPTED',
+      'from-the-last-menu': 'ACCEPTED',
+      'also-a-ghost': 'CALL_ME',
+    })
+    expect(totals.accepted).toBe(1)
+    expect(totals.callMe).toBe(0)
+    expect(totals.acceptedTotal).toBe(900)
+  })
+
+  it('adds up what they said yes to', () => {
+    const totals = menuTotals(snapshot, { o1: 'ACCEPTED', o2: 'ACCEPTED' })
+    expect(totals.accepted).toBe(2)
+    expect(totals.acceptedTotal).toBe(1020)
+  })
+
+  it('counts an unpriced line as a yes but adds nothing for it', () => {
+    // "Price to be confirmed" on screen and our estimate in the total underneath
+    // is the same unhonourable number arriving by another route.
+    const s2 = sheet([
+      opp({ priceSource: 'STORE', customerOutOfPocket: 900 }),
+      opp({ id: 'o2', title: 'Cabin filter', urgency: 'LOW', priceSource: 'ESTIMATE' }),
+    ])
+    // Ticked on by hand: `defaultSelection` leaves an unpriced line off a menu,
+    // so it only ever reaches a tablet because an advisor chose to send it.
+    const snap = buildDeviceSnapshot(s2, { includedIds: ['o1', 'o2'] })
+    const totals = menuTotals(snap, { o1: 'ACCEPTED', o2: 'ACCEPTED' })
+    expect(totals.accepted).toBe(2)
+    expect(totals.acceptedTotal).toBe(900)
+  })
+
+  it('keeps a call-me out of the yeses', () => {
+    const totals = menuTotals(snapshot, { o1: 'CALL_ME', o2: 'DECLINED' })
+    expect(totals).toEqual({ accepted: 0, callMe: 1, acceptedTotal: 0 })
   })
 })

@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ServiceMenu } from '@/components/present/service-menu'
 import type { DeviceSnapshot } from '@/lib/pairing/snapshot'
+import {
+  menuTotals, nextTabletState, type PendingTaps, type PolledSession, type TabletState,
+} from '@/lib/pairing/tablet-state'
 
 /**
  * The customer tablet.
@@ -14,17 +17,17 @@ import type { DeviceSnapshot } from '@/lib/pairing/snapshot'
  *
  * Idle, it shows its own name and nothing else. No customer, no vehicle, no
  * prices. A tablet left on a bench between visits should be as informative to
- * a passer-by as a switched-off one.
+ * a passer-by as a switched-off one — which now holds without an advisor
+ * remembering, because the server ends a session nobody has touched for thirty
+ * minutes and this screen goes idle at the next poll.
+ *
+ * What the poll does to the screen lives in `tablet-state.ts` rather than here:
+ * this file is a shell that fetches and renders, and the decisions worth
+ * getting right are pure and tested.
  */
 
 const POLL_MS = 1500
 const TOKEN_KEY = 'dealertech.device.token'
-
-type State =
-  | { phase: 'LOADING' }
-  | { phase: 'ENROLLING'; code: string }
-  | { phase: 'IDLE'; deviceName: string | null }
-  | { phase: 'PRESENTING'; deviceName: string | null; snapshot: DeviceSnapshot; decisions: Record<string, string> }
 
 function money(n: number): string {
   return `$${Math.round(n).toLocaleString()}`
@@ -44,11 +47,22 @@ async function call(action: string, token: string | null, extra: object = {}) {
 
 
 export function Tablet() {
-  const [state, setState] = useState<State>({ phase: 'LOADING' })
-  const tokenRef = useRef<string | null>(null)
+  /*
+    The screen and the taps still in flight, held together.
 
-  /** Local decisions, so a tap feels instant while the post is in flight. */
-  const [pending, setPending] = useState<Record<string, string>>({})
+    They were two pieces of state and the pair could disagree: `pending` was
+    dropped when the session went away but not when a *different* session
+    arrived, so a re-curated menu inherited the last customer's answers.
+    Advancing both in one call through `nextTabletState` makes that impossible
+    to get wrong again — and, being one functional update, it cannot read a
+    stale copy of either half from the poll's closure.
+  */
+  const [screen, setScreen] = useState<{ state: TabletState; pending: PendingTaps }>({
+    state: { phase: 'LOADING' },
+    pending: {},
+  })
+  const { state, pending } = screen
+  const tokenRef = useRef<string | null>(null)
 
   const poll = useCallback(async () => {
     const token = tokenRef.current
@@ -61,33 +75,30 @@ export function Tablet() {
       // token showing a stale menu.
       localStorage.removeItem(TOKEN_KEY)
       tokenRef.current = null
-      setState({ phase: 'LOADING' })
+      setScreen({ state: { phase: 'LOADING' }, pending: {} })
       return
     }
     if (!ok) return
 
     if (!data.paired) {
-      setState((s) => (s.phase === 'ENROLLING' ? s : { phase: 'LOADING' }))
+      setScreen((s) => (
+        s.state.phase === 'ENROLLING' ? s : { state: { phase: 'LOADING' }, pending: {} }
+      ))
       return
     }
 
-    if (data.session) {
-      setState({
-        phase: 'PRESENTING',
-        deviceName: data.deviceName ?? null,
-        snapshot: data.session.snapshot as DeviceSnapshot,
-        decisions: (data.session.decisions ?? {}) as Record<string, string>,
-      })
-    } else {
-      /*
-        The advisor took the menu back. Clearing the pending taps matters — a
-        tap still in flight when the session ends must not be replayed onto
-        whatever is presented next. The explainer closes on its own now: it
-        lives inside ServiceMenu, which unmounts with the menu.
-      */
-      setPending({})
-      setState({ phase: 'IDLE', deviceName: data.deviceName ?? null })
-    }
+    const session: PolledSession | null = data.session
+      ? {
+          id: String(data.session.id),
+          snapshot: data.session.snapshot as DeviceSnapshot,
+          decisions: (data.session.decisions ?? {}) as Record<string, string>,
+        }
+      : null
+
+    setScreen((s) => nextTabletState(s.state, s.pending, {
+      deviceName: data.deviceName ?? null,
+      session,
+    }))
   }, [])
 
   // Enrol once, then poll forever.
@@ -105,7 +116,7 @@ export function Tablet() {
       if (cancelled || !data.token) return
       localStorage.setItem(TOKEN_KEY, data.token)
       tokenRef.current = data.token
-      setState({ phase: 'ENROLLING', code: data.code })
+      setScreen({ state: { phase: 'ENROLLING', code: data.code }, pending: {} })
     }
 
     void boot()
@@ -117,8 +128,10 @@ export function Tablet() {
   }, [poll])
 
   async function decide(id: string, decision: string) {
-    const next = { ...pending, [id]: decision }
-    setPending(next)
+    // Applied to whatever is on screen at the moment of the tap. If a poll has
+    // swapped the menu underneath, the tap belongs to the menu that arrived,
+    // and the server sanitises it against that snapshot regardless.
+    setScreen((s) => ({ ...s, pending: { ...s.pending, [id]: decision } }))
     await call('decide', tokenRef.current, { decisions: { [id]: decision } })
   }
 
@@ -149,6 +162,11 @@ export function Tablet() {
     /*
       Deliberately empty. A tablet between visits should tell a passer-by
       nothing about the last customer who held it.
+
+      Reached three ways now: the advisor takes the menu back, another menu is
+      pushed elsewhere, or nobody has touched this one for thirty minutes and
+      the server ended it on read. The third is the one that covers the bench
+      at closing time.
     */
     return (
       <Centre>
@@ -160,14 +178,10 @@ export function Tablet() {
 
   const { snapshot } = state
   const decisions = { ...state.decisions, ...pending }
-  // An unpriced line adds nothing: we do not know what it costs, which is why
-  // it reads "price to be confirmed" rather than carrying our estimate.
-  const acceptedTotal = snapshot.tiers
-    .flatMap((t) => t.items)
-    .filter((i) => decisions[i.id] === 'ACCEPTED' && i.priceConfirmed !== false)
-    .reduce((s, i) => s + i.customerOutOfPocket, 0)
-  const acceptedCount = Object.values(decisions).filter((d) => d === 'ACCEPTED').length
-  const callMeCount = Object.values(decisions).filter((d) => d === 'CALL_ME').length
+  // Every figure below the menu comes from the items on this snapshot, not from
+  // the keys of the decisions map — see `menuTotals`.
+  const { accepted: acceptedCount, callMe: callMeCount, acceptedTotal } =
+    menuTotals(snapshot, decisions)
 
   return (
     <main className="min-h-dvh bg-[var(--background)] pb-32">

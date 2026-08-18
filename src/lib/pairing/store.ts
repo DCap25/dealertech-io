@@ -5,6 +5,7 @@ import {
   generateDeviceToken, generatePairingCode, hashToken, isPairingExpired, normalizePairingCode,
   pairingExpiry,
 } from './codes'
+import { isSessionIdle, sessionIdleDeadline } from './session'
 import { sanitizeDecisions, type DeviceSnapshot } from './snapshot'
 
 /**
@@ -147,13 +148,39 @@ export async function listDevices(storeId: string) {
     .orderBy(schema.pairedDevices.name)
 }
 
+/**
+ * Unpair a tablet.
+ *
+ * Kills the token and the menu together. Revoking alone was enough to stop the
+ * device reading anything — `deviceFromToken` refuses a revoked row and the
+ * tablet 401s within a poll — but it left the session `ACTIVE`, so the advisor's
+ * panel went on reporting the menu as live on a tablet that no longer exists,
+ * with a "take it back" button pointed at nothing. One transaction, because a
+ * device revoked without its session ended is exactly the state that produced
+ * that lie.
+ */
 export async function revokeDevice(storeId: string, deviceId: string): Promise<void> {
-  await getDb()
-    .update(schema.pairedDevices)
-    .set({ status: 'REVOKED', revokedAt: new Date() })
-    .where(
-      and(eq(schema.pairedDevices.id, deviceId), eq(schema.pairedDevices.storeId, storeId)),
-    )
+  const now = new Date()
+
+  await getDb().transaction(async (tx) => {
+    await tx
+      .update(schema.pairedDevices)
+      .set({ status: 'REVOKED', revokedAt: now })
+      .where(
+        and(eq(schema.pairedDevices.id, deviceId), eq(schema.pairedDevices.storeId, storeId)),
+      )
+
+    await tx
+      .update(schema.presentationSessions)
+      .set({ status: 'ENDED', endedAt: now })
+      .where(
+        and(
+          eq(schema.presentationSessions.deviceId, deviceId),
+          eq(schema.presentationSessions.storeId, storeId),
+          eq(schema.presentationSessions.status, 'ACTIVE'),
+        ),
+      )
+  })
 }
 
 /**
@@ -162,6 +189,13 @@ export async function revokeDevice(storeId: string, deviceId: string): Promise<v
  * Ends whatever was on it first. A device showing one customer's menu while
  * another is being pushed is the single worst failure this feature could have,
  * so there is never more than one active session per device.
+ *
+ * `expiresAt` is deliberately left null, unlike a link's. A link dies at a fixed
+ * hour and the column states it; a tablet dies thirty minutes after the last
+ * tap, and that deadline moves every time the customer answers something. A
+ * stamped column would be wrong within seconds of being written and would read
+ * as a second, disagreeing mechanism. The one clock is `lastActivityAt`, checked
+ * on read below.
  */
 export async function pushToDevice(input: {
   storeId: string
@@ -198,8 +232,40 @@ export async function pushToDevice(input: {
   return { sessionId: row!.id }
 }
 
-/** What is currently on a device. Null when it is idle. */
-export async function activeSessionForDevice(deviceId: string) {
+/**
+ * Close a session the clock has already closed.
+ *
+ * `endedAt` is the deadline — the last tap plus the idle window — not the
+ * moment somebody happened to read the row. The session ended when the customer
+ * stopped touching it; stamping `now` on a row nobody looked at until the next
+ * morning would claim a conversation ran all night, and it would give two
+ * readers racing on the same stale row two different answers. Guarded on
+ * `ACTIVE` so it can never overwrite the `endedAt` of a real take-back.
+ */
+async function endIdleSession(sessionId: string, lastActivityAt: Date): Promise<void> {
+  await getDb()
+    .update(schema.presentationSessions)
+    .set({ status: 'ENDED', endedAt: sessionIdleDeadline(lastActivityAt) })
+    .where(
+      and(
+        eq(schema.presentationSessions.id, sessionId),
+        eq(schema.presentationSessions.status, 'ACTIVE'),
+      ),
+    )
+}
+
+/**
+ * What is currently on a device. Null when it is idle.
+ *
+ * The idle window is enforced here rather than at push time, because this is
+ * the one function every device read goes through: the poll that paints the
+ * screen and the tap that records an answer both resolve the session this way.
+ * A menu left on a bench therefore stops being readable at the deadline whoever
+ * forgot to take it back, and the row is ended in the same call so no later
+ * reader — the advisor's mirror included — is left believing it is live. No
+ * background job, and nothing to schedule.
+ */
+export async function activeSessionForDevice(deviceId: string, now: Date = new Date()) {
   const [row] = await getDb()
     .select()
     .from(schema.presentationSessions)
@@ -211,7 +277,15 @@ export async function activeSessionForDevice(deviceId: string) {
     )
     .orderBy(desc(schema.presentationSessions.startedAt))
     .limit(1)
-  return row ?? null
+
+  if (!row) return null
+
+  if (isSessionIdle(row.lastActivityAt, now)) {
+    await endIdleSession(row.id, row.lastActivityAt)
+    return null
+  }
+
+  return row
 }
 
 /**
@@ -225,7 +299,12 @@ export async function recordDeviceDecisions(
   deviceId: string,
   incoming: unknown,
 ): Promise<{ decisions: Record<string, string> } | null> {
-  const session = await activeSessionForDevice(deviceId)
+  // One clock for both halves: the tap is judged against the same instant it is
+  // then stamped with, so an answer given on the boundary cannot be rejected as
+  // idle and recorded as activity at the same time.
+  const now = new Date()
+
+  const session = await activeSessionForDevice(deviceId, now)
   if (!session) return null
 
   const snapshot = session.snapshot as DeviceSnapshot
@@ -236,14 +315,29 @@ export async function recordDeviceDecisions(
 
   await getDb()
     .update(schema.presentationSessions)
-    .set({ decisions: merged, lastActivityAt: new Date() })
+    .set({ decisions: merged, lastActivityAt: now })
     .where(eq(schema.presentationSessions.id, session.id))
 
   return { decisions: merged }
 }
 
-/** The advisor watching what the customer is doing. */
-export async function sessionForAdvisor(storeId: string, sessionId: string) {
+/**
+ * The advisor watching what the customer is doing.
+ *
+ * Runs the same idle check as the device's own read, and for the same reason it
+ * cannot be left to that one: the advisor polls every 1.5 seconds while the
+ * tablet may have been asleep, dropped in a drawer or switched off since the
+ * last tap, so this is often the only reader left. Without it the mirror would
+ * keep saying "on Lane 3" against a session the next device poll is going to
+ * end — one reader believing a menu the other has already closed, which is the
+ * disagreement this whole check exists to prevent.
+ *
+ * Scoped to tablet sessions. A link has its own clock (`linkStatus`) and a
+ * customer answering it at lunchtime has been idle for hours entirely
+ * legitimately; expiring one on thirty minutes' silence would close the
+ * conversation this product most wants to keep open.
+ */
+export async function sessionForAdvisor(storeId: string, sessionId: string, now: Date = new Date()) {
   const [row] = await getDb()
     .select()
     .from(schema.presentationSessions)
@@ -254,7 +348,18 @@ export async function sessionForAdvisor(storeId: string, sessionId: string) {
       ),
     )
     .limit(1)
-  return row ?? null
+
+  if (!row) return null
+
+  if (row.deviceId && row.status === 'ACTIVE' && isSessionIdle(row.lastActivityAt, now)) {
+    await endIdleSession(row.id, row.lastActivityAt)
+    // Answer with what the row now says, not what it said a moment ago. The
+    // decisions the customer did give are still here and still returned — the
+    // menu is over, not the answers.
+    return { ...row, status: 'ENDED' as const, endedAt: sessionIdleDeadline(row.lastActivityAt) }
+  }
+
+  return row
 }
 
 export async function endSession(storeId: string, sessionId: string): Promise<void> {
