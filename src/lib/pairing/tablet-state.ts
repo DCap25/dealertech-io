@@ -83,6 +83,29 @@ export function nextTabletState(
 }
 
 /**
+ * Take back a tap the server refused.
+ *
+ * `pending` is an optimistic paint: the card turns green the instant it is
+ * touched, before the post that records it has landed. When that post comes
+ * back 409 — the advisor took the menu away between the tap and the request —
+ * or 403, or anything else, the paint is a claim nobody is holding up. Removing
+ * it here rather than waiting for the poll to overwrite it means the screen
+ * stops asserting an answer the moment we know it was not taken, whether or not
+ * the poll that follows changes the session at all.
+ *
+ * Scoped to the one id, because the other taps in the map are innocent: a
+ * customer working down a menu has several in flight and only the refused one
+ * is a lie. Returns the same object when there is nothing to remove, so a
+ * failure for a tap the poll has already absorbed does not re-render.
+ */
+export function withoutTap(pending: PendingTaps, id: string): PendingTaps {
+  if (!(id in pending)) return pending
+  const next = { ...pending }
+  delete next[id]
+  return next
+}
+
+/**
  * What the footer says.
  *
  * Every figure is derived from the items on the snapshot in front of the

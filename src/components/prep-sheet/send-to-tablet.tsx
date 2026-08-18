@@ -213,7 +213,28 @@ export function SendToTablet({
           <button
             type="button"
             onClick={async () => {
-              await takeBackMenu(sessionId)
+              /*
+                The last answers land before the mirror dies.
+
+                Clearing `sessionId` stops the poll above on the next render, so
+                whatever the customer tapped in the final interval used to be
+                ended, kept on the row and shown to nobody — the advisor turned
+                to their screen and the line they had just watched go green was
+                pending again. `takeBackMenu` returns the decisions the session
+                closed with, and they go through the same `isDecision` guard the
+                poll uses, so a value can only reach the advisor's state by the
+                one route.
+
+                A tap that raced past the end is genuinely lost from both
+                screens: the server refused it (409) and the tablet un-paints
+                it. There is nothing here to recover, and pretending otherwise
+                would put an answer on the advisor's sheet that the customer's
+                own screen no longer shows.
+              */
+              const { decisions } = await takeBackMenu(sessionId)
+              for (const [oppId, value] of Object.entries(decisions)) {
+                if (isDecision(value)) onCustomerDecision(oppId, value)
+              }
               setSessionId(null)
             }}
             className="touch-target rounded-xl border border-emerald-600 px-3.5 py-2 text-xs font-bold text-emerald-900 dark:text-emerald-100"

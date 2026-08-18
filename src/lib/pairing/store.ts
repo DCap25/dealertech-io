@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, desc, eq, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, isNull, lt, or } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 // One count for both channels — see the note on `pushToDevice`.
 import { nextPresentationSequence } from '@/lib/presentation/sequence'
@@ -26,24 +26,111 @@ export interface DeviceIdentity {
 }
 
 /**
+ * How long a dead pairing code is left lying in the table.
+ *
+ * Twenty-four hours past its ten-minute window, so nobody is ever mid-pairing
+ * when their row is swept: a code that stopped working yesterday belongs to a
+ * tablet somebody put down and walked away from.
+ */
+const ABANDONED_ENROLMENT_MS = 24 * 60 * 60_000
+
+/**
+ * Attempts at a unique pairing code before an enrolment gives up.
+ *
+ * Three, and the second effectively never runs. The code space is 32⁶ ≈ 1.07
+ * billion against a handful of live codes, so a first-attempt collision is a
+ * one-in-hundreds-of-millions event and a third is not a number worth writing
+ * down. The bound exists so a *broken* database — the unique index firing for
+ * some reason that is not a collision — fails loudly in three round trips
+ * rather than spinning forever on an unauthenticated endpoint.
+ */
+const ENROLMENT_ATTEMPTS = 3
+
+/** Postgres `unique_violation`. The only error worth a second attempt below. */
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && (error as { code?: unknown }).code === '23505'
+}
+
+/**
+ * Forget tablets that announced themselves and were never claimed.
+ *
+ * `enroll` is the one thing here anybody can call without a credential, so
+ * without this the table grows for as long as somebody keeps posting to it —
+ * which is the actual harm in an unauthenticated endpoint, rather than the
+ * guessing attack the code space already rules out. Piggybacked on enrolment
+ * instead of a scheduled job: this is the only path that creates the rows, so
+ * it is the only path that needs to bound them, and there is nothing to
+ * schedule or to notice has stopped running.
+ *
+ * It is a write on an unauthenticated path, which is worth saying out loud —
+ * but it deletes strictly less than the caller is about to create, it is
+ * rate-limited at the route, and every row it can reach is provably worthless:
+ * `AWAITING_PAIRING` means it belongs to no store, and a code that expired a
+ * day ago can no longer be claimed by anyone (`claimDevice` refuses it). The
+ * cascade from `presentation_sessions` cannot bite either — a menu is only ever
+ * pushed to a device that is already `PAIRED`.
+ */
+async function sweepAbandonedEnrolments(now: Date): Promise<void> {
+  await getDb()
+    .delete(schema.pairedDevices)
+    .where(
+      and(
+        eq(schema.pairedDevices.status, 'AWAITING_PAIRING'),
+        lt(
+          schema.pairedDevices.pairingExpiresAt,
+          new Date(now.getTime() - ABANDONED_ENROLMENT_MS),
+        ),
+      ),
+    )
+}
+
+/**
  * A tablet announcing itself for the first time.
  *
  * Creates an unclaimed device with a short code. It belongs to no store until
  * an advisor claims it, which is what makes an unclaimed code harmless: there
  * is nothing behind it to reach.
+ *
+ * Retried on a unique violation because migration 0027 made one possible.
+ * `pairing_code` is unique among rows awaiting pairing now, so two tablets that
+ * draw the same code no longer both sit there waiting — which used to mean the
+ * advisor typing that code claimed whichever row the database happened to
+ * return first. Better to hand the second tablet a different code than to leave
+ * an arbitrary claim on the table. Both halves of the credential are drawn
+ * again on a retry: the code is the one that can realistically collide, but
+ * regenerating the token as well costs a `randomBytes` call and makes the retry
+ * correct whichever constraint fired.
+ *
+ * On exhaustion the last violation propagates as it is. A 500 to a tablet that
+ * shows "Connecting…" is the honest answer to a database that just refused
+ * three unrelated codes; dressing it up as a pairing failure would send whoever
+ * reads the log looking at the wrong thing.
  */
 export async function enrollDevice(now: Date): Promise<{ token: string; code: string }> {
-  const token = generateDeviceToken()
-  const code = generatePairingCode()
+  await sweepAbandonedEnrolments(now)
 
-  await getDb().insert(schema.pairedDevices).values({
-    tokenHash: hashToken(token),
-    pairingCode: code,
-    pairingExpiresAt: pairingExpiry(now),
-    status: 'AWAITING_PAIRING',
-  })
+  let lastViolation: unknown
+  for (let attempt = 0; attempt < ENROLMENT_ATTEMPTS; attempt++) {
+    const token = generateDeviceToken()
+    const code = generatePairingCode()
 
-  return { token, code }
+    try {
+      await getDb().insert(schema.pairedDevices).values({
+        tokenHash: hashToken(token),
+        pairingCode: code,
+        pairingExpiresAt: pairingExpiry(now),
+        status: 'AWAITING_PAIRING',
+      })
+      return { token, code }
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error
+      lastViolation = error
+    }
+  }
+
+  throw lastViolation
 }
 
 /** Resolve a bearer token to a device, or nothing. */
@@ -373,8 +460,25 @@ export async function sessionForAdvisor(storeId: string, sessionId: string, now:
   return row
 }
 
-export async function endSession(storeId: string, sessionId: string): Promise<void> {
-  await getDb()
+/**
+ * Take the menu back, and hand back what the customer had answered.
+ *
+ * The decisions come from the statement that ends the session rather than a
+ * read after it. The advisor's mirror stops the moment this returns, so the
+ * last polling interval's answers only reach their screen if this call carries
+ * them — and taking them off the same `UPDATE` means what comes back is the row
+ * as it stood at the instant it was closed. A second `SELECT` would be answered
+ * by `sessionForAdvisor`, which has its own opinion about idle sessions, for a
+ * row this call has just settled.
+ *
+ * Nothing is cleared: `decisions` survives on an ended row, and this is only
+ * the end of the conversation, not of the record.
+ */
+export async function endSession(
+  storeId: string,
+  sessionId: string,
+): Promise<{ decisions: Record<string, string> } | null> {
+  const [row] = await getDb()
     .update(schema.presentationSessions)
     .set({ status: 'ENDED', endedAt: new Date() })
     .where(
@@ -387,4 +491,8 @@ export async function endSession(storeId: string, sessionId: string): Promise<vo
         ),
       ),
     )
+    .returning({ decisions: schema.presentationSessions.decisions })
+
+  if (!row) return null
+  return { decisions: (row.decisions ?? {}) as Record<string, string> }
 }

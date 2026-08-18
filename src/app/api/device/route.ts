@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import {
   activeSessionForDevice, deviceFromToken, enrollDevice, recordDeviceDecisions,
 } from '@/lib/pairing/store'
+import { callerKey, FixedWindowLimiter } from '@/lib/rate-limit/window'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,6 +33,36 @@ function bearer(req: Request): string {
 /** Never cached, by anything, ever. */
 const NO_STORE = { 'Cache-Control': 'no-store, private' }
 
+/**
+ * Ten enrolments an hour from one address.
+ *
+ * `enroll` is the one action here that runs before the bearer check, because a
+ * tablet being set up has no token yet — which also makes it the one thing
+ * anybody can post to. Each call writes a row, so unlimited means a table that
+ * grows for as long as somebody keeps asking.
+ *
+ * Ten is chosen against what a real service drive does, not against what an
+ * attacker wants. A store pairs a handful of tablets, ever: the device enrols
+ * once and keeps its token in local storage from then on, so this fires when
+ * hardware is unboxed or a tablet is wiped, not during a day's work. Ten in an
+ * hour is already more tablets than most stores own. The whole drive shares one
+ * NAT address, exactly as the sign-in limiter warns, which is why the number is
+ * generous rather than tight — a single-digit limit could bite an installer
+ * setting up a row of tablets in an afternoon.
+ *
+ * Keyed on the caller rather than anything on the request, because there is
+ * nothing on an enrolment to key on: no account, no store, no device. Read the
+ * note in `rate-limit/window` — these counters are per instance and this is a
+ * speed bump against the cheap version, but the cheap version is the whole
+ * threat here.
+ *
+ * A tablet that does get refused shows "Connecting…" until somebody reloads it:
+ * `boot()` enrols once. That is worth knowing and not worth engineering around
+ * at this limit — an automatic retry on a path that creates a row is how you
+ * turn one refused tablet into the flood this exists to stop.
+ */
+const enrollLimiter = new FixedWindowLimiter({ limit: 10, windowMs: 60 * 60_000 })
+
 export async function POST(req: Request) {
   let body: { action?: unknown; decisions?: unknown }
   try {
@@ -44,6 +75,17 @@ export async function POST(req: Request) {
 
   // ------------------------------------------------------------- enroll
   if (action === 'enroll') {
+    const gate = enrollLimiter.check(callerKey(req.headers), Date.now())
+    if (!gate.ok) {
+      return NextResponse.json(
+        { error: 'Too many tablets have been set up from here. Try again later.' },
+        {
+          status: 429,
+          headers: { ...NO_STORE, 'retry-after': String(gate.retryAfterSeconds) },
+        },
+      )
+    }
+
     const { token, code } = await enrollDevice(new Date())
     return NextResponse.json({ token, code }, { headers: NO_STORE })
   }

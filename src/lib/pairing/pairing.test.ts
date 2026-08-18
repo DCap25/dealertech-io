@@ -5,7 +5,7 @@ import {
 } from './codes'
 import { isSessionIdle, SESSION_IDLE_MINUTES, sessionIdleDeadline } from './session'
 import { buildDeviceSnapshot, FORBIDDEN_KEYS, sanitizeDecisions } from './snapshot'
-import { menuTotals, nextTabletState, type TabletState } from './tablet-state'
+import { menuTotals, nextTabletState, withoutTap, type TabletState } from './tablet-state'
 import { defaultSelection } from '@/lib/menu/selection'
 import type { Opportunity, PrepSheet } from '@/lib/prep-sheet'
 
@@ -451,6 +451,31 @@ describe('what a poll does to the tablet', () => {
   it('shows what the server says, not what the tablet remembered', () => {
     const next = nextTabletState(presenting('s1'), {}, polled('s1', { o2: 'DECLINED' }))
     expect(next.state).toMatchObject({ decisions: { o2: 'DECLINED' } })
+  })
+})
+
+describe('a tap the server refused', () => {
+  /*
+    F14. The customer answers as the advisor takes the menu back, the route
+    returns 409, and the optimistic paint is a claim nobody is holding up.
+  */
+  it('stops showing the one that was refused', () => {
+    expect(withoutTap({ o1: 'ACCEPTED', o2: 'DECLINED' }, 'o1')).toEqual({ o2: 'DECLINED' })
+  })
+
+  it('leaves the taps still in flight alone', () => {
+    // A customer working down a menu has several outstanding at once and only
+    // the refused one is a lie.
+    const pending = { o1: 'ACCEPTED', o2: 'CALL_ME', o3: 'DECLINED' }
+    expect(withoutTap(pending, 'o2')).toEqual({ o1: 'ACCEPTED', o3: 'DECLINED' })
+  })
+
+  it('hands back the same map when there is nothing to take back', () => {
+    // The poll may already have absorbed it. Returning a new object would
+    // re-render the menu for a change that is not one.
+    const pending = { o1: 'ACCEPTED' }
+    expect(withoutTap(pending, 'o9')).toBe(pending)
+    expect(withoutTap({}, 'o1')).toEqual({})
   })
 })
 

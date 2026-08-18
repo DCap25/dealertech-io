@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ServiceMenu } from '@/components/present/service-menu'
 import type { DeviceSnapshot } from '@/lib/pairing/snapshot'
 import {
-  menuTotals, nextTabletState, type PendingTaps, type PolledSession, type TabletState,
+  menuTotals, nextTabletState, withoutTap,
+  type PendingTaps, type PolledSession, type TabletState,
 } from '@/lib/pairing/tablet-state'
 
 /**
@@ -132,7 +133,26 @@ export function Tablet() {
     // swapped the menu underneath, the tap belongs to the menu that arrived,
     // and the server sanitises it against that snapshot regardless.
     setScreen((s) => ({ ...s, pending: { ...s.pending, [id]: decision } }))
-    await call('decide', tokenRef.current, { decisions: { [id]: decision } })
+    const { ok } = await call('decide', tokenRef.current, { decisions: { [id]: decision } })
+
+    /*
+      A refused tap must not stay painted.
+
+      The one that happens is the customer answering as the advisor takes the
+      menu back: `recordDeviceDecisions` finds no active session and the route
+      returns 409. This used to be ignored, so the card stayed green for up to a
+      poll while the server held nothing — the customer's last word on the
+      screen, recorded nowhere. 403 (the tablet was unpaired) and any other
+      failure are the same lie for a different reason.
+
+      Un-paint it, then poll immediately rather than waiting out the interval:
+      the poll is what knows whether the menu is gone, replaced or still there,
+      and `nextTabletState` already answers that correctly for all three.
+    */
+    if (!ok) {
+      setScreen((s) => ({ ...s, pending: withoutTap(s.pending, id) }))
+      await poll()
+    }
   }
 
   // ------------------------------------------------------------------ views

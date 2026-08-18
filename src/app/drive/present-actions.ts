@@ -166,7 +166,27 @@ export async function readLinkAnswers(
   return linkAnswersForVisit(user.storeId, appointmentId)
 }
 
-export async function takeBackMenu(sessionId: string): Promise<void> {
+/**
+ * End the tablet conversation, and return the answers it ended with.
+ *
+ * The decisions come back because the caller's mirror dies with this call. The
+ * advisor polls every 1.5 seconds, and pressing "take it back" used to clear
+ * the session id in the same click — so anything the customer tapped since the
+ * last poll was ended, kept on the row, and never shown to the person who was
+ * watching for it. Handing the final map back is what closes that window: the
+ * advisor's screen gets one last update from the same call that stops it
+ * updating.
+ *
+ * `endSession` reads them off its own `UPDATE` rather than this doing a second
+ * read — see the note there.
+ */
+export async function takeBackMenu(sessionId: string): Promise<{
+  decisions: Record<string, string>
+}> {
   const user = await requireUser()
-  await endSession(user.storeId, sessionId)
+  const ended = await endSession(user.storeId, sessionId)
+  // Null means no session of that id in this store — already gone, or never
+  // ours. Nothing to mirror, and nothing worth telling the advisor: the menu is
+  // off the tablet either way, which is what they asked for.
+  return { decisions: ended?.decisions ?? {} }
 }

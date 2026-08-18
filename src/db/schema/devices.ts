@@ -1,5 +1,6 @@
+import { sql } from 'drizzle-orm'
 import {
-  pgEnum, pgTable, uuid, text, timestamp, jsonb, index, integer, unique,
+  pgEnum, pgTable, uuid, text, timestamp, jsonb, index, integer, unique, uniqueIndex,
 } from 'drizzle-orm/pg-core'
 import { stores, users } from './tenancy'
 import { appointments } from './service'
@@ -35,7 +36,13 @@ export const pairedDevices = pgTable(
     name: text('name'),
     status: pairedDeviceStatusEnum('status').notNull().default('AWAITING_PAIRING'),
 
-    /** Short, human-typed, single use, expires in ten minutes. */
+    /**
+     * Short, human-typed, single use, expires in ten minutes.
+     *
+     * Unique among the rows awaiting pairing — see the index below. Cleared to
+     * null when the tablet is claimed, so a claimed device is out of the way of
+     * the next tablet that draws the same six characters.
+     */
     pairingCode: text('pairing_code'),
     pairingExpiresAt: timestamp('pairing_expires_at', { withTimezone: true }),
 
@@ -57,6 +64,20 @@ export const pairedDevices = pgTable(
     unique('paired_devices_token_hash').on(t.tokenHash),
     index('paired_devices_store_idx').on(t.storeId, t.status),
     index('paired_devices_code_idx').on(t.pairingCode),
+    /**
+     * One live code, one tablet.
+     *
+     * `claimDevice` looks a code up among rows awaiting pairing and takes the
+     * first, without an order. That is only an answer at all if there cannot be
+     * two: with a duplicate, which tablet an advisor pairs to their store is
+     * whichever row the database felt like returning. Partial rather than a
+     * plain unique, because the column is deliberately reused — it is cleared
+     * on a claim, and every paired and revoked device in the table holds null.
+     * Migration 0027.
+     */
+    uniqueIndex('paired_devices_awaiting_code')
+      .on(t.pairingCode)
+      .where(sql`status = 'AWAITING_PAIRING' AND pairing_code IS NOT NULL`),
   ],
 )
 
