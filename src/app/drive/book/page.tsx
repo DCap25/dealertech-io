@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 import { canManageStaff } from '@/lib/team/roster'
 import { demoNow } from '@/lib/demo-day'
 import { getDmsAdapter } from '@/lib/dms/registry'
@@ -45,6 +46,14 @@ export default async function BookPage({
 }) {
   // Enforced here, not only in the middleware — same reasoning as /drive.
   const user = await requireUser()
+  /*
+    The one fence that matters most, because this is the page a salesperson
+    would most plausibly want: an ordinary booking, on any day, for anybody.
+    DRIVE_PLAN §9 Q2's recommendation is that they book first services and
+    nothing else, so they go to /introduce instead — which books through this
+    very action, with the delivery recorded on it.
+  */
+  fenceSales(user.role)
   const params = await searchParams
   const store = await getCurrentStore()
 

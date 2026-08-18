@@ -3,6 +3,7 @@ import { UserBadge } from '@/components/auth/user-badge'
 import { StoreSwitcher } from '@/components/auth/store-switcher'
 import { getCurrentUser } from '@/lib/auth/session'
 import { canManageStaff } from '@/lib/team/roster'
+import { SALES_HOME, salesHome } from '@/lib/auth/routes'
 
 /**
  * The links across the top of every workspace surface.
@@ -12,8 +13,31 @@ import { canManageStaff } from '@/lib/team/roster'
  * are not allowed reads as a broken promise. Managers get the extra link;
  * nobody else knows it exists.
  */
-export async function WorkspaceNav({ current }: { current?: 'drive' | 'week' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' | 'billing' | 'import' | 'setup' }) {
+export async function WorkspaceNav({ current }: { current?: 'drive' | 'week' | 'follow-up' | 'customers' | 'manager' | 'scorecard' | 'team' | 'billing' | 'import' | 'setup' | 'introduce' }) {
   const user = await getCurrentUser()
+
+  /*
+    A salesperson gets one link, and it is the page they are already on.
+
+    Same argument as the manager links below, taken to its end: an advisor who
+    can see "Department" will click it, and a page that then explains they are
+    not allowed reads as a broken promise. Sales can reach exactly one surface,
+    so a nav offering them the drive would be nine broken promises in a row —
+    every one of which the fence in src/lib/auth/sales.ts bounces straight
+    back here. The badge and store switcher stay: they are about who is signed
+    in, not about where they can go.
+  */
+  if (user && salesHome(user.role)) {
+    return (
+      <nav className="flex flex-wrap items-center gap-3 text-sm text-neutral-500">
+        {current !== 'introduce' && (
+          <Link href={SALES_HOME} className="hover:underline">Introduce a customer</Link>
+        )}
+        <StoreSwitcher />
+        <UserBadge />
+      </nav>
+    )
+  }
   /*
     The same predicate the pages and the actions use.
 

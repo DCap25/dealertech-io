@@ -31,7 +31,7 @@ import { countByAdvisor, type AdvisorOnDuty, type ScheduledAppointment } from '.
 export type AssignmentReason =
   /** The customer asked, or the booker picked. */
   | 'REQUESTED'
-  /** Their advisor, from the owning relationship. Not written until P3. */
+  /** Their advisor, from the owning relationship (`customers.owning_advisor_id`). */
   | 'OWNING'
   /** Round-robin over the pool, weighted by that day's load. */
   | 'BALANCED'
@@ -58,11 +58,15 @@ export interface AssignmentInput {
   /**
    * The customer's owning advisor.
    *
-   * **The P3 seam.** `customers.owning_advisor_id` does not exist yet — it
-   * arrives with the delivery introduction in migration 0029, which is the
-   * write that first creates the relationship. Every P2 caller passes null, so
-   * step 2 is unreachable today; it is built and tested now so that P3 is a
-   * loader change and not a change to how assignment decides.
+   * **Live since P3.** `customers.owning_advisor_id` landed in migration 0029
+   * with the delivery introduction, and the booking action now feeds this from
+   * `loadOwningAdvisorScoped`. It was built and tested a phase before anything
+   * could answer it, and the bet paid: activating it was a loader change and
+   * one argument, with not a line of this function touched.
+   *
+   * Still nullable and still usually null — most customers do not have a guy,
+   * and the column is written only where a relationship genuinely formed (see
+   * `shouldClaimOwnership`).
    */
   owningAdvisorId?: string | null
   /** Everyone who could take it. An empty list is a real state — see below. */

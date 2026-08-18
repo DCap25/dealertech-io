@@ -198,6 +198,19 @@ export interface PrepSheetInput {
     advisorId?: string | null
     /** Appointment lifecycle status as the source system reports it. */
     status?: string
+    /**
+     * `FIRST_SERVICE` when this visit came from a delivery introduction
+     * (DRIVE_PLAN D5), null otherwise — which is nearly always.
+     *
+     * Optional and additive for the same reason `advisorId` and `status` were:
+     * every engine test builds this object by hand, and a required field would
+     * make a hundred fixtures wrong about a fact none of them are testing.
+     */
+    visitContext?: string | null
+    /** The salesperson who sold the car and walked them over. */
+    soldByName?: string | null
+    /** The advisor they were introduced to at delivery. */
+    introducedAdvisorName?: string | null
   }
   contracts: Contract[]
   prepaidEntitlements: (PrepaidEntitlement & { label: string })[]

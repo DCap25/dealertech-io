@@ -50,11 +50,45 @@ export const customers = pgTable(
     notes: text('notes'),
     isActive: boolean('is_active').notNull().default(true),
 
+    /**
+     * Their advisor — DRIVE_PLAN D6, the relationship as a fact.
+     *
+     * Nullable, and null is the ordinary state: most customers do not have a
+     * guy, and pretending otherwise would make step 2 of the assignment
+     * cascade fire on a relationship nobody formed. It is set at the two
+     * moments the relationship actually forms — the delivery introduction with
+     * a named advisor (`SALES_INTRO`), and the first completed visit when no
+     * owner exists yet (`FIRST_VISIT`) — and **never silently reassigned by
+     * traffic**. A relationship the system moves on its own is not one.
+     *
+     * This single column is what makes `assignAdvisor`'s owning step reachable
+     * and "my customers" queryable at all.
+     */
+    owningAdvisorId: uuid('owning_advisor_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Since when. Read as "your customer since March", not as an audit row. */
+    owningAdvisorSince: timestamp('owning_advisor_since', { withTimezone: true }),
+    /**
+     * SALES_INTRO · FIRST_VISIT · REQUESTED · MANAGER_SET — D6.
+     *
+     * Text rather than an enum, matching `assignment_reason` and the
+     * `presentation_sessions.channel` precedent: the vocabulary is younger than
+     * the table and will grow. `OwningAdvisorSource` in
+     * src/lib/scheduling/owning.ts is the authority on the values.
+     *
+     * Only two of the four are written today. REQUESTED and MANAGER_SET wait on
+     * a manager edit surface, which P3 deliberately does not build — see the
+     * type for why they are named anyway.
+     */
+    owningAdvisorSource: text('owning_advisor_source'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('customers_store_idx').on(t.storeId),
+    // "My customers", which is the query the owning relationship exists to make
+    // answerable — and D4 step 2 reads one row of it per booking.
+    index('customers_owning_advisor_idx').on(t.storeId, t.owningAdvisorId),
     index('customers_store_lastname_idx').on(t.storeId, t.lastName),
     index('customers_store_mobile_idx').on(t.storeId, t.mobilePhone),
     index('customers_store_email_idx').on(t.storeId, t.email),

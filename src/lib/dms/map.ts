@@ -253,6 +253,12 @@ export function toPrepSheetInputs(
         // customer is at 8:00" without a second query.
         advisorId: appointment.advisorId,
         status: appointment.status,
+        // The delivery introduction (D5). Null on every appointment that did
+        // not come off a sales floor, which is what `firstServiceCue` reads to
+        // decide there is nothing to say.
+        visitContext: appointment.visitContext ?? null,
+        soldByName: appointment.soldByName ?? null,
+        introducedAdvisorName: appointment.introducedAdvisorName ?? null,
       },
       contracts: (coveragesByVehicle.get(vehicle.id) ?? []).map(toContract),
       prepaidEntitlements: (entitlementsByVehicle.get(vehicle.id) ?? []).map(toPrepaidEntitlement),

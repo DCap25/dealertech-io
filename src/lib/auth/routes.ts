@@ -104,6 +104,35 @@ export function safeRedirect(target: string | null | undefined, fallback = '/dri
 }
 
 /**
+ * The one page a `SALES` account has.
+ *
+ * Named here, beside the other routing decisions, because three separate
+ * things need it and they must not disagree: sign-in sends a salesperson to
+ * it, the nav shows it as their only link, and the fence in
+ * src/lib/auth/sales.ts sends them back to it from anywhere else.
+ */
+export const SALES_HOME = '/introduce'
+
+/**
+ * Where this role belongs, when it belongs somewhere other than the drive.
+ *
+ * ---------------------------------------------------------------------------
+ * DRIVE_PLAN §9 Q2 — OPEN, ANSWERED PER THE RECOMMENDATION ON RECORD
+ * ---------------------------------------------------------------------------
+ * "May a SALES user book anything other than a first service?" The
+ * recommendation is no — one workflow, one page — on the reasoning that
+ * widening it later is a one-line change here, while narrowing it after the
+ * sales floor has the habit is a fight. Built that way, pending Dan.
+ *
+ * Returning a path rather than a boolean is what keeps the fence one line at
+ * every call site: a page asks where this person belongs, and null means
+ * "here is fine".
+ */
+export function salesHome(role: string): string | null {
+  return role === 'SALES' ? SALES_HOME : null
+}
+
+/**
  * Where a freshly signed-in account belongs when it did not ask for anywhere.
  *
  * ---------------------------------------------------------------------------
@@ -123,8 +152,17 @@ export function landingPath(account: {
   /** Holds at least one active role at an active dealership. */
   hasStore: boolean
   isPlatformAdmin: boolean
+  /**
+   * Every dealership role this account holds is SALES.
+   *
+   * Every, not any: a person can sell at one rooftop of a group and advise at
+   * another, and sending them to the introduction page would take away the
+   * drive they also work. Absent means no — the field arrived with the role
+   * and callers predating it are all non-sales by construction.
+   */
+  salesOnly?: boolean
 }): string {
-  if (account.hasStore) return '/drive'
+  if (account.hasStore) return account.salesOnly ? SALES_HOME : '/drive'
   if (account.isPlatformAdmin) return '/admin'
   /*
     Neither. An invited user before anybody granted them a role — /drive sends
@@ -155,7 +193,7 @@ export function landingPath(account: {
  */
 export function signInDestination(
   requested: string | null | undefined,
-  account: { hasStore: boolean; isPlatformAdmin: boolean },
+  account: { hasStore: boolean; isPlatformAdmin: boolean; salesOnly?: boolean },
 ): string {
   if (!requested) return landingPath(account)
   // Sanitised here, so callers can pass user input through untouched.

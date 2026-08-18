@@ -1,9 +1,11 @@
 import Link from 'next/link'
 import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
+import { firstServiceCue } from '@/lib/prep-sheet'
 import { CoverageChips, money, PayerBadge, timeOf, UrgencyBadge } from './ui'
 import { demoNow } from '@/lib/demo-day'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +21,9 @@ export default async function DrivePage({
   // Enforced here, not only in the middleware. The middleware is a separate
   // deploy artifact on the host, and this page must not serve a dealership
   // to an anonymous request even if it never runs.
-  await requireUser()
+  const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
   const params = await searchParams
   const store = await getCurrentStore()
 
@@ -98,6 +102,7 @@ export default async function DrivePage({
         <ul className="space-y-3">
           {sheets.map((sheet) => {
             const top = sheet.opportunities.slice(0, 3)
+            const firstService = firstServiceCue(sheet, day)
             return (
               <li key={sheet.appointment?.id}>
                 <Link
@@ -119,6 +124,20 @@ export default async function DrivePage({
                         {sheet.appointment?.concerns ?? 'No concern recorded'}
                       </p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {/*
+                          One chip, not the whole cue. The list is scanned;
+                          the sheet is read. Everything else the introduction
+                          knows waits on the prep sheet, where there is room
+                          for it and a reason to look.
+                        */}
+                        {firstService && (
+                          <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-bold text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100">
+                            {firstService.label}
+                            {sheet.appointment?.soldByName
+                              ? ` · sold by ${sheet.appointment.soldByName}`
+                              : ''}
+                          </span>
+                        )}
                         <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
                           {sheet.appointment?.transportType.replace('_', ' ')}
                         </span>

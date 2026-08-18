@@ -1,8 +1,9 @@
 import 'server-only'
-import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, isNull, lt, or } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import type { AdvisorOnDuty, ScheduledAppointment } from './capacity'
+import type { MaintenanceIntervalRow } from './first-service'
 import type { DayRules } from './rules'
 
 /**
@@ -143,4 +144,80 @@ export async function loadDayBookScoped(
       scheduledAt: r.scheduledAt,
       isWaiter: r.transportType === 'WAITER',
     }))
+}
+
+/**
+ * The customer's advisor, or null — DRIVE_PLAN D4 step 2.
+ *
+ * The whole of the owning seam's read side. `assignAdvisor` has had an
+ * `owningAdvisorId` input since P2 that every caller answered null; this is the
+ * loader that makes it a real answer, and it stayed one line for exactly that
+ * reason — landing P3 was meant to be a loader change and not a change to how
+ * assignment decides.
+ *
+ * Selected narrowly rather than through `loadCustomerRecord`: the booking
+ * action needs one uuid, and building a customer record with its repair orders
+ * and consent history to read it would be waste on the hot path of every
+ * booking. Scoped, so another store's customer resolves to null rather than to
+ * their advisor.
+ */
+export async function loadOwningAdvisorScoped(
+  db: ScopedDb,
+  customerId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ owningAdvisorId: schema.customers.owningAdvisorId })
+    .from(schema.customers)
+    .where(eq(schema.customers.id, customerId))
+    .limit(1)
+
+  return row?.owningAdvisorId ?? null
+}
+
+export async function loadMaintenanceIntervals(
+  storeId: string,
+  make: string,
+): Promise<MaintenanceIntervalRow[]> {
+  return withCurrentUserScope((db) => loadMaintenanceIntervalsScoped(db, storeId, make))
+}
+
+/**
+ * What this make's maintenance schedule says, for the first-service default.
+ *
+ * `maintenance_schedules.store_id` is nullable and the null rows are shared
+ * reference data every tenant may read, so both are pulled and the engine
+ * picks the shortest interval among them. That is deliberate rather than
+ * preferring the store's own: a rooftop that adds a row is adding a service,
+ * not overriding the manufacturer, and "soonest wins" is the right rule for
+ * *first* service either way.
+ *
+ * An empty result is the normal state today — nothing ships rows in this table
+ * — and `firstServiceDefault` answers with the stated fallback and says which
+ * it used, so the form is honest on a store that has configured nothing.
+ */
+export async function loadMaintenanceIntervalsScoped(
+  db: ScopedDb,
+  storeId: string,
+  make: string,
+): Promise<MaintenanceIntervalRow[]> {
+  const rows = await db
+    .select({
+      make: schema.maintenanceSchedules.make,
+      modelYearFrom: schema.maintenanceSchedules.modelYearFrom,
+      modelYearTo: schema.maintenanceSchedules.modelYearTo,
+      intervalMiles: schema.maintenanceSchedules.intervalMiles,
+      intervalMonths: schema.maintenanceSchedules.intervalMonths,
+      description: schema.maintenanceSchedules.description,
+    })
+    .from(schema.maintenanceSchedules)
+    .where(and(
+      eq(schema.maintenanceSchedules.isActive, true),
+      eq(schema.maintenanceSchedules.make, make.trim().toUpperCase()),
+      or(
+        isNull(schema.maintenanceSchedules.storeId),
+        eq(schema.maintenanceSchedules.storeId, storeId),
+      ),
+    ))
+
+  return rows
 }

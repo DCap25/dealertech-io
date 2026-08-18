@@ -3,15 +3,17 @@
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { schema } from '@/db/client'
-import { withCurrentUserScope } from '@/db/scoped'
+import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
 import { requireUser } from '@/lib/auth/session'
+import { isSalesRole } from '@/lib/auth/sales'
 import { canManageStaff } from '@/lib/team/roster'
 import {
   assignAdvisor, assignedBy, capacityWarnings, dayRulesFor, mayOverrideHours, outsideHours,
-  slotsForDay, type Slot,
+  shouldClaimOwnership, slotsForDay, type Slot,
 } from '@/lib/scheduling'
 import {
-  loadAdvisorsOnDutyScoped, loadDayBookScoped, loadSchedulingRulesScoped,
+  loadAdvisorsOnDutyScoped, loadDayBookScoped, loadOwningAdvisorScoped,
+  loadSchedulingRulesScoped,
 } from '@/lib/scheduling/store-rules'
 import { transportFrom } from './transport'
 
@@ -33,6 +35,17 @@ import { transportFrom } from './transport'
  * why a fifth write-up at 8:00 is fine, and a refusal only teaches them to
  * record it somewhere we cannot see. The single hard stop is outside store
  * hours, and even that has an override.
+ *
+ * ---------------------------------------------------------------------------
+ * ONE ACTION, TWO DOORS (P3)
+ * ---------------------------------------------------------------------------
+ * The delivery introduction books through here rather than through an action
+ * of its own. It is the same act — a customer, a car, a slot, the cascade, the
+ * capacity sentences — and forking it would mean two places that decide who
+ * gets the appointment, which is exactly the divergence the pure engine exists
+ * to prevent. What differs is *how it is recorded*: `source: SALES_INTRO`,
+ * `visit_context: FIRST_SERVICE`, who sold the car, who was introduced. So the
+ * fork is a flag on the form and about thirty lines below, not a file.
  */
 
 export interface BookingState {
@@ -75,8 +88,41 @@ export async function bookAppointment(
 
   const transportType = transportFrom(text(formData, 'transportType'))
   const concerns = text(formData, 'concerns')
-  const requestedAdvisorId = text(formData, 'requestedAdvisorId') || null
   const overrideHours = formData.get('overrideHours') === 'on'
+
+  /*
+    Which door this came through.
+
+    `introduction` is the delivery walk-over (D5); anything else is the ordinary
+    drive booking. The flag comes off the form, so it is a claim — which is why
+    the role check below reads the session and not this.
+  */
+  const introduction = text(formData, 'intent') === 'SALES_INTRO'
+  const introducedAdvisorId = text(formData, 'introducedAdvisorId') || null
+
+  /*
+    DRIVE_PLAN §9 Q2 — OPEN, built per the recommendation: a SALES user books
+    first services and nothing else.
+
+    Enforced here and not only by the fence on the pages, because a server
+    action is a POST endpoint whether or not a page ever rendered — the fence
+    stops a salesperson *opening* /drive/book, and this stops them posting to
+    it. Widening the answer later is deleting this block; narrowing it after
+    the sales floor has the habit would be a fight.
+  */
+  if (isSalesRole(user.role) && !introduction) {
+    return { error: 'A first service at delivery is the booking this account can make.' }
+  }
+
+  /*
+    On an introduction the advisor picker IS the request — D5 says the
+    introduced advisor enters the cascade as its step-1 REQUESTED, so the two
+    fields are the same fact arriving under two names, and collapsing them here
+    keeps `assignAdvisor` unaware that introductions exist.
+  */
+  const requestedAdvisorId = introduction
+    ? introducedAdvisorId
+    : text(formData, 'requestedAdvisorId') || null
 
   // Where the booking came from, when it came from a follow-up.
   const taskId = text(formData, 'taskId') || null
@@ -156,6 +202,25 @@ export async function bookAppointment(
             .from(schema.vehicles).where(eq(schema.vehicles.id, vehicleId)).limit(1)
           if (!vehicle) vehicleId = null
         }
+
+        /*
+          A car this customer did not have before.
+
+          The repeat buyer is the whole reason this branch exists: somebody who
+          bought a truck here in 2022 is on the books already, and the sedan
+          they are being handed the keys to this morning is not. Without this
+          the introduction would either book against the old vehicle — the one
+          fact on the appointment that would then be wrong for the rest of its
+          life — or against no vehicle at all, and the first-service cue would
+          have nothing to say.
+
+          Same rule as the new-customer branch below: only when a real VIN, make
+          and year arrive.
+        */
+        if (!vehicleId) {
+          const created = await createVehicle(db, storeId, customerId, formData, introduction)
+          if (created) vehicleId = created
+        }
       } else {
         const firstName = text(formData, 'newFirstName')
         const lastName = text(formData, 'newLastName')
@@ -173,32 +238,7 @@ export async function bookAppointment(
         if (!created) throw new BookingError('Could not create the customer.')
         customerId = created.id
 
-        /*
-          A vehicle only if there is a VIN to hang it on. `vehicles.vin` is NOT
-          NULL and unique per store, and a placeholder would be a permanent lie
-          in the one column every coverage lookup keys off. No vehicle is a
-          state the schema already allows — `appointments.vehicle_id` is
-          nullable — and the write-up attaches the real one when the car is in
-          front of somebody who can read the plate.
-        */
-        const vin = text(formData, 'newVin').toUpperCase()
-        const make = text(formData, 'newMake').toUpperCase()
-        const modelYear = Number(text(formData, 'newModelYear'))
-        if (vin && make && Number.isFinite(modelYear) && modelYear > 1900) {
-          const [vehicle] = await db.insert(schema.vehicles).values({
-            storeId,
-            vin,
-            make,
-            model: text(formData, 'newModel') || null,
-            modelYear,
-          }).returning({ id: schema.vehicles.id })
-          if (vehicle) {
-            vehicleId = vehicle.id
-            await db.insert(schema.customerVehicles).values({
-              storeId, customerId, vehicleId: vehicle.id, isCurrent: true,
-            })
-          }
-        }
+        vehicleId = await createVehicle(db, storeId, customerId, formData, introduction)
       }
 
       /*
@@ -206,23 +246,30 @@ export async function bookAppointment(
         *request*, which is step 1 — everything after it is decided here from
         the day's book, not from anything the client sent.
 
-        `owningAdvisorId` is null and stays null until P3: the owning
-        relationship is `customers.owning_advisor_id`, which the delivery
-        introduction first writes in migration 0029. The seam is wired so that
-        landing it is a loader change rather than a change to how assignment
-        decides.
+        **The owning step is live.** `customers.owning_advisor_id` arrived with
+        migration 0029, so step 2 of D4 is reachable for the first time: a
+        customer who has a guy gets their guy, whether or not this booker
+        thought to ask. `assignAdvisor` itself is unchanged — landing P3 was a
+        loader change, which is what the seam was built for.
 
-        The two reads are sequential rather than a `Promise.all`: one scope is
+        A brand-new customer created moments ago has no owner, so the read is
+        skipped rather than run against a row we just wrote and already know
+        the answer for.
+
+        The three reads are sequential rather than a `Promise.all`: one scope is
         one transaction is one connection, so parallel here would only look
         parallel (src/db/scoped.ts).
       */
       const advisors = await loadAdvisorsOnDutyScoped(db, storeId)
       const dayBook = await loadDayBookScoped(db, storeId, when)
+      const owningAdvisorId = existingCustomerId && customerId
+        ? await loadOwningAdvisorScoped(db, customerId)
+        : null
       const slots = slotsForDay(rules, when)
 
       const decision = assignAdvisor({
         requestedAdvisorId,
-        owningAdvisorId: null,
+        owningAdvisorId,
         advisors,
         dayAppointments: dayBook,
         autoAssign: dayRulesFor(rules, when)?.autoAssign ?? true,
@@ -254,18 +301,72 @@ export async function bookAppointment(
           A MANAGER source would split the drive's own bookings in two for no
           question anybody asks.
         */
-        source: user.role === 'BDC' ? 'BDC' : 'ADVISOR',
+        source: introduction ? 'SALES_INTRO' : user.role === 'BDC' ? 'BDC' : 'ADVISOR',
         transportType,
         // The customer's own words, never an op-code description.
         customerConcerns: concerns || null,
         createdBy: user.id,
         assignedBy: assignedBy(decision.reason, user.id),
         assignmentReason: decision.reason,
+        /*
+          The delivery introduction's own three columns (D5). Written only on
+          that path, so an ordinary booking leaves them null rather than
+          carrying a `visit_context` nobody set.
+
+          `introducedAdvisorId` is stored beside `advisorId` even though they
+          agree today. They are different facts and they will diverge: a
+          reassignment moves the advisor and must not rewrite who the customer
+          actually shook hands with at delivery.
+        */
+        ...(introduction
+          ? {
+              visitContext: 'FIRST_SERVICE' as const,
+              soldByUserId: user.id,
+              introducedAdvisorId: introducedAdvisorId ?? null,
+            }
+          : {}),
         createdAt: now,
         updatedAt: now,
       }).returning({ id: schema.appointments.id })
 
       if (!appointment) throw new BookingError('Could not save the appointment.')
+
+      /*
+        The relationship, when the introduction created one — DRIVE_PLAN D6.
+
+        Three conditions, and each one is load-bearing. It is an introduction:
+        an ordinary booking is somebody ringing up, not a handshake. An advisor
+        was actually named: an introduction with nobody named forms no
+        relationship, and the customer meets their advisor at the first visit
+        instead (see `shouldClaimOwnership` for why that is better than letting
+        the balancer's pick become "their guy"). And nobody owns them yet: the
+        rule this column lives or dies by is that it is never silently
+        reassigned.
+
+        `decision.advisorId` rather than the raw form field, so an id naming
+        somebody who does not work here cannot become a customer's advisor —
+        the cascade has already dropped it by then.
+
+        In the same transaction as the appointment: a relationship recorded
+        against a booking that rolled back would route the next six months of
+        this customer's visits off an event that never happened.
+      */
+      if (introduction) {
+        const claim = shouldClaimOwnership({
+          currentOwnerId: owningAdvisorId,
+          advisorId: decision.reason === 'REQUESTED' ? decision.advisorId : null,
+          source: 'SALES_INTRO',
+          at: now,
+        })
+        if (claim && customerId) {
+          await db.update(schema.customers).set({
+            owningAdvisorId: claim.advisorId,
+            owningAdvisorSince: claim.since,
+            owningAdvisorSource: claim.source,
+            updatedAt: now,
+          }).where(eq(schema.customers.id, customerId))
+        }
+      }
 
       /*
         Close the loop the booking came from.
@@ -320,8 +421,73 @@ export async function bookAppointment(
     revalidatePath('/drive')
     revalidatePath('/drive/week')
     revalidatePath('/follow-up')
+    revalidatePath('/introduce')
   }
   return result
+}
+
+/**
+ * The car, when the form carried enough of one — and null when it did not.
+ *
+ * Only with a real VIN, make and year. `vehicles.vin` is NOT NULL and unique
+ * per store, and a placeholder would be a permanent lie in the one column every
+ * coverage lookup keys off. No vehicle is a state the schema already allows —
+ * `appointments.vehicle_id` is nullable — and the write-up attaches the real one
+ * when the car is in front of somebody who can read the plate.
+ *
+ * Shared by both branches of the booking because the delivery introduction made
+ * it two cases rather than one: a repeat buyer is already on the books and the
+ * car they were just handed the keys to is not.
+ */
+async function createVehicle(
+  db: ScopedDb,
+  storeId: string,
+  customerId: string,
+  formData: FormData,
+  /**
+   * True on the delivery introduction, where the dealership demonstrably sold
+   * this car — it is being introduced by the person who sold it, minutes ago.
+   * `sold_by_store` has existed on the ownership link since 0000 and nothing
+   * has ever been able to set it truthfully; the introduction can, and the
+   * ownership panel and every goodwill argument read it.
+   */
+  soldByStore = false,
+): Promise<string | null> {
+  const vin = text(formData, 'newVin').toUpperCase()
+  const make = text(formData, 'newMake').toUpperCase()
+  const modelYear = Number(text(formData, 'newModelYear'))
+  if (!vin || !make || !Number.isFinite(modelYear) || modelYear <= 1900) return null
+
+  const [vehicle] = await db.insert(schema.vehicles).values({
+    storeId,
+    vin,
+    make,
+    model: text(formData, 'newModel') || null,
+    modelYear,
+  }).returning({ id: schema.vehicles.id })
+  if (!vehicle) return null
+
+  await db.insert(schema.customerVehicles).values({
+    storeId,
+    customerId,
+    vehicleId: vehicle.id,
+    isCurrent: true,
+    soldByStore,
+    /*
+      A purchase date only where there genuinely was a purchase we witnessed.
+      A BDC rep keying a stranger's car has no idea when they bought it, and
+      "today" would be a fabricated fact in a column the warranty and loyalty
+      arguments both read.
+
+      Nothing sets `isOriginalOwner` on either path, deliberately. The
+      introduction knows the store sold the car; it does not know whether the
+      car was new, and on Hyundai, Kia, Genesis and Mitsubishi that flag
+      decides whether a 10yr/100k powertrain term applies at all. A confident
+      wrong answer there is worse than the conservative default.
+    */
+    purchasedAt: soldByStore ? new Date().toISOString().slice(0, 10) : null,
+  })
+  return vehicle.id
 }
 
 /**

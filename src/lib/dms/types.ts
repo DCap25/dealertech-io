@@ -78,6 +78,28 @@ export interface DmsAppointment {
   status: string
   /** The customer's own words. Never rewrite this. */
   customerConcerns: string | null
+
+  /**
+   * What kind of visit this is — `FIRST_SERVICE`, or absent.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THE DELIVERY INTRODUCTION IS ON THE WIRE TYPE AT ALL
+   * ---------------------------------------------------------------------------
+   * DealerTech owns the appointment book (D1), so today these three fields are
+   * only ever set by our own booking — the mock adapter reads them straight off
+   * the local rows. They are on `DmsAppointment` rather than smuggled around it
+   * because the prep sheet is built *only* from mapped bundles: a field the
+   * bundle cannot carry is a field the drive cannot render, whatever wrote it.
+   *
+   * A real DMS will answer null for all three, which is correct and not a gap —
+   * it does not know that a salesperson walked somebody over, because it was
+   * not there.
+   */
+  visitContext?: string | null
+  /** The salesperson, resolved to a name the drive can print. */
+  soldByName?: string | null
+  /** Who the customer was introduced to at delivery. Not necessarily `advisorId`. */
+  introducedAdvisorName?: string | null
 }
 
 export type DmsCoverageProduct =

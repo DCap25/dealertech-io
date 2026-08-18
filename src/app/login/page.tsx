@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { getSession } from '@/lib/auth/session'
-import { landingPath, safeRedirect } from '@/lib/auth/routes'
+import { landingPath, safeRedirect, salesHome } from '@/lib/auth/routes'
 import { SignInForm } from './sign-in-form'
 import { signOut } from './actions'
 
@@ -68,10 +68,17 @@ export default async function LoginPage({
   const showDemo = process.env.NODE_ENV !== 'production'
 
   if (session) {
-    const destination = session.active ? target : landingPath({
-      hasStore: false,
-      isPlatformAdmin: session.isPlatformAdmin,
-    })
+    /*
+      A salesperson's destination is their one page, whatever `next` said.
+
+      Not a security decision — the fence on every other page would bounce them
+      back regardless — but an honest button. Offering "Continue to today's
+      drive" to somebody who cannot open it is the broken promise the nav is
+      careful to avoid, and it is worse here because it is the button.
+    */
+    const destination = session.active
+      ? salesHome(session.active.role) ?? target
+      : landingPath({ hasStore: false, isPlatformAdmin: session.isPlatformAdmin })
 
     return (
       <main className="mx-auto flex flex-1 max-w-md flex-col justify-center px-6 py-12">
@@ -97,7 +104,9 @@ export default async function LoginPage({
           href={destination}
           className="mt-8 rounded-xl bg-neutral-900 px-5 py-3.5 text-center text-sm font-bold text-white transition active:scale-[0.99] dark:bg-white dark:text-neutral-900"
         >
-          {session.active ? 'Go to your drive' : 'Open the console'}
+          {session.active
+            ? salesHome(session.active.role) ? 'Introduce a customer' : 'Go to your drive'
+            : 'Open the console'}
         </Link>
 
         {/* Says what it does. "Sign in as someone else" described the intent

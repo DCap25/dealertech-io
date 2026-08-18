@@ -30,10 +30,14 @@
  *
  * Kept in step with `user_role` in src/db/schema/enums.ts and with the wider
  * list in src/lib/team/roster.ts.
+ *
+ * SALES joined in 0029 and is the odd one out on purpose: every other role
+ * here works the service department, and SALES works one page of it. See
+ * src/lib/auth/sales.ts for the fence that keeps it there.
  */
 export type StaffRole =
   | 'ADVISOR' | 'BDC' | 'TECHNICIAN' | 'DISPATCHER' | 'PARTS' | 'CASHIER'
-  | 'SERVICE_MANAGER' | 'FIXED_OPS_DIRECTOR' | 'ADMIN'
+  | 'SERVICE_MANAGER' | 'FIXED_OPS_DIRECTOR' | 'ADMIN' | 'SALES'
 
 /** One rooftop this person works at, and what they are there. */
 export interface StoreMembership {

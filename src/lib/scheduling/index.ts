@@ -27,3 +27,13 @@ export {
   assignAdvisor, assignedBy,
   type AssignmentDecision, type AssignmentInput, type AssignmentReason,
 } from './assign'
+
+export {
+  shouldClaimOwnership,
+  type OwnershipClaim, type OwnershipInput, type OwningAdvisorSource,
+} from './owning'
+
+export {
+  firstServiceDefault, FALLBACK_FIRST_SERVICE,
+  type FirstServiceDefault, type MaintenanceIntervalRow,
+} from './first-service'

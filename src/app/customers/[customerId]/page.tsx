@@ -5,6 +5,7 @@ import {
   ConsentBadge, Empty, formatPhone, money, Panel, shortDate, Stat, VehicleLink,
 } from '../../records-ui'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +29,9 @@ export default async function CustomerPage({
   // Enforced here, not only in the middleware. The middleware is a separate
   // deploy artifact on the host, and this page must not serve a dealership
   // to an anonymous request even if it never runs.
-  await requireUser()
+  const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
   const { customerId } = await params
   const store = await getCurrentStore()
   if (!store) notFound()

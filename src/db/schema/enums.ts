@@ -11,6 +11,17 @@ export const userRoleEnum = pgEnum('user_role', [
   'SERVICE_MANAGER',
   'FIXED_OPS_DIRECTOR',
   'ADMIN',
+  /**
+   * The person who sold the car — DRIVE_PLAN D5.
+   *
+   * Nine roles and none of them sold anything, which is why the delivery
+   * introduction had no actor. This one is deliberately the smallest role in
+   * the product: one page, `/introduce`, and deny-by-default plus the fence in
+   * src/lib/auth/sales.ts keeps every other surface shut. Sales-side CRM —
+   * desking, ups, deals — stays out on purpose, or this becomes a second
+   * product (D5, "what deliberately stays out").
+   */
+  'SALES',
 ])
 
 export const contactChannelEnum = pgEnum('contact_channel', ['SMS', 'EMAIL', 'PHONE', 'NONE'])
@@ -47,6 +58,15 @@ export const appointmentSourceEnum = pgEnum('appointment_source', [
   'DMS_SYNC',
   'CAMPAIGN',
   'RECALL',
+  /**
+   * The delivery introduction — booked at the moment the keys change hands.
+   *
+   * Its own value rather than folding into ADVISOR because the whole point is
+   * that it is measurable: "how many deliveries walked to the drive" is the
+   * number a sales manager is asked for, and it is unanswerable if the
+   * introduction books as an ordinary advisor booking (D5).
+   */
+  'SALES_INTRO',
 ])
 
 export const roStatusEnum = pgEnum('ro_status', [

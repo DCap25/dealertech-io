@@ -29,7 +29,7 @@
 
 export type StaffRole =
   | 'ADVISOR' | 'BDC' | 'TECHNICIAN' | 'DISPATCHER' | 'PARTS' | 'CASHIER'
-  | 'SERVICE_MANAGER' | 'FIXED_OPS_DIRECTOR' | 'ADMIN'
+  | 'SERVICE_MANAGER' | 'FIXED_OPS_DIRECTOR' | 'ADMIN' | 'SALES'
 
 export interface RosterMember {
   userId: string

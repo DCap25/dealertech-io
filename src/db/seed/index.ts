@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import { getDb, schema } from '../client'
 import { chance, int, isoDate, makeVin, pick, reseed, rnd, sample, stableId, daysAgo, daysFrom } from './random'
@@ -200,6 +200,14 @@ export async function seed(connectionString?: string) {
     { name: 'Tom Kowalski', role: 'TECHNICIAN' as const, email: 'tom@lonestarford.test' },
     { name: 'Alicia Brooks', role: 'TECHNICIAN' as const, email: 'alicia@lonestarford.test' },
     { name: 'Ray Delgado', role: 'SERVICE_MANAGER' as const, email: 'ray@lonestarford.test' },
+    /*
+      The sales floor — one person, which is all the role is for.
+
+      Seeded so the delivery introduction has an author and the first-service
+      cue on the drive has somebody's name on it. She books one appointment
+      below and can reach exactly one page (DRIVE_PLAN D5).
+    */
+    { name: 'Elena Vasquez', role: 'SALES' as const, email: 'elena@lonestarford.test' },
   ].map((s) => ({ ...s, id: stableId(`user:${s.email}`) }))
 
   await db.insert(schema.users).values(
@@ -210,6 +218,7 @@ export async function seed(connectionString?: string) {
   )
   const advisors = staff.filter((s) => s.role === 'ADVISOR')
   const techs = staff.filter((s) => s.role === 'TECHNICIAN')
+  const salesperson = staff.find((s) => s.role === 'SALES')!
 
   // ---------------------------------------------------------- op codes
   const opCodeRows = OP_CODES.map((o) => ({
@@ -801,6 +810,21 @@ export async function seed(connectionString?: string) {
     ...showcase,
     ...sample(vehicles.filter((v) => !showcaseSet.has(v.id)), 34 - showcase.length),
   ]
+  /**
+   * One of today's appointments is a delivery introduction.
+   *
+   * The newest car on the drive, because that is what a car sold a few months
+   * ago looks like, and it makes the first-service cue demonstrable rather than
+   * theoretical — the drive card and the prep sheet both render differently for
+   * exactly this row. Chosen deterministically for the same reason the showcase
+   * vehicles are: a demo case that appears on a dice roll is a demo case that
+   * disappears on one.
+   */
+  const introVehicle = [...bookable].sort(
+    (a, b) => b.inService.getTime() - a.inService.getTime(),
+  )[0]
+  const introAdvisor = advisors[0]!
+
   let idx = 0
   for (const veh of bookable) {
     const dayOffset = idx < 14 ? 0 : idx < 24 ? 1 : int(2, 5)
@@ -809,18 +833,54 @@ export async function seed(connectionString?: string) {
     const when = daysFrom(dayOffset, NOW)
     when.setUTCHours(hour + 5, minute, 0, 0) // store is US Central
 
+    const isIntroduction = veh.id === introVehicle?.id
+
     await db.insert(schema.appointments).values({
       storeId, customerId: veh.customerId, vehicleId: veh.id,
-      advisorId: pick(advisors).id, scheduledAt: when,
+      advisorId: isIntroduction ? introAdvisor.id : pick(advisors).id,
+      scheduledAt: when,
       promisedAt: new Date(when.getTime() + int(2, 6) * 3600_000),
       estimatedMinutes: pick([60, 90, 120, 180]),
       status: dayOffset === 0 && hour < 12 ? pick(['ARRIVED', 'IN_SERVICE', 'SCHEDULED']) : 'SCHEDULED',
-      source: pick(['PHONE', 'ONLINE', 'BDC', 'ADVISOR']),
-      transportType: pick(['WAITER', 'DROP_OFF', 'LOANER', 'SHUTTLE']),
-      customerConcerns: pick(CONCERNS),
+      source: isIntroduction ? 'SALES_INTRO' : pick(['PHONE', 'ONLINE', 'BDC', 'ADVISOR']),
+      transportType: isIntroduction ? 'WAITER' : pick(['WAITER', 'DROP_OFF', 'LOANER', 'SHUTTLE']),
+      customerConcerns: isIntroduction
+        ? 'First oil change since we picked it up. Elena said to ask for Dana.'
+        : pick(CONCERNS),
       projectedMileage: veh.mileage + int(50, 400),
+      /*
+        The three delivery columns, written exactly as the introduction page
+        writes them — including `assignmentReason: REQUESTED`, because naming
+        an advisor at delivery IS step 1 of the D4 cascade.
+      */
+      ...(isIntroduction
+        ? {
+            visitContext: 'FIRST_SERVICE' as const,
+            soldByUserId: salesperson.id,
+            introducedAdvisorId: introAdvisor.id,
+            assignedBy: salesperson.id,
+            assignmentReason: 'REQUESTED',
+          }
+        : {}),
     })
     idx++
+  }
+
+  /*
+    And the relationship that introduction formed (DRIVE_PLAN D6).
+
+    Only this one customer, matching the rule the code enforces: an owner is
+    written where a relationship actually formed, never backfilled across a
+    store's book. Everyone else has no advisor of their own, which is the
+    ordinary state and the one the assignment cascade is usually deciding
+    against.
+  */
+  if (introVehicle) {
+    await db.update(schema.customers).set({
+      owningAdvisorId: introAdvisor.id,
+      owningAdvisorSince: introVehicle.inService,
+      owningAdvisorSource: 'SALES_INTRO',
+    }).where(eq(schema.customers.id, introVehicle.customerId))
   }
 
   // ------------------------------------------------------- cadence rules

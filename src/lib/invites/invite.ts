@@ -33,6 +33,16 @@ export const INVITABLE_ROLES = [
   { code: 'BDC', label: 'BDC / call centre', hint: 'Works the follow-up list. No drive.' },
   { code: 'SERVICE_MANAGER', label: 'Service manager', hint: 'Sees the whole department, every advisor.' },
   { code: 'TECHNICIAN', label: 'Technician', hint: 'Inspection results and recommendations.' },
+  /*
+    The sales floor, and the hint is doing real work here.
+
+    A service manager handing out logins has no reason to expect a role called
+    "salesperson" in a service product, and the two questions they will have —
+    what can this person see, and will they be in my department's numbers — are
+    both answered before they click. Listed after the department roles and
+    before Administrator, which is roughly the order a roster is filled in.
+  */
+  { code: 'SALES', label: 'Salesperson', hint: 'Books first services at delivery. One page — no drive, no customer list.' },
   { code: 'ADMIN', label: 'Administrator', hint: 'Everything a manager sees, plus staff and settings.' },
 ] as const
 

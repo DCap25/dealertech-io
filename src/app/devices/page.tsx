@@ -1,6 +1,7 @@
 import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { Card } from '@/components/ui/primitives'
 import { requireUser } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 import { listDevices } from '@/lib/pairing/store'
 import { PairForm, UnpairButton } from './pair-form'
 
@@ -19,6 +20,8 @@ function seenLabel(at: Date | null): string {
 
 export default async function DevicesPage() {
   const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
   const devices = await listDevices(user.storeId)
 
   return (

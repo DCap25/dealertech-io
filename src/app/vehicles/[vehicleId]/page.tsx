@@ -7,6 +7,7 @@ import type { WearPrediction } from '@/lib/prep-sheet'
 import { Empty, money, Panel, shortDate, Stat } from '../../records-ui'
 import { demoNow } from '@/lib/demo-day'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 
 export const dynamic = 'force-dynamic'
 
@@ -120,6 +121,8 @@ export default async function VehiclePage({
   // deploy artifact on the host, and this page must not serve a dealership
   // to an anonymous request even if it never runs.
   const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
   const { vehicleId } = await params
   const store = await getCurrentStore()
   if (!store) notFound()

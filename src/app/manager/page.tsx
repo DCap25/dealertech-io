@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { UserBadge } from '@/components/auth/user-badge'
 import { Card } from '@/components/ui/primitives'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 import { monthToDatePeriod, weekPeriod } from '@/lib/performance'
 import { buildBoard, type AdvisorRow, type Attention, type AttentionTone } from '@/lib/manager'
 import { loadAdvisors, loadAppointments, loadBacklog, loadRepairOrders } from '@/lib/manager/load'
@@ -155,6 +156,8 @@ export default async function ManagerPage({
   searchParams: Promise<{ period?: string }>
 }) {
   const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
 
   /**
    * Not a redirect.

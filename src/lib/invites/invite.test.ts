@@ -108,6 +108,9 @@ describe('isInvitableRole', () => {
   it('accepts the roles a dealership can hand out', () => {
     expect(isInvitableRole('ADVISOR')).toBe(true)
     expect(isInvitableRole('SERVICE_MANAGER')).toBe(true)
+    // The sales floor, so a manager can hand out a delivery-introduction
+    // login from the roster screen without anybody touching the database.
+    expect(isInvitableRole('SALES')).toBe(true)
   })
 
   it('refuses anything else', () => {

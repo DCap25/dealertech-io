@@ -1,4 +1,5 @@
 export { buildPrepSheet, DEFAULT_INTERVALS } from './build'
+export { firstServiceCue, type FirstServiceCue } from './first-service'
 export {
   predictWear, predictWorstCorner, TIRE_THRESHOLDS, BRAKE_THRESHOLDS,
   type WearReading, type WearPrediction,

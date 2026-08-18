@@ -274,9 +274,31 @@ describe('assignAdvisor', () => {
     expect(decision.reason).toBe('BALANCED')
   })
 
-  it('falls to the owning advisor — the P3 seam, wired and unused today', () => {
+  it('falls to the owning advisor — live since P3 fed it a real column', () => {
     expect(assignAdvisor({ ...base, owningAdvisorId: 'marcus' }))
       .toEqual({ advisorId: 'marcus', reason: 'OWNING' })
+  })
+
+  it('gives their guy the appointment even when their guy is off that day', () => {
+    /*
+      The whole point of the relationship. Silently handing the customer to
+      whoever is on shift takes the decision away from the only person in the
+      conversation who can make it — the booker sees the warning and chooses
+      another day or another advisor.
+    */
+    const offToday: AdvisorOnDuty[] = [
+      { advisorId: 'marcus', name: 'Marcus', working: false },
+      { advisorId: 'dana', name: 'Dana', working: true },
+    ]
+    expect(assignAdvisor({ ...base, advisors: offToday, owningAdvisorId: 'marcus' }))
+      .toEqual({ advisorId: 'marcus', reason: 'OWNING' })
+  })
+
+  it('ignores an owner who no longer works here', () => {
+    // A departed advisor is still on old customers' rows; routing to them
+    // would book a customer to a ghost.
+    expect(assignAdvisor({ ...base, owningAdvisorId: 'someone-who-left' }).reason)
+      .toBe('BALANCED')
   })
 
   it('balances by that day’s load, ties broken by name for determinism', () => {

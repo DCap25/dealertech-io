@@ -6,6 +6,7 @@ import {
 } from '@/lib/performance'
 import { loadOutcomes, loadSoldLines } from '@/lib/performance/load'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 import { demoNow } from '@/lib/demo-day'
 
 export const dynamic = 'force-dynamic'
@@ -97,6 +98,8 @@ function StreakRow({ streak }: { streak: Streak }) {
 export default async function ScorecardPage() {
   // The signed-in advisor, not whichever row the database returned first.
   const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
   const store = await getCurrentStore()
   if (!store) {
     return (

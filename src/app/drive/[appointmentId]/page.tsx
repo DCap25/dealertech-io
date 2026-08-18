@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
+import { firstServiceCue } from '@/lib/prep-sheet'
 import { vinLastSix } from '@/lib/prep-sheet/presentation'
+import { fenceSales } from '@/lib/auth/sales'
 import { PrepSheetView } from '@/components/prep-sheet/prep-sheet-view'
 import { demoNow } from '@/lib/demo-day'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
@@ -41,7 +43,9 @@ export default async function PrepSheetPage({
   // Enforced here, not only in the middleware. The middleware is a separate
   // deploy artifact on the host, and this page must not serve a dealership
   // to an anonymous request even if it never runs.
-  await requireUser()
+  const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
   const { appointmentId } = await params
   const store = await getCurrentStore()
   if (!store) notFound()
@@ -49,6 +53,8 @@ export default async function PrepSheetPage({
   const sheets = await loadDriveDay(store.id, DAY(), DAY())
   const sheet = sheets.find((s) => s.appointment?.id === appointmentId)
   if (!sheet) notFound()
+
+  const firstService = firstServiceCue(sheet, DAY())
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6 sm:py-8">
@@ -105,6 +111,39 @@ export default async function PrepSheetPage({
           </p>
         )}
       </header>
+
+      {/*
+        Above the alerts, and a different colour on purpose.
+
+        The alerts panel is rose because everything in it is bad news — a
+        do-not-drive recall, a contradicted odometer. This is the opposite kind
+        of fact and putting it in the same red box would teach the advisor to
+        read "first service" as a warning. Emerald, and it leads because it
+        changes how the greeting starts rather than what gets quoted.
+      */}
+      {firstService && (
+        <div className="mt-4 rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-4 dark:border-emerald-700 dark:bg-emerald-950">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <p className="text-sm font-bold uppercase tracking-wide text-emerald-900 dark:text-emerald-200">
+              {firstService.label}
+            </p>
+            {firstService.attribution && (
+              <p className="text-sm text-emerald-900/80 dark:text-emerald-200/80">
+                {firstService.attribution}
+              </p>
+            )}
+          </div>
+          {firstService.notes.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {firstService.notes.map((n) => (
+                <li key={n} className="text-sm text-emerald-900 dark:text-emerald-200">
+                  {n}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {sheet.alerts.length > 0 && (
         <div className="mt-4 rounded-2xl border-2 border-rose-400 bg-rose-50 p-4 dark:border-rose-700 dark:bg-rose-950">

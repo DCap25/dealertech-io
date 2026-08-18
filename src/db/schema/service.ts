@@ -130,6 +130,35 @@ export const appointments = pgTable(
      */
     assignmentReason: text('assignment_reason'),
 
+    /**
+     * The delivery introduction — DRIVE_PLAN D5. All three nullable, and null
+     * is every appointment that did not come from a sales floor, which is
+     * almost all of them.
+     *
+     * Who the customer was walked over to and shook hands with. Distinct from
+     * `advisorId`: this is the *introduction*, which enters the D4 cascade as a
+     * step-1 request. The two agree on the day it is booked and can diverge
+     * afterwards — a reassignment moves `advisorId` and must not rewrite who
+     * was actually introduced, because that is history.
+     */
+    introducedAdvisorId: uuid('introduced_advisor_id').references(() => users.id, { onDelete: 'set null' }),
+    /**
+     * The salesperson. Attribution is half the point of giving sales a login
+     * at all (D5): "did the deliveries this month get walked to the drive, and
+     * by whom" is the report the sales manager wants, and a tokened link with
+     * no account could never answer it.
+     */
+    soldByUserId: uuid('sold_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /**
+     * `FIRST_SERVICE`, or null.
+     *
+     * Text rather than an enum, following `presentation_sessions.channel` and
+     * `assignment_reason` above: one value today, and the vocabulary of "what
+     * kind of visit is this" is exactly the sort that grows. It is what the
+     * drive renders differently — see src/lib/prep-sheet/first-service.ts.
+     */
+    visitContext: text('visit_context'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

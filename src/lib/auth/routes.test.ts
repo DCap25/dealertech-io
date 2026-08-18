@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPublicPath, landingPath, safeRedirect, signInDestination } from './routes'
+import { isPublicPath, landingPath, safeRedirect, salesHome, signInDestination } from './routes'
 
 describe('isPublicPath', () => {
   it('lets someone reach an invitation or a trial without an account', () => {
@@ -164,6 +164,32 @@ describe('landingPath', () => {
     // An invited user before anyone granted them a role. /drive bounces to the
     // sign-in page, which is the surface that says why.
     expect(landingPath({ hasStore: false, isPlatformAdmin: false })).toBe('/drive')
+  })
+
+  it('sends a salesperson to the one page they have', () => {
+    expect(landingPath({ hasStore: true, isPlatformAdmin: false, salesOnly: true }))
+      .toBe('/introduce')
+  })
+
+  it('sends somebody who also advises somewhere to the drive', () => {
+    /*
+      "Every membership is SALES", not "any". A dealer group moves people
+      between rooftops, and landing a person who sells at one store and advises
+      at another on the introduction page would take away the drive they work.
+    */
+    expect(landingPath({ hasStore: true, isPlatformAdmin: false, salesOnly: false }))
+      .toBe('/drive')
+  })
+})
+
+describe('salesHome', () => {
+  it('names the introduction page for a salesperson and nothing for anyone else', () => {
+    // The whole fence, and the reason it is a path rather than a boolean: a
+    // page asks where this person belongs, and null means "here is fine".
+    expect(salesHome('SALES')).toBe('/introduce')
+    expect(salesHome('ADVISOR')).toBeNull()
+    expect(salesHome('SERVICE_MANAGER')).toBeNull()
+    expect(salesHome('ADMIN')).toBeNull()
   })
 })
 

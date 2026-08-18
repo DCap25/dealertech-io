@@ -234,6 +234,33 @@ describe('toPrepSheetInputs', () => {
     }), store, ASOF)).toHaveLength(0)
   })
 
+  it('carries the delivery introduction through to the sheet', () => {
+    /*
+      The prep sheet is built only from mapped bundles, so a field the mapper
+      drops is a field the drive cannot render — which is exactly how advisorId
+      and status went missing until P1. The first-service cue reads all three.
+    */
+    const inputs = toPrepSheetInputs(bundle({
+      appointments: [appointment({
+        visitContext: 'FIRST_SERVICE',
+        soldByName: 'Elena Vasquez',
+        introducedAdvisorName: 'Dana Whitfield',
+      })],
+    }), store, ASOF)
+
+    expect(inputs[0]?.appointment?.visitContext).toBe('FIRST_SERVICE')
+    expect(inputs[0]?.appointment?.soldByName).toBe('Elena Vasquez')
+    expect(inputs[0]?.appointment?.introducedAdvisorName).toBe('Dana Whitfield')
+  })
+
+  it('answers null for a DMS that was not standing there at delivery', () => {
+    // A real integration knows nothing about a salesperson walking somebody
+    // over, and null is the correct answer rather than a gap.
+    const inputs = toPrepSheetInputs(bundle(), store, ASOF)
+    expect(inputs[0]?.appointment?.visitContext).toBeNull()
+    expect(inputs[0]?.appointment?.soldByName).toBeNull()
+  })
+
   it('falls back to the company name for a fleet customer', () => {
     const inputs = toPrepSheetInputs(bundle({
       customers: [customer({ firstName: null, lastName: null, companyName: 'Bluebonnet Plumbing' })],

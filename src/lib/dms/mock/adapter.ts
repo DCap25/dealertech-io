@@ -232,7 +232,18 @@ export class MockDmsAdapter implements DmsAdapter {
 
     const vehicleIds = [...new Set(appointmentRows.map((a) => a.vehicleId).filter(isId))]
     const customerIds = [...new Set(appointmentRows.map((a) => a.customerId).filter(isId))]
-    const advisorIds = [...new Set(appointmentRows.map((a) => a.advisorId).filter(isId))]
+    /*
+      One lookup for every person named on an appointment, not three.
+
+      A delivery introduction names two more — who sold the car and who they
+      were walked over to (DRIVE_PLAN D5) — and both are `users` rows exactly
+      like the advisor. Widening this set rather than adding queries keeps the
+      pull at the same number of round trips, and the introduced advisor is
+      usually already in it anyway.
+    */
+    const advisorIds = [...new Set(appointmentRows.flatMap((a) => [
+      a.advisorId, a.soldByUserId, a.introducedAdvisorId,
+    ]).filter(isId))]
     if (vehicleIds.length === 0 || customerIds.length === 0) return emptyBundle()
 
     const [
@@ -320,6 +331,19 @@ export class MockDmsAdapter implements DmsAdapter {
         transportType: a.transportType,
         status: a.status,
         customerConcerns: a.customerConcerns,
+        /*
+          The delivery introduction, threaded end to end.
+
+          Names rather than ids, because that is what the drive prints and the
+          adapter is the layer that knows how this system spells a person. A
+          real DMS answers null for all three — it was not standing there when
+          the keys changed hands.
+        */
+        visitContext: a.visitContext,
+        soldByName: a.soldByUserId ? advisorNameById.get(a.soldByUserId) ?? null : null,
+        introducedAdvisorName: a.introducedAdvisorId
+          ? advisorNameById.get(a.introducedAdvisorId) ?? null
+          : null,
       })),
       customers: customerRows.map(mapCustomer),
       vehicles: vehicleRows.map((v) => {

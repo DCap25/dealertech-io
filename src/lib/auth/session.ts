@@ -290,6 +290,11 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     storeId: active.storeId,
     storeName: active.storeName,
     role: active.role,
+    /*
+      Roles that work the drive and own follow-ups. SALES is not one of them
+      and needs no clause here — it books an appointment into somebody else's
+      book and never works one, which is the whole shape of the role.
+    */
     isAdvisor: active.role === 'ADVISOR' || active.role === 'SERVICE_MANAGER',
     memberships: session.memberships,
     isPlatformAdmin: session.isPlatformAdmin,
@@ -330,20 +335,30 @@ export async function requireUser(): Promise<CurrentUser> {
 export async function accountShape(userId: string): Promise<{
   hasStore: boolean
   isPlatformAdmin: boolean
+  salesOnly: boolean
 }> {
   const db = getDb()
 
-  const [store, platform] = await Promise.all([
+  const [stores, platform] = await Promise.all([
+    /*
+      Every active membership, not the first one.
+
+      It used to be `.limit(1)`, which answered "do they work anywhere" and
+      nothing more — enough while every dealership role landed on the same
+      page. `SALES` does not: it lands on /introduce, and deciding that needs
+      the whole list, because somebody who sells at one rooftop of a group and
+      advises at another must still land on the drive. A handful of rows for
+      one user is not a query worth optimising back down.
+    */
     db
-      .select({ storeId: schema.userStoreRoles.storeId })
+      .select({ role: schema.userStoreRoles.role })
       .from(schema.userStoreRoles)
       .innerJoin(schema.stores, eq(schema.stores.id, schema.userStoreRoles.storeId))
       .where(and(
         eq(schema.userStoreRoles.userId, userId),
         eq(schema.userStoreRoles.isActive, true),
         eq(schema.stores.isActive, true),
-      ))
-      .limit(1),
+      )),
     db
       .select({ id: schema.platformAdmins.id })
       .from(schema.platformAdmins)
@@ -354,7 +369,11 @@ export async function accountShape(userId: string): Promise<{
       .limit(1),
   ])
 
-  return { hasStore: store.length > 0, isPlatformAdmin: platform.length > 0 }
+  return {
+    hasStore: stores.length > 0,
+    isPlatformAdmin: platform.length > 0,
+    salesOnly: stores.length > 0 && stores.every((s) => s.role === 'SALES'),
+  }
 }
 
 /**

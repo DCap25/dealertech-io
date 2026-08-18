@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { requireUser } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 import { CaptureForm } from './capture-form'
 
 export const dynamic = 'force-dynamic'
@@ -15,6 +16,8 @@ export default async function ContractCapturePage({
   params: Promise<{ vehicleId: string }>
 }) {
   const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
   const { vehicleId } = await params
 
   const [vehicle] = await withCurrentUserScope((db) => db

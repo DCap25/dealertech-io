@@ -8,6 +8,7 @@ import {
 import { timeOf } from '../ui'
 import { demoNow } from '@/lib/demo-day'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +40,8 @@ export default async function DriveWeekPage({
 }) {
   // Enforced here, not only in the middleware — same reasoning as /drive.
   const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
   const params = await searchParams
   const store = await getCurrentStore()
 

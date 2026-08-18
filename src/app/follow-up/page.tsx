@@ -7,6 +7,7 @@ import {
   type FollowUpItem, type FollowUpOwner,
 } from '@/lib/follow-up/view'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { fenceSales } from '@/lib/auth/sales'
 import { FollowUpCard } from './follow-up-card'
 import { demoDayEnd } from '@/lib/demo-day'
 
@@ -69,6 +70,8 @@ export default async function FollowUpPage({
 }) {
   const params = await searchParams
   const user = await requireUser()
+  // A salesperson has one page and this is not it (DRIVE_PLAN §9 Q2).
+  fenceSales(user.role)
   const ownerTabs = ownerTabsFor(user.role)
   const store = await getCurrentStore()
 

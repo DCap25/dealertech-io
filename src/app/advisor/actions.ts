@@ -7,6 +7,7 @@ import { withCurrentUserScope } from '@/db/scoped'
 import { nextRoNumberScoped } from '@/lib/advisor/load'
 import { requireUser } from '@/lib/auth/session'
 import { soldComponentGroups } from '@/lib/reconcile/sold-work'
+import { shouldClaimOwnership } from '@/lib/scheduling'
 import { checkOdometer, overrideSummary, validateOverride } from '@/lib/odometer/check'
 import { recordAudit } from '@/lib/audit/record'
 
@@ -590,6 +591,61 @@ export async function closeRepairOrder(
         await db.update(schema.appointments)
           .set({ status: 'DELIVERED', updatedAt: now })
           .where(eq(schema.appointments.id, ro.appointmentId))
+      }
+
+      /*
+        ---------------------------------------------------------------------
+        FIRST_VISIT — where the relationship forms when nobody introduced them
+        ---------------------------------------------------------------------
+        DRIVE_PLAN D6 says the owning advisor is set at "the first completed
+        visit with an advisor when no owner exists". This is that moment, and
+        picking it took some looking, because several places are plausibly
+        "the visit finished":
+
+          * `recordVisitOutcomes` fires when the advisor finishes working the
+            prep sheet. It is the earliest signal and the wrong one — it runs
+            while the car is still in the shop, it can run twice as an advisor
+            corrects themselves, and a visit that is then cancelled at the
+            cashier would have formed a relationship out of a conversation.
+          * The write-up sets ARRIVED. Too early by a whole visit: the customer
+            has met somebody, not been served by them.
+          * There is no other completion path. DELIVERED is written in exactly
+            one place in this codebase, and it is four lines above.
+
+        So: the close of the repair order. It is the money event, it is
+        already one transaction, and it is where the customer aggregates
+        (`visit_count`, `first_visit_at`) are recomputed a few lines below —
+        which is the same claim about the same fact, made in the same breath.
+
+        `ro.advisorId` and not `closedBy`: the person clicking Close may be a
+        cashier at the end of the day, and the RO's advisor is who actually
+        wrote the visit up. And not `appointment.advisorId` either — the RO's
+        column already holds the advisor as of write-up, which is the honest
+        answer when somebody covered for whoever the booking named.
+
+        `shouldClaimOwnership` owns the rule: never over an existing owner, and
+        never without an advisor to name. The read is scoped and narrow because
+        the answer is one uuid.
+      */
+      const [owner] = await db
+        .select({ owningAdvisorId: schema.customers.owningAdvisorId })
+        .from(schema.customers)
+        .where(eq(schema.customers.id, ro.customerId))
+        .limit(1)
+
+      const claim = shouldClaimOwnership({
+        currentOwnerId: owner?.owningAdvisorId,
+        advisorId: ro.advisorId,
+        source: 'FIRST_VISIT',
+        at: now,
+      })
+      if (claim) {
+        await db.update(schema.customers).set({
+          owningAdvisorId: claim.advisorId,
+          owningAdvisorSince: claim.since,
+          owningAdvisorSource: claim.source,
+          updatedAt: now,
+        }).where(eq(schema.customers.id, ro.customerId))
       }
 
       /**
