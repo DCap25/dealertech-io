@@ -366,6 +366,25 @@ describe('the guide covers the whole app', () => {
     '/', // the marketing site
     '/demo', // the marketing demo surface
     '/login', // the sign-in form; there is nothing to explain and nobody signed in to explain it to
+    /*
+      The trust and legal pages. Same argument as the marketing site, listed
+      one per line so each is an individually reviewable claim rather than a
+      prefix that would quietly swallow a future `/legal/something` that does
+      belong in the guide.
+
+      An advisor never opens these mid-shift, and teaching the guide about them
+      would put the Co-Pilot in the position of coaching a signed-in user
+      through a cookie policy — which is not the product it is there to explain.
+    */
+    '/legal',
+    '/legal/privacy',
+    '/legal/terms',
+    '/legal/cookies',
+    '/security',
+    '/compliance',
+    '/responsible-ai',
+    '/status',
+    '/press',
   ])
 
   const routes = routePaths(APP_DIR)
@@ -554,6 +573,17 @@ describe('showsHelpLauncher', () => {
   it('stays off the signed-out doors and the operations console', () => {
     for (const path of ['/', '/demo', '/login', '/signup', '/invite/tok', '/admin', '/admin/leads']) {
       expect(showsHelpLauncher(path)).toBe(false)
+    }
+  })
+
+  it('stays off the trust and legal pages', () => {
+    // They are the marketing site by another name. A floating "ask the
+    // Co-Pilot" button on a privacy policy would 401 on every tap.
+    for (const path of [
+      '/legal', '/legal/privacy', '/legal/terms', '/legal/cookies',
+      '/security', '/compliance', '/responsible-ai', '/status', '/press',
+    ]) {
+      expect(showsHelpLauncher(path), path).toBe(false)
     }
   })
 })

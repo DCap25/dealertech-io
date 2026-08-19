@@ -51,6 +51,38 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/demo')).toBe(true)
   })
 
+  it('lets anyone read the trust and legal pages', () => {
+    /*
+      These exist to be read by somebody without an account — that is their
+      entire job. Gated, a dealer's IT contact working a vendor questionnaire
+      and a customer following the cookie link out of the footer both land on a
+      sign-in page for a product they have not bought.
+    */
+    for (const path of [
+      '/legal',
+      '/legal/privacy',
+      '/legal/terms',
+      '/legal/cookies',
+      '/security',
+      '/compliance',
+      '/responsible-ai',
+      '/status',
+      '/press',
+    ]) {
+      expect(isPublicPath(path), path).toBe(true)
+    }
+  })
+
+  it('does not open lookalikes of the trust pages', () => {
+    // The same prefix trap as /signup and /demo. "/security-review" is an
+    // internal name waiting to happen, and "/status-board" is exactly the kind
+    // of page somebody adds later assuming it is protected.
+    expect(isPublicPath('/security-review')).toBe(false)
+    expect(isPublicPath('/status-board')).toBe(false)
+    expect(isPublicPath('/legally-required')).toBe(false)
+    expect(isPublicPath('/press-kit-admin')).toBe(false)
+  })
+
   it('lets framework assets through', () => {
     expect(isPublicPath('/_next/static/chunk.js')).toBe(true)
     expect(isPublicPath('/favicon.ico')).toBe(true)

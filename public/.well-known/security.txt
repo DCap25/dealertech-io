@@ -1,0 +1,19 @@
+# Reporting a vulnerability in DealerTech.io
+#
+# RFC 9116. Served from public/.well-known/security.txt, which Next.js maps to
+# /.well-known/security.txt — files in public/ are served from the base URL,
+# nested directories included.
+#
+# Expires is required by the RFC and is deliberately short: an address that has
+# been unattended for a year should stop claiming to be monitored. Refresh this
+# date annually, at the same time as the "last updated" dates in
+# src/lib/site/legal.ts.
+#
+# Not signed. A PGP signature on a file nobody has our key to verify against is
+# decoration; when a key is published this file gains a Signature: line.
+
+Contact: mailto:info@dealertech.io
+Expires: 2027-08-19T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://dealertech.io/.well-known/security.txt
+Policy: https://dealertech.io/security

@@ -74,6 +74,32 @@ const PUBLIC_PREFIXES = [
    * accepting unverified JSON that could mark any dealership as paid.
    */
   '/api/webhooks',
+  /**
+   * The trust and legal pages.
+   *
+   * Public in the plainest sense: their entire purpose is to be read by
+   * somebody who does not have an account and is deciding whether to get one.
+   * A dealer's IT contact working through a vendor questionnaire, a customer
+   * following the cookie link out of the footer, and a journalist reading the
+   * press page are all anonymous by definition — deny-by-default would send
+   * every one of them to a sign-in page for a product they are still
+   * evaluating, which is the same dead end invitations used to hit.
+   *
+   * `/legal` covers `/legal/privacy`, `/legal/terms` and `/legal/cookies` as
+   * sub-paths. The rest are top-level because that is where a questionnaire
+   * expects to find them.
+   *
+   * Nothing under any of them reads a session, touches the database or renders
+   * anything tenant-specific; they are static text about the company. See
+   * src/lib/site/marketing-surface.test.ts, which fails if that stops being
+   * true.
+   */
+  '/legal',
+  '/security',
+  '/compliance',
+  '/responsible-ai',
+  '/status',
+  '/press',
 ]
 
 /** Never gated: static assets, framework internals, health checks. */

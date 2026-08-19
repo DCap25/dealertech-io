@@ -4,6 +4,7 @@ import { CoverageContrast } from '@/components/marketing/coverage-contrast'
 import { DepartmentPreview } from '@/components/marketing/department-preview'
 import { LeakCalculator } from '@/components/marketing/leak-calculator'
 import { PrepSheetPreview } from '@/components/marketing/prep-sheet-preview'
+import { MarketingFooter } from '@/components/marketing/site-footer'
 import { WearPreview } from '@/components/marketing/wear-preview'
 
 export const metadata = {
@@ -451,39 +452,13 @@ export default function HomePage() {
         </div>
       </Section>
 
-      {/* -------------------------------------------------------- footer */}
-      <footer className="mt-auto border-t border-[var(--rule)] px-5 py-10 sm:px-6">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 text-sm text-[var(--ink-soft)]">
-          <p>
-            <span className="font-bold text-[var(--ink)]">DealerTech.io</span> · Service drive
-            intelligence
-          </p>
-          <nav className="flex flex-wrap gap-5">
-            <Link href="/demo" className="transition hover:text-[var(--ink)]">Live demo</Link>
-            <a href="#how" className="transition hover:text-[var(--ink)]">How it works</a>
-            <a href="#managers" className="transition hover:text-[var(--ink)]">For managers</a>
-            <a href="#demo" className="transition hover:text-[var(--ink)]">Book a walkthrough</a>
-            <Link href="/login" className="font-semibold transition hover:text-[var(--ink)]">
-              Sign in
-            </Link>
-          </nav>
-        </div>
-        <p className="mx-auto mt-6 max-w-6xl text-xs leading-relaxed text-[var(--ink-soft)] opacity-80">
-          Coverage answers are advisory. DealerTech does not adjudicate claims — the administrator
-          or manufacturer does. Warranty terms are reference data and vary by model and model year.
-          Recall data comes from NHTSA by make, model and year, not by VIN. Figures shown in product
-          previews on this page are illustrative.
-        </p>
-        {/*
-          Inline rather than from a layout. This page sits directly under the
-          root layout, which every other surface shares, and it already ends in
-          a footer of its own — a second one stacked underneath would be the
-          only page on the site with two.
-        */}
-        <p className="mx-auto mt-6 max-w-6xl text-xs text-[var(--ink-soft)]">
-          Copyright © DealerTech.io
-        </p>
-      </footer>
+      {/*
+        The footer moved to a component rather than a layout, and the reasoning
+        it used to carry inline still holds: this page sits directly under the
+        root layout, which every other surface shares, so a footer layout there
+        would put marketing links on the drive. See the note in the component.
+      */}
+      <MarketingFooter />
     </div>
   )
 }

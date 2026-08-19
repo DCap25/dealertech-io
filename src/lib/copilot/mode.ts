@@ -76,6 +76,17 @@ export function showsHelpLauncher(pathname: string): boolean {
   if (pathname === '/invite' || pathname.startsWith('/invite/')) return false
 
   /*
+    The trust and legal pages, for the same reason. None of them mounts the
+    workspace frame today, so nothing renders the launcher there in practice —
+    but this function is the written answer to "is this the product?", and
+    leaving it answering yes for /legal/terms makes it wrong about a page it
+    describes rather than merely unused.
+  */
+  for (const page of ['/legal', '/security', '/compliance', '/responsible-ai', '/status', '/press']) {
+    if (pathname === page || pathname.startsWith(`${page}/`)) return false
+  }
+
+  /*
     DealerTech's own console. Not the dealership product, and a platform admin
     holding no store role has no `getCurrentUser()` for the endpoint to answer
     as — the button would be there and every tap would 401.
