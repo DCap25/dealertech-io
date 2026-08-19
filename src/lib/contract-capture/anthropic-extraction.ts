@@ -22,7 +22,19 @@ import type { ExtractionContext } from './types'
  */
 
 const MODEL = 'claude-opus-5'
-const MAX_TOKENS = 4096
+
+/**
+ * Sixteen thousand, not four.
+ *
+ * On this model adaptive thinking spends from the same budget as the answer,
+ * and reading a creased twelve-page contract is exactly the work it thinks
+ * hardest about. At 4096 a dense scan could reason its way to the right fifteen
+ * fields and then be cut off mid-JSON — which arrives here as a parse failure
+ * and reaches the advisor as "nothing was read". 16000 is the documented
+ * ceiling for a non-streaming request; the cost is only paid when the tokens
+ * are actually used.
+ */
+const MAX_TOKENS = 16000
 
 let client: Anthropic | null = null
 function getClient(): Anthropic {
@@ -49,11 +61,18 @@ function documentBlock(fileBase64: string, mediaType: AcceptedMediaType) {
       },
     }
   }
+  /*
+    No cast here, deliberately. `isPdf` narrows the union, so `mediaType` is
+    already one of the formats the API accepts and the compiler is what says
+    so. The cast this replaced asserted the same thing and was wrong: HEIC was
+    an accepted upload type, so it silently satisfied the assertion, went out
+    over the wire, and came back a 400.
+  */
   return {
     type: 'image' as const,
     source: {
       type: 'base64' as const,
-      media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp',
+      media_type: mediaType,
       data: fileBase64,
     },
   }
@@ -99,11 +118,29 @@ export const anthropicExtractionProvider: ExtractionProvider = {
       ],
     })
 
+    /*
+      A refusal or a truncation is a failed read, and it has to be said so.
+
+      Both arrive as HTTP 200 with a plausible-looking message — a safety
+      classifier declining returns `stop_reason: 'refusal'`, and running out of
+      budget returns 'max_tokens' with whatever was written so far. Neither
+      threw, so `store.ts` recorded outcome EXTRACTED, and the advisor was shown
+      an empty form under a heading saying the document had been read and
+      nothing found. That is the worst of the three possible answers: it invites
+      them to conclude the contract is blank rather than to type it in.
+
+      Throwing puts it back in the one branch that tells the truth — store.ts
+      catches anything from here and records FAILED, which is what happened.
+    */
+    if (message.stop_reason === 'refusal' || message.stop_reason === 'max_tokens') {
+      throw new Error(`Extraction stopped early: ${message.stop_reason}`)
+    }
+
     const text = message.content.find((block) => block.type === 'text')
     if (!text || text.type !== 'text') {
-      // A response with no text block is a refusal or a truncation. Either way
-      // nothing was read, and `normaliseExtraction` turns that into a blank
-      // form rather than a partially-populated one.
+      // A response with no text block at all, having not refused and not run
+      // out of room. Nothing was read; `normaliseExtraction` turns that into a
+      // blank form rather than a partially-populated one.
       return normaliseExtraction(null)
     }
 

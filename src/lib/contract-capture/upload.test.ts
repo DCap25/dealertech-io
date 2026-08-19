@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
-  ACCEPTED_MEDIA_TYPES, MAX_UPLOAD_BYTES, UPLOAD_ACCEPT_ATTRIBUTE, checkUpload, isPdf,
+  ACCEPTED_MEDIA_TYPES, MAX_IMAGE_BYTES, MAX_UPLOAD_BYTES, UPLOAD_ACCEPT_ATTRIBUTE,
+  checkUpload, isPdf,
 } from './upload'
 
 /**
@@ -20,14 +21,9 @@ describe('what gets through', () => {
   })
 
   it('accepts a photo, because a customer with one on their phone has a real file', () => {
-    for (const type of ['image/jpeg', 'image/png', 'image/webp', 'image/heic']) {
+    for (const type of ['image/jpeg', 'image/png', 'image/webp']) {
       expect(checkUpload({ type, size: 3_000_000 }).ok).toBe(true)
     }
-  })
-
-  it('accepts HEIC without making the customer know what HEIC is', () => {
-    // It is what an iPhone produces by default.
-    expect(checkUpload({ type: 'image/heic', size: 1_000 }).ok).toBe(true)
   })
 })
 
@@ -60,6 +56,44 @@ describe('what does not', () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('unreachable')
     expect(result.message).toMatch(/^That file is not something we can read/)
+  })
+
+  it('rejects a raw HEIC file, telling the person how to get one we can read', () => {
+    /*
+      HEIC is not one of the formats the model's vision API accepts, so an
+      upload that reached the call would come back a 400 and land on the
+      misleading "could not be read" note. Rejecting it here is cheap and
+      honest — and because `accept` no longer lists it, iOS transcodes to JPEG
+      at the picker and a phone photo never gets this far. What does is a .heic
+      chosen from a desktop Files app, and that person needs a way out.
+    */
+    const result = checkUpload({ type: 'image/heic', size: 1_000 })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.reason).toBe('TYPE')
+    expect(result.message).toMatch(/JPEG/i)
+    expect(result.message).toMatch(/export|share/i)
+  })
+
+  it('rejects a photo over the image cap, which the model would refuse anyway', () => {
+    // The vision API's own per-image limit is 10MB *base64*, well under the
+    // 20MB a scanned PDF is allowed. Everything between the two used to be
+    // accepted here and then fail at the API as an unexplained read failure.
+    const result = checkUpload({ type: 'image/jpeg', size: MAX_IMAGE_BYTES + 1 })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.reason).toBe('SIZE')
+    expect(result.message).toMatch(/7\.0MB/)
+    expect(result.message).toMatch(/lower resolution|PDF/i)
+  })
+
+  it('accepts a photo exactly at the image cap', () => {
+    expect(checkUpload({ type: 'image/jpeg', size: MAX_IMAGE_BYTES }).ok).toBe(true)
+  })
+
+  it('still lets a 20MB PDF through, because the image cap is not the PDF cap', () => {
+    expect(checkUpload({ type: 'application/pdf', size: MAX_UPLOAD_BYTES }).ok).toBe(true)
+    expect(MAX_IMAGE_BYTES).toBeLessThan(MAX_UPLOAD_BYTES)
   })
 
   it('rejects a file over the cap, before anything expensive happens', () => {

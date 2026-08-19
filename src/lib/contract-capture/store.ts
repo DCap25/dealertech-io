@@ -179,6 +179,51 @@ export async function confirmContract(input: {
     answer for that vehicle from then on is wrong in the customer's disfavour.
   */
   return withCurrentUserScope(async (db) => {
+    /*
+      Claim the document before writing anything, and let the WHERE do it.
+
+      A server action is a public endpoint and a form can be submitted twice —
+      a double tap, a retried request, a back button. The insert used to come
+      first and the update carried no condition beyond the id, so the second
+      submission cheerfully inserted a *second* ACTIVE contract for the same
+      vehicle and re-stamped the same document over it. Two live policies from
+      one piece of paper is not a duplicate row; it is the coverage engine
+      arbitrating between two versions of the truth.
+
+      Every check that matters is in this one statement, so the database
+      decides rather than a read-then-write that another request can slip
+      between: the document must exist, still be awaiting review, not have been
+      deleted, and actually belong to the store and vehicle that were posted.
+      Exactly one caller gets a row back. The rest throw before the insert, and
+      the transaction they are in unwinds with nothing written.
+    */
+    const [claimed] = await db
+      .update(schema.documentCaptures)
+      .set({
+        status: 'CONFIRMED',
+        confirmedValues: values,
+        reviewedByUserId: input.reviewedByUserId,
+        reviewedAt: now,
+      })
+      .where(
+        and(
+          eq(schema.documentCaptures.id, input.documentId),
+          eq(schema.documentCaptures.storeId, input.storeId),
+          eq(schema.documentCaptures.vehicleId, input.vehicleId),
+          eq(schema.documentCaptures.status, 'PENDING_REVIEW'),
+          isNull(schema.documentCaptures.deletedAt),
+        ),
+      )
+      .returning({ id: schema.documentCaptures.id })
+
+    if (!claimed) {
+      throw new Error(
+        'That upload is no longer waiting for review — it has already been confirmed or ' +
+          'discarded, or it belongs to a different vehicle. Reload the vehicle to see its ' +
+          'current coverage before adding it again.',
+      )
+    }
+
     const [contract] = await db
       .insert(schema.contracts)
       .values({
@@ -214,16 +259,15 @@ export async function confirmContract(input: {
 
     const contractId = contract!.id
 
+    /*
+      The second half of the claim: point the document at the contract it
+      produced. Safe to key on the id alone now — this transaction owns the row,
+      and no other caller can have claimed it since the update above.
+    */
     await db
       .update(schema.documentCaptures)
-      .set({
-        status: 'CONFIRMED',
-        confirmedValues: values,
-        contractId,
-        reviewedByUserId: input.reviewedByUserId,
-        reviewedAt: now,
-      })
-      .where(eq(schema.documentCaptures.id, input.documentId))
+      .set({ contractId })
+      .where(eq(schema.documentCaptures.id, claimed.id))
 
     /*
       Coverage arriving from an uploaded document, confirmed by a person.

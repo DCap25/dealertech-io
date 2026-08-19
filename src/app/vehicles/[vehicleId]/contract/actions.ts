@@ -201,14 +201,29 @@ export async function saveConfirmed(
     return { status: 'ERROR', documentId, draft: recheck, message: payload.message }
   }
 
-  await confirmContract({
-    documentId,
-    storeId: user.storeId,
-    vehicleId,
-    customerId: await currentOwnerId(user.storeId, vehicleId),
-    reviewedByUserId: user.id,
-    values: payload.values,
-  })
+  /*
+    A refused claim is a message, not a crash.
+
+    `confirmContract` throws when the document is not there to be confirmed —
+    already saved, already discarded, or posted against the wrong vehicle. The
+    commonest way to reach it is a second submission of the same form, and the
+    person doing that is looking at a page, not a stack trace. An uncaught throw
+    here would replace their draft with the error boundary and lose everything
+    they typed; this leaves the form standing and says what happened.
+  */
+  try {
+    await confirmContract({
+      documentId,
+      storeId: user.storeId,
+      vehicleId,
+      customerId: await currentOwnerId(user.storeId, vehicleId),
+      reviewedByUserId: user.id,
+      values: payload.values,
+    })
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Could not save that coverage.'
+    return { status: 'ERROR', documentId, draft: recheck, message: detail }
+  }
 
   revalidatePath(`/vehicles/${vehicleId}`)
   revalidatePath('/drive')

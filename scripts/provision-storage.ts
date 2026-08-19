@@ -10,10 +10,16 @@
  * the project up.
  *
  * Idempotent — safe to re-run, and re-running is now meaningful: an existing
- * bucket has its allowed MIME types widened rather than being left alone. The
- * bucket predates PDF uploads and was created images-only, so a project set up
- * before that change rejects every PDF at the storage layer with an error the
- * advisor cannot act on. Re-run this after deploying the upload flow.
+ * bucket has its allowed MIME types set to whatever this list says rather than
+ * being left alone. The bucket predates PDF uploads and was created
+ * images-only, so a project set up before that change rejects every PDF at the
+ * storage layer with an error the advisor cannot act on. Re-run this after
+ * deploying the upload flow.
+ *
+ * The list also *shrank* once: HEIC came out, because the model's vision API
+ * never accepted it and every HEIC upload became a stored document nothing
+ * could read. A bucket provisioned before that still allows HEIC, which is not
+ * harmful but is a lie about what the product can do — re-run to narrow it.
  */
 import { createClient } from '@supabase/supabase-js'
 
@@ -31,7 +37,6 @@ const ALLOWED_MIME_TYPES = [
   'image/jpeg',
   'image/png',
   'image/webp',
-  'image/heic',
 ]
 
 const FILE_SIZE_LIMIT = 20 * 1024 * 1024
