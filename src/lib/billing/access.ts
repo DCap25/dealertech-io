@@ -176,6 +176,12 @@ export function resolveAccess(input: AccessInput): AccessDecision {
         The drive is untouched. What goes is the administrative surface — and
         ADD_STORE in particular, because a group that is not paying for the
         rooftops it has should not be quietly adding more.
+
+        ADD_STORE is declared and enforced nowhere, on purpose: adding a rooftop
+        is platform-admin-only today, so there is no tenant-side call site to
+        guard. The reasoning is written out at `createStore` in
+        src/lib/invites/provision.ts, which is where the guard will go if that
+        ever changes.
       */
       return {
         level: 'RESTRICTED',
@@ -292,4 +298,40 @@ export function resolveAccess(input: AccessInput): AccessDecision {
 /** Is this action allowed right now? The shape a guard wants. */
 export function permits(decision: AccessDecision, action: GuardedAction): boolean {
   return !decision.blockedActions.includes(action)
+}
+
+/**
+ * The sentence to refuse with. The other shape a guard wants.
+ *
+ * ---------------------------------------------------------------------------
+ * THREE STATUSES SHARE ONE LEVEL, AND THIS IS WHERE THAT BIT
+ * ---------------------------------------------------------------------------
+ * `AccessLevel` is a rung on the ladder, not a lifecycle status. SUSPENDED,
+ * EXPIRED and CHURNED all resolve to `level: 'SUSPENDED'` because they take the
+ * same things away — and the guard that used to live in session.ts switched on
+ * that level and hard-coded one sentence for all three. So a dealership whose
+ * *free trial had run out* clicked "invite" and read "This account is
+ * suspended. Contact DealerTech to restore access.": a sentence about a
+ * relationship gone wrong, said to somebody who had not started one yet, and
+ * flatly contradicting the banner two inches above it on the same page.
+ *
+ * The fix is to stop writing the wording down twice. Every restricting branch
+ * above already composes one true sentence for its status, reviewed as
+ * customer-facing copy; deriving the refusal from it means the banner and the
+ * refusal cannot disagree, and a status added later gets its wording once.
+ *
+ * Only the SUSPENDED family is taken from the banner. At RESTRICTED the banner
+ * is a statement of where the account stands and a refusal is an answer to a
+ * button somebody just pressed, so that one keeps its own sentence and points
+ * at the notice rather than reciting it.
+ *
+ * The `??` is unreachable today — every branch that restricts anything sets a
+ * banner — and is vague on purpose rather than wrong.
+ */
+export function refusalMessage(decision: AccessDecision): string {
+  if (decision.level === 'SUSPENDED') {
+    return decision.banner?.message
+      ?? 'This account cannot save changes at the moment. Contact DealerTech.'
+  }
+  return 'Billing needs attention before this can be changed. Everything else keeps working — see the notice at the top of the page.'
 }

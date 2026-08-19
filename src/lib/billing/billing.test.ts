@@ -3,7 +3,7 @@ import {
   CHURN_AFTER_DAYS, GRACE_DAYS, dueTransition, transition,
   type LifecycleActor, type LifecycleEvent, type LifecycleStatus,
 } from './lifecycle'
-import { permits, resolveAccess, type GuardedAction } from './access'
+import { permits, refusalMessage, resolveAccess, type GuardedAction } from './access'
 
 /**
  * The lifecycle and access engines.
@@ -318,6 +318,10 @@ describe('access: the ladder', () => {
     })
     expect(decision.canWork).toBe(true)
     expect(permits(decision, 'INVITE_STAFF')).toBe(false)
+    // Both halves of the roster: removing somebody and changing their role are
+    // guarded on this, and a dealership that could still promote an account to
+    // ADMIN would have invited an administrator by another route.
+    expect(permits(decision, 'MANAGE_STAFF')).toBe(false)
     expect(permits(decision, 'ADD_STORE')).toBe(false)
     expect(decision.banner?.tone).toBe('CRITICAL')
     expect(decision.banner?.message).toContain('unaffected')
@@ -362,6 +366,74 @@ describe('access: the ladder', () => {
       status: 'TRIAL', statusChangedAt: daysAgo(2), trialEndsAt: daysAhead(28), asOf: NOW,
     })
     expect(decision.banner).toBeNull()
+  })
+})
+
+describe('access: what a refusal actually says', () => {
+  const refusalFor = (status: LifecycleStatus) => refusalMessage(resolveAccess({
+    status, statusChangedAt: daysAgo(2), trialEndsAt: daysAgo(1), asOf: NOW,
+  }))
+
+  it('does not call a trial that ran out a suspension', () => {
+    /*
+      The bug this describe block exists for.
+
+      EXPIRED, SUSPENDED and CHURNED all collapse to `level: 'SUSPENDED'`, and
+      the guard used to switch on the level — so a dealership that had simply
+      reached the end of a free trial was told "This account is suspended.
+      Contact DealerTech to restore access." Nothing had gone wrong, nobody had
+      suspended anything, and the banner on the same page said so.
+    */
+    const expired = refusalFor('EXPIRED')
+    expect(expired).toContain('trial has ended')
+    expect(expired).not.toMatch(/suspend/i)
+  })
+
+  it('does call a suspension a suspension', () => {
+    expect(refusalFor('SUSPENDED')).toMatch(/suspended/i)
+  })
+
+  it('tells a churned dealership their data is still theirs', () => {
+    // Their export still works — see the CHURNED branch — so the refusal must
+    // not read as a door closing on the records they are entitled to.
+    expect(refusalFor('CHURNED')).toContain('export')
+  })
+
+  it('gives the three collapsed statuses three different sentences', () => {
+    const said = new Set([
+      refusalFor('EXPIRED'), refusalFor('SUSPENDED'), refusalFor('CHURNED'),
+    ])
+    expect(said.size).toBe(3)
+  })
+
+  it('says the same thing as the banner, because it is the banner', () => {
+    // The point of deriving rather than restating: a wording change in
+    // access.ts reaches the refusal without anybody remembering to make it
+    // twice.
+    const decision = resolveAccess({
+      status: 'SUSPENDED', statusChangedAt: daysAgo(2), asOf: NOW,
+    })
+    expect(refusalMessage(decision)).toBe(decision.banner?.message)
+  })
+
+  it('points a restricted tenant at the notice rather than reciting it', () => {
+    // Not from the banner. A banner states where the account stands; this
+    // answers a button somebody just pressed, and it is shown alongside the
+    // banner rather than instead of it.
+    const decision = resolveAccess({
+      status: 'RESTRICTED', statusChangedAt: daysAgo(2), asOf: NOW,
+    })
+    expect(refusalMessage(decision)).not.toBe(decision.banner?.message)
+    expect(refusalMessage(decision)).toContain('Everything else keeps working')
+  })
+
+  it('never hands back an empty sentence, whatever the state', () => {
+    for (const status of ALL_STATUSES) {
+      const decision = resolveAccess({
+        status, statusChangedAt: daysAgo(2), trialEndsAt: daysAgo(1), asOf: NOW,
+      })
+      expect(refusalMessage(decision).length, status).toBeGreaterThan(20)
+    }
   })
 })
 

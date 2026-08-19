@@ -5,7 +5,7 @@ import { buildHandOffPayload } from '@/lib/prep-sheet/command-center'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import { getDmsAdapter } from '@/lib/dms/registry'
 import { demoNow } from '@/lib/demo-day'
-import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { checkWork, requireUser, getCurrentStore } from '@/lib/auth/session'
 import {
   describeReceipt, provenanceNote, withProvenance,
   type DecisionSource, type HandOffReceipt,
@@ -77,6 +77,16 @@ export async function pushHandOffForVisit(
     if (!store) {
       return failure(vendor, 'No store configured.')
     }
+
+    /*
+      A hand-off writes to the dealership's DMS and records a receipt here, so
+      it is a save and it stops with the others. Returned through `failure`
+      rather than thrown, because the paste path below still works — an advisor
+      refused here can still copy the hand-off into the RO by hand, which is
+      exactly what this action falls back to for a read-only integration.
+    */
+    const workable = await checkWork()
+    if (!workable.allowed) return failure(vendor, workable.error)
 
     const sheets = await loadDriveDay(store.id, DAY(), DAY())
     const sheet = sheets.find((s) => s.appointment?.id === appointmentId)

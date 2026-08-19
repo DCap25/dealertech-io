@@ -143,6 +143,16 @@ export async function removeStaff(
   const verdict = canRemove(await roster(user.storeId), user.id, targetUserId)
   if (!verdict.ok) return { error: verdict.reason }
 
+  /*
+    The roster verdict first, then billing — the same order `inviteStaff` uses,
+    and for the same reason. A last-manager lockout and an unpaid invoice are
+    different problems with different fixes, and sending somebody who could not
+    have made this change anyway off to chase accounts payable would point them
+    at the wrong one.
+  */
+  const access = await checkAccess('MANAGE_STAFF')
+  if (!access.allowed) return { error: access.error }
+
   await withCurrentUserScope(async (db) => {
     await db.update(schema.userStoreRoles)
       .set({ isActive: false })
@@ -177,6 +187,18 @@ export async function restoreStaff(
 
   const verdict = canRestore(await roster(user.storeId), user.id, targetUserId)
   if (!verdict.ok) return { error: verdict.reason }
+
+  /*
+    Guarded like the other two, and it is not a formality.
+
+    Putting somebody back on the roster reactivates a membership, which is
+    inviting staff with the invitation already served — a dealership blocked
+    from INVITE_STAFF and MANAGE_STAFF but left able to restore could staff
+    itself out of anybody who had ever worked there. This was the hole left when
+    removal and role changes were guarded and this was not.
+  */
+  const access = await checkAccess('MANAGE_STAFF')
+  if (!access.allowed) return { error: access.error }
 
   await withCurrentUserScope(async (db) => {
     await db.update(schema.userStoreRoles)
@@ -214,6 +236,15 @@ export async function changeRole(
     await roster(user.storeId), user.id, targetUserId, nextRole as StaffRole,
   )
   if (!verdict.ok) return { error: verdict.reason }
+
+  /*
+    Guarded the same way `removeStaff` is, and after the verdict for the same
+    reason. A role change is the other half of managing staff: blocking removal
+    and leaving this open would let a restricted dealership promote an existing
+    account to ADMIN, which is inviting an administrator by another route.
+  */
+  const access = await checkAccess('MANAGE_STAFF')
+  if (!access.allowed) return { error: access.error }
 
   const previousRole = (await roster(user.storeId))
     .find((m) => m.userId === targetUserId)?.role ?? null

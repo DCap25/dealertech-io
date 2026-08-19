@@ -6,7 +6,8 @@ import { and, asc, eq, gt, isNull, or } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import {
-  permits, resolveAccess, type AccessDecision, type GuardedAction,
+  permits, refusalMessage, resolveAccess,
+  type AccessDecision, type GuardedAction,
 } from '@/lib/billing/access'
 import {
   ACTIVE_STORE_COOKIE, resolveActiveStore,
@@ -122,6 +123,49 @@ function isRealRejection(status: number | undefined): boolean {
   return typeof status === 'number' && status >= 400 && status < 500
 }
 
+/**
+ * Where the dealership behind one rooftop stands, commercially.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS TAKES A STORE ID RATHER THAN READING THE SESSION
+ * ---------------------------------------------------------------------------
+ * Almost everything wanting this has a signed-in user and should reach for
+ * `user.access`, which `getSession` has already resolved. The exception is the
+ * customer's own surface: `/m/[token]` is a menu link on somebody's phone, and
+ * the person holding it has no account and never will. The token resolves to a
+ * store, and the store is the only thing there is to ask about.
+ *
+ * Runs on the privileged connection, like the rest of this file — it
+ * establishes the context a request is scoped by, so it cannot itself be
+ * scoped. Cached per request, so the two customer actions that call it during
+ * one tap pay for one query.
+ *
+ * Never throws for a store that does not resolve: `resolveAccess` treats a
+ * missing status as full access with a note, which is the deliberate fail-open
+ * described in src/lib/billing/access.ts. A customer must not lose their menu
+ * to a gap in our bookkeeping.
+ */
+export const accessForStore = cache(async (storeId: string): Promise<AccessDecision> => {
+  const db = getDb()
+  const [org] = await db
+    .select({
+      status: schema.organizations.lifecycleStatus,
+      statusChangedAt: schema.organizations.lifecycleChangedAt,
+      trialEndsAt: schema.organizations.trialEndsAt,
+    })
+    .from(schema.organizations)
+    .innerJoin(schema.stores, eq(schema.stores.organizationId, schema.organizations.id))
+    .where(eq(schema.stores.id, storeId))
+    .limit(1)
+
+  return resolveAccess({
+    status: org?.status,
+    statusChangedAt: org?.statusChangedAt,
+    trialEndsAt: org?.trialEndsAt ?? null,
+    asOf: new Date(),
+  })
+})
+
 export const getSession = cache(async (): Promise<Session | null> => {
   const supabase = await getSupabaseServerClient()
 
@@ -230,35 +274,16 @@ export const getSession = cache(async (): Promise<Session | null> => {
   /*
     Where this dealership stands commercially.
 
-    Read on the privileged connection like everything else in this file — it
-    establishes the context the rest of the request is scoped by, so it cannot
-    itself be scoped. One extra query per request, on the same connection that
-    already resolved the memberships.
+    One extra query per request, and it goes through `accessForStore` rather
+    than being written out again here — the signed-in workspace and a
+    customer's menu link must not be able to reach different answers about the
+    same dealership.
 
-    A failure here must not sign anybody out or blank a page: the access engine
+    A failure there must not sign anybody out or blank a page: the access engine
     treats a missing status as full access with a note, which is the deliberate
     fail-open described in src/lib/billing/access.ts.
   */
-  let access: AccessDecision | null = null
-  if (active) {
-    const [org] = await db
-      .select({
-        status: schema.organizations.lifecycleStatus,
-        statusChangedAt: schema.organizations.lifecycleChangedAt,
-        trialEndsAt: schema.organizations.trialEndsAt,
-      })
-      .from(schema.organizations)
-      .innerJoin(schema.stores, eq(schema.stores.organizationId, schema.organizations.id))
-      .where(eq(schema.stores.id, active.storeId))
-      .limit(1)
-
-    access = resolveAccess({
-      status: org?.status,
-      statusChangedAt: org?.statusChangedAt,
-      trialEndsAt: org?.trialEndsAt ?? null,
-      asOf: new Date(),
-    })
-  }
+  const access: AccessDecision | null = active ? await accessForStore(active.storeId) : null
 
   return {
     id: data.user.id,
@@ -388,9 +413,11 @@ export async function accountShape(userId: string): Promise<{
  * here is a server action that already returns `{ error }` to a form, so the
  * refusal renders where they are, in words that say what to do about it.
  *
- * Nothing on the drive calls this. The guarded actions are administrative by
- * construction — see `GuardedAction` — because a billing problem must never
- * break the drive.
+ * The drive does not call this one; it calls `checkWork` below. The actions
+ * guarded here are administrative by construction — see `GuardedAction` —
+ * because a billing problem must never break the drive. What does stop the
+ * drive is suspension, which is a different question with a different answer,
+ * asked by a different function.
  */
 export async function checkAccess(
   action: GuardedAction,
@@ -398,13 +425,43 @@ export async function checkAccess(
   const user = await requireUser()
   if (permits(user.access, action)) return { allowed: true }
 
-  return {
-    allowed: false,
-    error:
-      user.access.level === 'SUSPENDED'
-        ? 'This account is suspended. Contact DealerTech to restore access.'
-        : 'Billing needs attention before this can be changed. Everything else keeps working — see the notice at the top of the page.',
-  }
+  return { allowed: false, error: refusalMessage(user.access) }
+}
+
+/**
+ * May this dealership save anything at all right now?
+ *
+ * ---------------------------------------------------------------------------
+ * THE COARSE QUESTION, AS AGAINST `checkAccess`'S FINE ONE
+ * ---------------------------------------------------------------------------
+ * `checkAccess` asks whether one named administrative action is on the blocked
+ * list. This asks the blunter thing `canWork` answers: is the account in a
+ * state where a write may happen at all. The two are deliberately separate and
+ * they protect opposite interests. `blockedActions` never touches the drive at
+ * any rung a scheduled job can reach — that is the rule access.ts exists to
+ * enforce. `canWork` is false only at SUSPENDED, EXPIRED and CHURNED, none of
+ * which a job can cause: a person at DealerTech puts an account there.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY IT IS WORTH ENFORCING RATHER THAN DECLARING
+ * ---------------------------------------------------------------------------
+ * `canWork` sat in the access decision for a long time with nothing reading it
+ * but a label on the platform console. Meanwhile the banner told an entire
+ * dealership "Records are readable; new work cannot be saved", and the terms of
+ * service said it in writing, and both were false — every write went through.
+ * A promise a customer can read is not documentation; it is behaviour we owe
+ * them, and this is the function that pays it.
+ *
+ * Reads are untouched, everywhere. A suspended dealership keeps every record
+ * they have ever had, on screen, exactly as before.
+ */
+export async function checkWork(): Promise<
+  { allowed: true } | { allowed: false; error: string }
+> {
+  const user = await requireUser()
+  if (user.access.canWork) return { allowed: true }
+
+  return { allowed: false, error: refusalMessage(user.access) }
 }
 
 /**

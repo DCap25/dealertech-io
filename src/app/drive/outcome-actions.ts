@@ -3,7 +3,7 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
-import { getCurrentUser, getCurrentStore } from '@/lib/auth/session'
+import { checkWork, getCurrentUser, getCurrentStore } from '@/lib/auth/session'
 import type { OpportunityOutcome } from '@/lib/performance'
 
 /**
@@ -60,6 +60,15 @@ export async function recordVisitOutcomes(
 
     const store = await getCurrentStore()
     if (!store) return { ok: false, error: 'No store configured.' }
+
+    /*
+      Inside the try, in the shape this action already answers in. Everything
+      here returns `{ ok: false, error }` rather than throwing, because the
+      advisor is finishing a visit and a crashed page at that moment costs more
+      than the record does.
+    */
+    const workable = await checkWork()
+    if (!workable.allowed) return { ok: false, error: workable.error }
 
     /*
       The appointment lookup and the upsert share a scope. The client sends

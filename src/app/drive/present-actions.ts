@@ -1,6 +1,6 @@
 'use server'
 
-import { requireUser, getCurrentStore } from '@/lib/auth/session'
+import { checkWork, requireUser, getCurrentStore } from '@/lib/auth/session'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { buildDeviceSnapshot, type DeviceSnapshot } from '@/lib/pairing/snapshot'
 import { endSession, listDevices, pushToDevice, sessionForAdvisor } from '@/lib/pairing/store'
@@ -58,6 +58,15 @@ export async function sendMenuToDevice(
 
   const store = await getCurrentStore()
   if (!store) return { status: 'ERROR', message: 'No store configured.' }
+
+  /*
+    Putting a menu on a tablet creates a presentation row, so it is a write and
+    it stops with the rest of them. It is also the last moment to stop it
+    cleanly: once the snapshot is in a customer's hands the refusal has to be
+    explained to *them*, and this keeps that conversation from starting.
+  */
+  const workable = await checkWork()
+  if (!workable.allowed) return { status: 'ERROR', message: workable.error }
 
   const sheets = await loadDriveDay(store.id, DAY(), DAY())
   const sheet = sheets.find((s) => s.appointment?.id === appointmentId)
@@ -117,6 +126,11 @@ export async function sendMenuLink(
 
   const store = await getCurrentStore()
   if (!store) return { status: 'ERROR', message: 'No store configured.' }
+
+  // A link is a presentation row and a live bearer token. Same rule as the
+  // tablet push above, and the same reason for stopping it before it is sent.
+  const workable = await checkWork()
+  if (!workable.allowed) return { status: 'ERROR', message: workable.error }
 
   const sheets = await loadDriveDay(store.id, DAY(), DAY())
   const sheet = sheets.find((s) => s.appointment?.id === appointmentId)
@@ -229,6 +243,16 @@ export async function readLinkAnswers(
  * `endSession` reads them off its own `UPDATE` rather than this doing a second
  * read — see the note there.
  */
+/*
+  Deliberately NOT gated on `checkWork`, unlike the two sends above.
+
+  This is teardown. It saves no new work — it ends a conversation and takes a
+  menu off a screen — and the screen in question is in a customer's hands. A
+  suspended dealership that could not retrieve its own tablet would leave
+  somebody sitting in a waiting room holding a live menu with prices on it,
+  which is a worse thing to have done to a customer than any billing dispute
+  justifies. Stopping work does not mean stranding it.
+*/
 export async function takeBackMenu(sessionId: string): Promise<{
   decisions: Record<string, string>
 }> {

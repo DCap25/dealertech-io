@@ -5,7 +5,7 @@ import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { nextRoNumberScoped } from '@/lib/advisor/load'
-import { requireUser } from '@/lib/auth/session'
+import { checkWork, requireUser } from '@/lib/auth/session'
 import { soldComponentGroups } from '@/lib/reconcile/sold-work'
 import { shouldClaimOwnership } from '@/lib/scheduling'
 import { checkOdometer, overrideSummary, validateOverride } from '@/lib/odometer/check'
@@ -81,6 +81,14 @@ export async function openRepairOrder(
 
   if (!appointmentId) return { error: 'Missing appointment.' }
   if (mileage <= 0) return { error: 'Enter the odometer reading — coverage decisions depend on it.' }
+
+  /*
+    A suspended account writes nothing, and a repair order is the plainest
+    reading of the "new work" the banner promises cannot be saved. Checked
+    before the scope opens so no transaction is started to be rolled back.
+  */
+  const workable = await checkWork()
+  if (!workable.allowed) return { error: workable.error }
 
   /**
    * ---------------------------------------------------------------------------
@@ -339,6 +347,10 @@ export async function addRecommendation(
   const opCodeId = String(formData.get('opCodeId') ?? '')
   if (!repairOrderId || !opCodeId) return { error: 'Pick an operation.' }
 
+  // A recommendation is work being added to a car. Same rung as opening the RO.
+  const workable = await checkWork()
+  if (!workable.allowed) return { error: workable.error }
+
   /*
     One insert, but the number on it is read first.
 
@@ -418,6 +430,16 @@ export async function recordLineDecision(
   const payType = String(formData.get('payType') ?? 'CUSTOMER_PAY')
 
   if (!lineId || !decision) return { error: 'Missing line or decision.' }
+
+  /*
+    Blocked with the rest of it, and the decline is the reason to be careful
+    about the wording rather than about the rule: this write is what creates the
+    `declined_services` record the follow-up loop chases. A refusal that reads
+    as "nothing happened" would be a lie by omission, so the sentence comes from
+    the access engine and says the account cannot save.
+  */
+  const workable = await checkWork()
+  if (!workable.allowed) return { error: workable.error }
 
   const now = new Date()
 
@@ -524,6 +546,18 @@ export async function closeRepairOrder(
   const closedBy = await requireUser()
   const repairOrderId = String(formData.get('repairOrderId') ?? '')
   if (!repairOrderId) return { error: 'Missing repair order.' }
+
+  /*
+    Guarded, with the operational consequence stated so nobody meets it as a
+    surprise: suspending a dealership in the middle of a working day leaves the
+    cars already on the lifts unclosable, because closing an RO is a write and
+    the money event at that. That is the intended meaning of suspension rather
+    than a side effect of it — but suspension is reached from RESTRICTED by a
+    named person with a reason recorded, so it is a decision somebody makes
+    knowing this, and the right time to make it is not eleven in the morning.
+  */
+  const workable = await checkWork()
+  if (!workable.allowed) return { error: workable.error }
 
   const now = new Date()
   let customerId = ''

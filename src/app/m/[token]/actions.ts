@@ -1,7 +1,10 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { authoriseLinkSession, recordLinkDecisions } from '@/lib/presentation/link-store'
+import { accessForStore } from '@/lib/auth/session'
+import {
+  authoriseLinkSession, linkSessionFromToken, recordLinkDecisions,
+} from '@/lib/presentation/link-store'
 import {
   isUsableAuthorisationName, linkStatusMessage, refusalFromStatus,
   type LinkRefusal, type LinkStatus,
@@ -43,8 +46,62 @@ export async function saveAnswer(
   id: string,
   decision: Decision,
 ): Promise<LinkStatus | null> {
-  const session = await recordLinkDecisions(token, { [id]: decision }, new Date())
+  const now = new Date()
+
+  const refused = await suspendedDealership(token, now)
+  if (refused) return refused
+
+  const session = await recordLinkDecisions(token, { [id]: decision }, now)
   return session?.status ?? null
+}
+
+/**
+ * The dealership behind this link cannot save anything right now.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY NOT `checkWork`, WHICH IS WHAT EVERY OTHER WRITE USES
+ * ---------------------------------------------------------------------------
+ * Because `checkWork` starts with `requireUser()`, and there is no user here.
+ * Calling it would redirect a customer's phone to /login, which is the single
+ * worst thing this file could do. The token resolves to a store, and the store
+ * is the only subject there is — `accessForStore` answers for it off the same
+ * engine, so the two paths cannot reach different verdicts about one
+ * dealership.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THE CUSTOMER IS TOLD, AND WHY IT IS NOT THE TRUE REASON
+ * ---------------------------------------------------------------------------
+ * `ENDED` — "Your advisor has closed this list. Give them a call if you would
+ * still like something done."
+ *
+ * The sentence `checkWork` hands staff is "This account is suspended. Contact
+ * DealerTech to restore access." On this screen that would tell somebody their
+ * dealership is in trouble with a supplier they have never heard of, while they
+ * are deciding whether to spend six hundred pounds with that dealership. This
+ * product's entire argument is that the transparent dealership wins the
+ * customer; their vendor's accounts receivable is not the thing to be
+ * transparent about, and it is not ours to disclose on their behalf.
+ *
+ * So the refusal borrows a status the surface already renders properly. ENDED
+ * takes the menu read-only, leaves every answer they have already given on the
+ * screen — which is the only real proof that nothing they chose was lost — and
+ * sends them to their advisor, who is both the right person and one who can
+ * actually do something. UNKNOWN was the alternative and is worse: it promises
+ * "they will send a new one", and a new link would refuse them identically.
+ *
+ * It is not the whole truth. It is true in the sense the customer needs — this
+ * list is not taking answers — and every other wording is either a leak or a
+ * promise we cannot keep.
+ *
+ * Returns null for a link that is missing or already closed on its own terms,
+ * so the store functions below can give their more specific answer.
+ */
+async function suspendedDealership(token: string, now: Date): Promise<'ENDED' | null> {
+  const session = await linkSessionFromToken(token, now)
+  if (!session || session.status !== 'OPEN') return null
+
+  const access = await accessForStore(session.storeId)
+  return access.canWork ? null : 'ENDED'
 }
 
 export interface AuthoriseState {
@@ -65,7 +122,20 @@ export async function authorise(
     return { error: 'Please type your name to confirm.' }
   }
 
-  const session = await authoriseLinkSession(token, name, new Date())
+  const now = new Date()
+
+  /*
+    Refused in exactly the shape a closed link is refused in — see
+    `suspendedDealership`. This is the more important of the two to get right:
+    an authorisation is the customer putting their name to something, and
+    letting that submit appear to succeed while nothing was written would be a
+    false record of consent, which is the one thing this surface must never
+    produce.
+  */
+  const blocked = await suspendedDealership(token, now)
+  if (blocked) return { error: linkStatusMessage(blocked), refused: blocked }
+
+  const session = await authoriseLinkSession(token, name, now)
   if (session?.status !== 'AUTHORIZED') {
     /*
       Expired, closed, or gone between the page rendering and this submit.

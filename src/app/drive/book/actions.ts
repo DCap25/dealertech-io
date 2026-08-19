@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope, type ScopedDb } from '@/db/scoped'
-import { requireUser } from '@/lib/auth/session'
+import { checkWork, requireUser } from '@/lib/auth/session'
 import { isSalesRole } from '@/lib/auth/sales'
 import { canManageStaff } from '@/lib/team/roster'
 import {
@@ -113,6 +113,14 @@ export async function bookAppointment(
   if (isSalesRole(user.role) && !introduction) {
     return { error: 'A first service at delivery is the booking this account can make.' }
   }
+
+  /*
+    After the role fence, before anything is written — the same ordering the
+    roster actions use. An appointment is the other plain reading of "new work":
+    a suspended dealership must not be filling next week's book.
+  */
+  const workable = await checkWork()
+  if (!workable.allowed) return { error: workable.error }
 
   /*
     On an introduction the advisor picker IS the request — D5 says the

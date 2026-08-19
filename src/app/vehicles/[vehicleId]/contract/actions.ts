@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
-import { requireUser } from '@/lib/auth/session'
+import { checkWork, requireUser } from '@/lib/auth/session'
 import { fenceSales } from '@/lib/auth/sales'
 import { FixedWindowLimiter } from '@/lib/rate-limit/window'
 import {
@@ -120,6 +120,17 @@ export async function uploadAndExtract(
   const check = checkUpload(file instanceof File ? file : null)
   if (!check.ok) return { status: 'ERROR', message: check.message }
 
+  /*
+    Before the vehicle lookup and well before the file is encoded.
+
+    An upload stages a document row and then spends money at a paid extraction
+    API, so refusing early is worth more here than anywhere else on the list:
+    the alternative is billing ourselves for a Claude call on behalf of an
+    account that is not paying us.
+  */
+  const workable = await checkWork()
+  if (!workable.allowed) return { status: 'ERROR', message: workable.error }
+
   const vehicle = await loadVehicle(user.storeId, vehicleId)
   if (!vehicle) return { status: 'ERROR', message: 'That vehicle is not at this store.' }
 
@@ -179,6 +190,17 @@ export async function saveConfirmed(
     return { status: 'ERROR', message: 'That upload is no longer available.' }
   }
 
+  /*
+    Confirming is what puts coverage on a vehicle, and coverage is what the
+    prep sheet quotes from — so this is the write on this screen that changes
+    what a customer is told they owe. ERROR keeps the draft on the page with
+    everything the advisor typed still in it.
+  */
+  const workable = await checkWork()
+  if (!workable.allowed) {
+    return { status: 'ERROR', documentId, message: workable.error }
+  }
+
   const submitted = readSubmittedContract((name) => {
     const raw = formData.get(name)
     if (raw === null) return null
@@ -234,6 +256,16 @@ export async function saveConfirmed(
   }
 }
 
+/*
+  Deliberately NOT gated on `checkWork`, unlike the two above.
+
+  Discarding is teardown, and nothing new can reach this state anyway — both
+  `uploadAndExtract` and `saveConfirmed` are blocked, so a suspended account
+  stages nothing. What is left is a draft that was staged *before* suspension,
+  sitting on somebody's screen, and refusing to let them clear it would pin an
+  unverified extraction to a vehicle with no way to take it down. That is the
+  opposite of what blocking new work is for.
+*/
 export async function discardUpload(
   _previous: UploadState,
   formData: FormData,

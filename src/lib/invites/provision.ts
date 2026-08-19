@@ -62,6 +62,23 @@ export interface NewStore {
  * Country BMW" is normal in a franchise network, and a check-then-insert loop
  * for the next free name is a race waiting to happen.
  */
+/*
+  Why there is no `checkAccess('ADD_STORE')` anywhere.
+
+  `GuardedAction` names ADD_STORE, and access.ts explains what it is for: a
+  group that is not paying for the rooftops it has should not quietly add more.
+  There is simply no dealership-facing way to add one today, so the guard would
+  have nothing to sit in front of. Both callers of this function are outside a
+  tenant's reach — /signup stands up an organisation that has no lifecycle
+  status to be judged against yet, and /admin provisioning runs behind
+  `requirePlatformAdmin()` — and the billing side, `setRooftopQuantity`, is
+  platform-admin-only as well.
+
+  A guard added here would therefore refuse nobody and quietly imply a flow
+  that does not exist. The day a manager can add a rooftop from their own side
+  of the product, `checkAccess('ADD_STORE')` goes at the top of that action, in
+  the shape src/app/team/actions.ts already uses.
+*/
 export async function createStore(
   input: NewStore,
   suffix: string,

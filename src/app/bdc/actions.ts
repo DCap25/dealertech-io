@@ -5,7 +5,7 @@ import { addDays } from 'date-fns'
 import { eq } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
-import { requireUser } from '@/lib/auth/session'
+import { checkWork, requireUser } from '@/lib/auth/session'
 
 export type Outcome =
   | 'APPOINTMENT_SET'
@@ -41,6 +41,16 @@ export async function logOutcome(
   const notes = String(formData.get('notes') ?? '').trim()
 
   if (!taskId || !outcome) return { error: 'Missing task or outcome.' }
+
+  /*
+    Blocked while suspended, and DO_NOT_CONTACT is the reason to say out loud
+    that this is a refusal rather than a silent drop. That outcome is a
+    suppression the customer asked for, and the rep has to know it did not land
+    so they can honour it another way — a request recorded nowhere is the worst
+    outcome available here.
+  */
+  const workable = await checkWork()
+  if (!workable.allowed) return { error: workable.error }
 
   const now = new Date()
   const retryable = outcome === 'NO_ANSWER' || outcome === 'LEFT_VOICEMAIL'
@@ -165,6 +175,10 @@ export async function snoozeTask(_previous: OutcomeState, formData: FormData): P
   const taskId = String(formData.get('taskId') ?? '')
   const days = Number(formData.get('days') ?? 7)
   if (!taskId) return { error: 'Missing task.' }
+
+  // Moving a due date is a write like any other.
+  const workable = await checkWork()
+  if (!workable.allowed) return { error: workable.error }
 
   /*
     A single write, and scoped anyway — the id is the only thing this action is

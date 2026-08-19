@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
-import { requireUser } from '@/lib/auth/session'
+import { checkWork, requireUser } from '@/lib/auth/session'
 import { canManageStaff } from '@/lib/team/roster'
 import { isAcknowledgeable } from '@/lib/onboarding/steps'
 
@@ -39,6 +39,11 @@ export async function acknowledgeStep(
   if (!isAcknowledgeable(stepKey)) {
     return { error: 'That step is worked out from your data and cannot be ticked off.' }
   }
+
+  // A tick box is a small write, but it is still a write, and onboarding
+  // progress is the last thing a suspended account needs to be recording.
+  const workable = await checkWork()
+  if (!workable.allowed) return { error: workable.error }
 
   try {
     await withCurrentUserScope(async (db) => {
