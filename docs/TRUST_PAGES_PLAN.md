@@ -227,17 +227,53 @@ not need one, and adding one would make us look *worse*:
 - **The no-cookie test** from §4.
 - **security.txt** under `/.well-known/`, pointing at the Q2 address.
 
-## 6. Open questions for Dan
+## 6. Decisions (Dan, 2026-08-19) and what remains
 
-- **Q1 — Legal entity.** Exact registered name and address for the © line,
-  terms, and privacy policy. (An LLC? These documents need the real name.)
-- **Q2 — Contact addresses.** privacy@, security@, press@ dealertech.io — do
-  they exist / route to you? One shared inbox is fine; the pages need
-  addresses that answer.
-- **Q3 — Governing law / venue** for the terms. Usually your home state.
-- **Q4 — Status page:** hosted provider (recommended) or self-built?
-- **Q5 — Lawyer review** of privacy + terms before the first paying contract
-  references them: yes (recommended) or ship-and-iterate?
-- **Q6 — Compliance ambition:** is SOC 2 something to name a timeline for on
-  the compliance page, or stay silent beyond "when customer count warrants
-  it"? Naming a date creates an obligation; silence is safer and still honest.
+- **Q1 — Legal entity: The DAS Board LLC.** Dan's existing LLC, which owns
+  the variable-ops product The DAS Board (thedasboard.com,
+  E:\WebProjects\dasboard — © line found in its DashboardLayout). DealerTech
+  operates as a product of that LLC; whether a DBA filing is needed for
+  "DealerTech.io" on contracts is a **lawyer question**, flagged. Registered
+  address: still needed from Dan or the lawyer before publishing.
+- **Q2 — Contact: info@dealertech.io**, being created. All pages use it
+  (privacy, security disclosure, press) until role addresses exist. Matches
+  the sibling site's info@thedasboard.com pattern.
+- **Q3 — Governing law: unresolved.** The build writes around it ("the state
+  in which The DAS Board LLC is organized") and keeps entity, address, email
+  and governing state in **one constants file** so the lawyer pass is a
+  one-file edit.
+- **Q4 — Status: build the minimal static page now** (links to Netlify,
+  Supabase, Stripe and Anthropic status pages, honest sentence about being
+  early); hosted provider remains the recommended upgrade when there are
+  customers to notify.
+- **Q5 — Lawyer review: yes, before the first customer.** Decided. Pages
+  carry a visible "last updated" date; the drafts are the honest starting
+  text, not legal advice.
+- **Q6 — SOC 2: silence** beyond "when customer count warrants it" (default
+  taken; no timeline named).
+
+## 7. The DAS Board tie-in
+
+Dan has two products under one LLC: The DAS Board (variable ops — sales,
+F&I, payroll, deals) and DealerTech (fixed ops — the service drive). The
+question is whether to build a parent site like Tekion's, an umbrella like
+dlr360.com (one brand, product family, one light footer), or something
+smaller.
+
+- *(a) Parent marketing site* — a third property presenting both products.
+  Real cost: a domain, a brand, content, and upkeep for a company of one.
+  Tekion's shape, without Tekion's staff.
+- *(b) Family treatment on both existing sites* — footer line "DealerTech.io
+  is a product of The DAS Board LLC", a small cross-link ("Also from The DAS
+  Board LLC: variable-ops management at thedasboard.com"), mirrored on the
+  sibling site. One legal entity, two storefronts — which is also dlr360's
+  actual footer weight (terms, privacy, one info@ address).
+- *(c) Fold both under one domain* — a rebrand, out of scope.
+
+**Recommendation: (b) now, (a) only when both products have customers and a
+name worth umbrella-ing.** The legal build is unblocked either way — every
+document hangs off The DAS Board LLC regardless — so (b)'s footer line ships
+with this build and the parent-site question can wait without cost. One
+follow-on worth noting: The DAS Board's own legal pages
+(src/pages/legal in that repo) should eventually agree with these on entity
+name, subprocessors and tone — a later pass, in that repo.
