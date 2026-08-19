@@ -7,6 +7,7 @@ import { recordAudit } from '@/lib/audit/record'
 import { getSupabaseAdminClient } from '@/lib/supabase/admin'
 import { emptyExtraction, reviewExtraction } from './review'
 import { getExtractionProvider } from './provider'
+import { checkUpload } from './upload'
 import type { AcceptedMediaType } from './upload'
 import type { ConfirmedContractValues } from './confirm'
 import type {
@@ -54,6 +55,24 @@ export async function uploadContractDocument(input: {
   const storageKey = `${input.storeId}/${input.vehicleId}/${randomUUID()}`
   const bytes = Buffer.from(input.fileBase64, 'base64')
 
+  /*
+    Re-check the file against its own bytes, not the caller's word for them.
+
+    `uploadAndExtract` runs `checkUpload` against the File's metadata before it
+    encodes anything, which is the right place for it — a rejection there costs
+    nothing. But this function is exported, and its only guard on the media
+    type is the compiler, which is not present at runtime and says nothing at
+    all about size. A second caller that skipped the check would put an
+    oversized document into storage and then spend a paid call on it.
+
+    The decoded length is exact rather than an estimate, and it is already in
+    hand for the upload, so the check is a comparison rather than any real
+    work. Throwing rather than returning a rejection: this is the impossible
+    branch for the one caller that exists today, not a message for an advisor.
+  */
+  const recheck = checkUpload({ type: input.mediaType, size: bytes.byteLength })
+  if (!recheck.ok) throw new Error(`That document cannot be uploaded. ${recheck.message}`)
+
   const upload = await supabase.storage
     .from(BUCKET)
     .upload(storageKey, bytes, { contentType: input.mediaType, upsert: false })
@@ -92,6 +111,21 @@ export async function uploadContractDocument(input: {
     Nothing here invents a value to fill the gap — see ./provider.ts.
   */
   if (!provider) {
+    /*
+      Still a write, even though nothing was read.
+
+      This branch returns before the update below, so it used to leave the row
+      saying nothing at all — no provider, no model, no outcome — which reads
+      exactly like a row whose extraction is still in flight. The distinction
+      the outcome column exists to preserve is lost at precisely the moment it
+      is cheapest to record. One column, its own scope, the same
+      no-transaction-across-a-network-call rule as everything else here.
+    */
+    await withCurrentUserScope((db) => db
+      .update(schema.documentCaptures)
+      .set({ extractionOutcome: 'NO_PROVIDER' })
+      .where(eq(schema.documentCaptures.id, documentId)))
+
     return {
       documentId,
       draft: reviewExtraction(emptyExtraction(), input.context),
@@ -100,7 +134,7 @@ export async function uploadContractDocument(input: {
     }
   }
 
-  let extraction: ExtractedContract
+  let extraction: ExtractedContract | null
   let outcome: ExtractionOutcome = 'EXTRACTED'
   try {
     extraction = await provider.extract({
@@ -109,9 +143,17 @@ export async function uploadContractDocument(input: {
       context: input.context,
     })
   } catch {
-    // A failed read is not a failed upload. The advisor gets an empty form
-    // with the document already attached and types the fields themselves.
-    extraction = emptyExtraction()
+    /*
+      A failed read is not a failed upload — the advisor gets an empty form
+      with the document already attached and types the fields themselves.
+
+      Null, not `emptyExtraction()`. The blank object was a lie: it stored a
+      call that threw as though a model had read the document and found
+      fifteen empty fields, which is a real and different answer. The empty
+      form below is built fresh for the screen; the row records that nothing
+      came back.
+    */
+    extraction = null
     outcome = 'FAILED'
   }
 
@@ -119,6 +161,7 @@ export async function uploadContractDocument(input: {
     .update(schema.documentCaptures)
     .set({
       rawExtraction: extraction,
+      extractionOutcome: outcome,
       extractionProvider: provider.name,
       extractionModel: provider.model,
     })
@@ -126,7 +169,7 @@ export async function uploadContractDocument(input: {
 
   return {
     documentId,
-    draft: reviewExtraction(extraction, input.context),
+    draft: reviewExtraction(extraction ?? emptyExtraction(), input.context),
     outcome,
     provider: provider.name,
   }
@@ -303,12 +346,28 @@ export async function confirmContract(input: {
   })
 }
 
+/**
+ * Throw the upload away.
+ *
+ * Returns false when there was nothing to discard, rather than throwing —
+ * see `discardUpload` for why the caller wants a fact instead of an error.
+ */
 export async function rejectContractDocument(input: {
   documentId: string
   reviewedByUserId: string
   reason: string
-}): Promise<void> {
-  await withCurrentUserScope((db) => db
+}): Promise<boolean> {
+  /*
+    Claim the document, exactly as `confirmContract` does, and for the same
+    reason in reverse: a discard posted after a confirm used to key on the id
+    alone and would happily stamp REJECTED over a CONFIRMED row — while the
+    contract it produced stayed ACTIVE. The document then says the advisor
+    threw it away and the coverage engine says it is live, and the vehicle's
+    prep sheet believes the engine. A CONFIRMED document must never become
+    REJECTED; the WHERE is what guarantees that rather than an ordering
+    assumption about which request lands first.
+  */
+  const [rejected] = await withCurrentUserScope((db) => db
     .update(schema.documentCaptures)
     .set({
       status: 'REJECTED',
@@ -316,7 +375,16 @@ export async function rejectContractDocument(input: {
       reviewNotes: input.reason,
       reviewedAt: new Date(),
     })
-    .where(eq(schema.documentCaptures.id, input.documentId)))
+    .where(
+      and(
+        eq(schema.documentCaptures.id, input.documentId),
+        eq(schema.documentCaptures.status, 'PENDING_REVIEW'),
+        isNull(schema.documentCaptures.deletedAt),
+      ),
+    )
+    .returning({ id: schema.documentCaptures.id }))
+
+  return Boolean(rejected)
 }
 
 /** Uploads still waiting on a human, newest first. */

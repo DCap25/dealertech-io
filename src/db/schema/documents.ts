@@ -2,6 +2,14 @@ import { pgEnum, pgTable, uuid, text, timestamp, jsonb, index } from 'drizzle-or
 import { stores, users } from './tenancy'
 import { customers, vehicles } from './customers'
 import { contracts } from './coverage'
+/*
+  Type-only, and the only import in this directory that points at src/lib.
+  The vocabulary and its rationale already live with the three outcomes in
+  contract-capture/types.ts; re-declaring them here would give the column a
+  second list to drift from. `import type` is erased at compile, so nothing
+  about the dependency survives into the bundle.
+*/
+import type { ExtractionOutcome } from '@/lib/contract-capture/types'
 
 /**
  * Photographed customer documents, and what a model read off them.
@@ -70,6 +78,23 @@ export const documentCaptures = pgTable(
     /** Which model read it, so a bad batch can be found later. */
     extractionProvider: text('extraction_provider'),
     extractionModel: text('extraction_model'),
+
+    /**
+     * Whether anything actually read it — EXTRACTED, NO_PROVIDER or FAILED.
+     *
+     * The two columns above say who was *asked*; this one says what came back,
+     * and without it they cannot be told apart. A failed call used to be
+     * stored as a blank `rawExtraction`, which is indistinguishable from a
+     * model that read the document and honestly found nothing — one is a
+     * broken pipeline and the other is a fact about the paperwork.
+     *
+     * Text with a closed TypeScript union (`ExtractionOutcome` in
+     * src/lib/contract-capture/types.ts) rather than a pg enum, following the
+     * audit log — see 0032 for why that trade is the right way round here.
+     * Null on every row written before migration 0032; the outcome of those
+     * uploads is not recoverable and is not guessed at.
+     */
+    extractionOutcome: text('extraction_outcome').$type<ExtractionOutcome>(),
 
     /** Set once confirmed. This is the link from a document to live coverage. */
     contractId: uuid('contract_id').references(() => contracts.id, { onDelete: 'set null' }),

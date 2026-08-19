@@ -244,10 +244,34 @@ export async function discardUpload(
   const documentId = String(formData.get('documentId') ?? '')
   if (!documentId) return { status: 'IDLE' }
 
-  await rejectContractDocument({
+  const discarded = await rejectContractDocument({
     documentId,
     reviewedByUserId: user.id,
     reason: String(formData.get('reason') ?? 'Discarded by advisor'),
   })
+
+  /*
+    Nothing claimed means nothing to discard — the document was already
+    confirmed, already discarded, or deleted. IDLE rather than ERROR, and the
+    difference is deliberate: `saveConfirmed` returns ERROR to keep a form
+    standing that still holds fields somebody typed, whereas here the outcome
+    the advisor asked for — this draft off my screen — has happened either way,
+    and there is nothing left worth preserving. Throwing would replace the page
+    with the error boundary over a second tap of the same button.
+
+    It still says something, because the two cases it cannot distinguish do not
+    mean the same thing to the person. If the document was confirmed, coverage
+    is now live on this vehicle and they have not removed it — reading
+    "Discarded" and walking away would be the wrong impression to leave.
+  */
+  if (!discarded) {
+    return {
+      status: 'IDLE',
+      message:
+        'That upload was no longer waiting for review — it has already been confirmed or ' +
+        'discarded. Reload the vehicle to see its current coverage.',
+    }
+  }
+
   return { status: 'IDLE', message: 'Discarded. The document is kept on the vehicle record.' }
 }

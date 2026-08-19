@@ -30,9 +30,11 @@ const MODEL = 'claude-opus-5'
  * and reading a creased twelve-page contract is exactly the work it thinks
  * hardest about. At 4096 a dense scan could reason its way to the right fifteen
  * fields and then be cut off mid-JSON — which arrives here as a parse failure
- * and reaches the advisor as "nothing was read". 16000 is the documented
- * ceiling for a non-streaming request; the cost is only paid when the tokens
- * are actually used.
+ * and reaches the advisor as "nothing was read". The cost is only paid when
+ * the tokens are actually used.
+ *
+ * 16000 sits at the top of the range a non-streaming request is safe at, which
+ * is why the call below streams. See the note there.
  */
 const MAX_TOKENS = 16000
 
@@ -93,7 +95,25 @@ export const anthropicExtractionProvider: ExtractionProvider = {
   model: MODEL,
 
   async extract({ fileBase64, mediaType, context }) {
-    const message = await getClient().messages.create({
+    /*
+      Streamed, and nothing here consumes a delta.
+
+      That is the whole point. A dense multi-page scan at high thinking effort
+      is a request that can sit silent for a long time, and a non-streaming
+      call at this token ceiling is close enough to the HTTP timeout that a
+      slow read would come back as a transport error — which store.ts records
+      as FAILED and the advisor reads as "we could not read the document",
+      when the model was simply still working. Streaming keeps bytes moving on
+      the connection so the request is bounded by the model rather than by a
+      socket. `finalMessage()` waits for the assembled message, so everything
+      below — the stop_reason checks, the text block, the parse — is unchanged
+      and reads the same object it always did.
+
+      No `.on()` handlers, deliberately: there is no UI on the other end of
+      this to feed, and the SDK already resolves completion, error and abort
+      into this one promise.
+    */
+    const message = await getClient().messages.stream({
       model: MODEL,
       max_tokens: MAX_TOKENS,
       // Reading a scanned or creased contract and mapping fifteen fields to a
@@ -116,7 +136,7 @@ export const anthropicExtractionProvider: ExtractionProvider = {
           content: [documentBlock(fileBase64, mediaType), { type: 'text', text: instruction(context) }],
         },
       ],
-    })
+    }).finalMessage()
 
     /*
       A refusal or a truncation is a failed read, and it has to be said so.

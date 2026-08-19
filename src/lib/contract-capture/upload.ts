@@ -46,6 +46,15 @@ export type AcceptedMediaType = (typeof ACCEPTED_MEDIA_TYPES)[number]
  * before the API call, so an oversized upload costs nothing but a message.
  *
  * This is the *PDF* ceiling. Images have their own, lower one — see below.
+ *
+ * It is also half of what bounds the spend. A `MAX_PDF_PAGES = 30` used to sit
+ * in this file on the reasoning that "pages beyond this are an appendix nobody
+ * needs read, and cost real money" — and nothing ever counted a page, so it
+ * bounded nothing. Counting them honestly needs a real PDF parser: raw-byte
+ * regexes miscount object-stream PDFs and would reject valid documents, which
+ * is a worse failure than reading a long one. The two bounds that do exist are
+ * this ceiling and the twelve-extractions-an-hour limiter in the contract
+ * action, and between them the money is accounted for.
  */
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
@@ -63,9 +72,6 @@ export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
  * the 32MB request limit rather than the per-image one.
  */
 export const MAX_IMAGE_BYTES = 7 * 1024 * 1024
-
-/** Pages beyond this are an appendix nobody needs read, and cost real money. */
-export const MAX_PDF_PAGES = 30
 
 export type UploadRejection =
   | { ok: false; reason: 'MISSING'; message: string }

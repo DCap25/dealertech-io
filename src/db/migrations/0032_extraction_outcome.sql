@@ -1,0 +1,93 @@
+-- Record whether anything actually read the document.
+--
+-- ===========================================================================
+-- WHY
+-- ===========================================================================
+-- `uploadContractDocument` has always computed one of three outcomes —
+-- EXTRACTED, NO_PROVIDER, FAILED — and handed it to the form so the advisor is
+-- told the truth about why they are looking at an empty set of fields. It then
+-- threw the answer away. The row kept `extraction_provider` and
+-- `extraction_model`, which say *who was asked*, and nothing that says *what
+-- came back*.
+--
+-- Worse than a gap: on FAILED the code wrote `emptyExtraction()` into
+-- `raw_extraction`, so a call that threw was stored byte-for-byte identically
+-- to a model that read the document and honestly found nothing. Those are
+-- different facts about a customer's contract and the table could not tell
+-- them apart. Every row written before today is affected, which is exactly why
+-- there is no backfill below — see the next section.
+--
+-- The column matters beyond tidiness. `raw_extraction` is the only evidence of
+-- what the machine claimed, and PROJECT_OVERVIEW §2 turns on being able to say
+-- afterwards whether a coverage answer came from a misread document or a
+-- mis-confirmed one. "Nobody read it" and "the read failed" have to be
+-- distinguishable from "it was read and was blank", or that question has no
+-- answer.
+--
+-- ===========================================================================
+-- WHY TEXT AND NOT AN ENUM
+-- ===========================================================================
+-- The audit log's precedent (0020, src/lib/audit/events.ts): a text column
+-- whose vocabulary is fixed by a TypeScript union, not a pg enum. Its comment
+-- puts the trade honestly — text "would happily accept" three spellings of the
+-- same thing, so the compiler is what keeps the set closed and adding a value
+-- is a deliberate edit to one list. The upside here is the same one 0031 and
+-- 0030 both had to write essays about: `ALTER TYPE … ADD VALUE` cannot be used
+-- in the transaction that adds it, so every enum change costs a two-step
+-- deploy. `ExtractionOutcome` in src/lib/contract-capture/types.ts is the
+-- vocabulary; this column stores it.
+--
+-- ===========================================================================
+-- WHY NULLABLE, NO DEFAULT, NO BACKFILL
+-- ===========================================================================
+-- Nullable because every existing row genuinely has an unknown outcome, and
+-- nothing in the row recovers it. A row with `extraction_provider = 'anthropic'`
+-- and a blank `raw_extraction` is either a failed call or a successful read of
+-- a document nothing could be found on — that is the whole defect above, and
+-- guessing either way would launder the ambiguity into a stated fact. NULL says
+-- "written before this column existed", which is true and is the most that is
+-- available. Same reasoning as 0030's call-me rows and 0026's unmatched
+-- declines: where the old data cannot answer, it is left saying nothing.
+--
+-- No DEFAULT for the same reason — a default would stamp a claim on the next
+-- INSERT, and the insert happens *before* the model is called, when the outcome
+-- is genuinely not known yet. The upload path fills it in on the update
+-- afterwards.
+--
+-- ===========================================================================
+-- SEQUENCING — THIS ONE DOES BREAK A READ
+-- ===========================================================================
+-- APPLY THIS BEFORE THE CODE DEPLOYS. `npm run db:apply`. Two distinct
+-- failures if that order is reversed, and they are not equally survivable:
+--
+--   * THE WRITES fail loudly and narrowly. Both are in
+--     src/lib/contract-capture/store.ts, both on the upload path, both UPDATEs
+--     that set `extraction_outcome`. Against a database without this column
+--     they error with `column "extraction_outcome" of relation
+--     "document_captures" does not exist`. The document is already in object
+--     storage and already inserted PENDING_REVIEW by then — the two-scopes,
+--     no-transaction design (see the comment in that file) means the row
+--     survives the failed update — so the advisor sees an error rather than
+--     losing their file. Bad, loud, recoverable.
+--
+--   * THE READ fails, and this is the part worth stating plainly rather than
+--     claiming the column is write-only. `pendingDocuments` in the same file
+--     is a bare `.select()`, and Drizzle expands that into an explicit column
+--     list built from the schema file — so the moment `extractionOutcome` is
+--     added to src/db/schema/documents.ts, that SELECT names a column the
+--     database does not have and the query fails outright. It has no callers
+--     today, which is luck rather than safety: the next surface that lists the
+--     review queue picks up the hazard for free. `documentsForVehicle` is fine
+--     — it projects an explicit column list that does not include this one.
+--
+-- No GRANT is needed. Table-level privileges on `document_captures` cover
+-- columns added later, so `authenticated` can read and write this one on the
+-- strength of the grants it already has.
+--
+-- Idempotent — `IF NOT EXISTS`, safe to run twice.
+
+ALTER TABLE document_captures
+  ADD COLUMN IF NOT EXISTS extraction_outcome text;
+
+COMMENT ON COLUMN document_captures.extraction_outcome IS
+  'What became of the extraction attempt: EXTRACTED (a model read it), NO_PROVIDER (no key configured, nobody read it), FAILED (a model was called and the call failed). Null means the row predates the column. Vocabulary is closed by ExtractionOutcome in src/lib/contract-capture/types.ts. On FAILED, raw_extraction is null rather than a blank object — a failed call is not a successful read of nothing.';
