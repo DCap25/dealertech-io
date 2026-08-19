@@ -82,6 +82,46 @@ budget. Copying its *shape* is right; copying its *claims* would be fatal.
 | Modern Slavery statement | UK statutory requirement for large turnover. Not applicable; skip without comment. |
 | status.tekion.com | See the status decision in §3. |
 
+## 2a. What visiting the live page added (Chrome, 2026-08-19)
+
+The first survey was a server-side fetch; a browser visit afterwards caught
+three things the fetch flattened, and each one changes the plan slightly.
+
+**Their trust portal is a four-tab hub — and Responsible AI is its own tab.**
+Privacy / Security / Compliance / Responsible AI sit as sibling pages under a
+parent Trust Portal page. That Responsible AI stands as a peer of Security is
+the tell about where dealer procurement questions are heading. Amendment to
+P6: give Responsible AI **its own page** (`/responsible-ai`) rather than a
+section inside compliance. It is our single best trust story — the
+human-confirmation invariant, machine-read suspicion in the coverage engine,
+the audit log on every confirmation, no model training on customer data — and
+it is all mechanism, not adjectives. Tekion needed ISO 42001 to say it; we
+can point at the code.
+
+**Their real footer inventory** (worth mirroring in shape, not content):
+four link columns (Company · Resources · trust/legal · Contact), then a
+bottom row: © line · Update Privacy Preferences · Terms of Use · Cookie
+Policy. The trust/legal column is: Trust Portal, Legal, Privacy Policy,
+Security, Compliance, Do Not Sell My Information, Status, Modern Slavery
+statement. Amendments to P1: add a **contact block** (the demo email /
+founder contact — dealers expect an address in the footer, Q2 covers which);
+and where Tekion has "Update Privacy Preferences" (their consent-manager
+reopen link), our bottom row carries the no-tracking sentence from §4 — same
+slot, honest version. "Do Not Sell My Information" is a CCPA sale/share
+opt-out; we do not sell or share data, so the privacy policy says that
+plainly instead of a dedicated opt-out page.
+
+**Their FAQ is the dealer-IT questionnaire.** The live page carries the full
+list: encryption in transit and at rest (they answer TLS 1.2+, AES-256,
+tokenization for payments), disaster recovery and continuity, vendor
+monitoring, incident response, employee screening, SDLC and pen-testing, who
+audits them. Amendment to P6: our compliance FAQ should answer this exact
+question list honestly — Supabase gives us the encryption answers, Stripe the
+payment one, and where the honest answer is "we are two people and a test
+suite" (employee screening, formal DR drills), say what is actually true
+rather than skipping the question. A skipped question on a trust page reads
+as a no.
+
 ## 3. The pages, one by one
 
 All public → each route must be added to the public prefix list in
