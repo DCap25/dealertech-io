@@ -2,8 +2,9 @@
 
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
-import { buildDeviceSnapshot } from '@/lib/pairing/snapshot'
+import { buildDeviceSnapshot, type DeviceSnapshot } from '@/lib/pairing/snapshot'
 import { endSession, listDevices, pushToDevice, sessionForAdvisor } from '@/lib/pairing/store'
+import { menuTotals } from '@/lib/pairing/tablet-state'
 import { createLinkPresentation, linkAnswersForVisit } from '@/lib/presentation/link-store'
 import type { Decision } from '@/lib/presentation/decisions'
 import type { MenuSelection } from '@/lib/menu/selection'
@@ -33,10 +34,25 @@ export async function listPairedDevices() {
   return listDevices(user.storeId)
 }
 
+/**
+ * How the menu is going onto the tablet.
+ *
+ * `ATTENDED` is the advisor turning the screen around and talking through it —
+ * the original, and still the default. `SELF_SERVE` is handing it over: the
+ * customer works down the list alone and sends it when they are done, which is
+ * the same conversation with the advisor's half of it happening afterwards.
+ *
+ * Nothing else differs. Same sheet, same selection, same snapshot, same
+ * whitelist — which is the point, because a second way of building the menu is
+ * a second way for it to be wrong.
+ */
+export type PresentMode = 'ATTENDED' | 'SELF_SERVE'
+
 export async function sendMenuToDevice(
   appointmentId: string,
   deviceId: string,
   includedIds: string[],
+  mode: PresentMode = 'ATTENDED',
 ): Promise<PushState> {
   const user = await requireUser()
 
@@ -66,6 +82,7 @@ export async function sendMenuToDevice(
       appointmentId,
       advisorId: user.id,
       snapshot: buildDeviceSnapshot(sheet, selection),
+      selfServe: mode === 'SELF_SERVE',
     })
     return { status: 'SENT', sessionId, deviceName: device.name ?? 'Tablet' }
   } catch (error) {
@@ -126,6 +143,15 @@ export async function sendMenuLink(
   }
 }
 
+export interface SessionMirror {
+  decisions: Record<string, string>
+  active: boolean
+  /** Set when the customer finished it themselves and put a name to it. */
+  authorized: { at: string; name: string } | null
+  /** Counted off the session's own frozen snapshot — see `menuTotals`. */
+  totals: { itemCount: number; answered: number; callMe: number }
+}
+
 /**
  * What the customer has tapped so far. Polled by the advisor's screen.
  *
@@ -134,16 +160,39 @@ export async function sendMenuLink(
  * session that has gone quiet, so a menu left on a bench takes the panel down
  * here as surely as pressing "take it back" does. The answers already given
  * still come back with it — the caller drops its mirror, not the decisions.
+ *
+ * The counts come from here rather than from the advisor's own copy of the
+ * decisions map, because they are counted against the *snapshot that is in the
+ * customer's hands* — the same derivation the tablet's own footer uses. That is
+ * what lets the two screens agree on "4 of 6 answered" while a handed-over
+ * customer works down the list, which is the whole content of the mid-session
+ * state for a menu nobody is standing over.
+ *
+ * `authorized` is the finished fact. A handed-over tablet ends its conversation
+ * with the customer's own sign-off rather than with the advisor taking it back,
+ * and the mirror has to be able to say so — otherwise "waiting for them to
+ * start…" is the last thing the advisor's screen ever says about a menu that
+ * has been done for ten minutes.
  */
-export async function readSessionDecisions(
-  sessionId: string,
-): Promise<{ decisions: Record<string, string>; active: boolean } | null> {
+export async function readSessionDecisions(sessionId: string): Promise<SessionMirror | null> {
   const user = await requireUser()
   const session = await sessionForAdvisor(user.storeId, sessionId)
   if (!session) return null
+
+  const decisions = (session.decisions ?? {}) as Record<string, string>
+  const snapshot = session.snapshot as DeviceSnapshot
+  const { answered, callMe } = menuTotals(snapshot, decisions)
+
   return {
-    decisions: (session.decisions ?? {}) as Record<string, string>,
+    decisions,
     active: session.status === 'ACTIVE',
+    authorized: session.authorizedAt
+      ? {
+          at: session.authorizedAt.toISOString(),
+          name: session.authorizedName ?? '',
+        }
+      : null,
+    totals: { itemCount: snapshot.itemCount, answered, callMe },
   }
 }
 

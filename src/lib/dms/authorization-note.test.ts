@@ -33,6 +33,20 @@ describe('authorizationNote', () => {
     expect(authorizationNote(auth({ channel: 'WHATEVER' }))!).toMatch(/device we provided/)
   })
 
+  it('tells a handed-over tablet apart from one the advisor presented', () => {
+    /*
+      Q6. "The advisor went through the menu with them" and "they read it and
+      answered it alone in the waiting room" are different accounts of the same
+      hour, and the difference is exactly what somebody is trying to establish
+      two months later. The old default — "on a device we provided" — was true
+      of this case and silent about the part that matters.
+    */
+    const note = authorizationNote(auth({ channel: 'TABLET_SELF_SERVE' }))!
+    expect(note).toMatch(/at the dealership/)
+    expect(note).toMatch(/on their own/)
+    expect(note).not.toMatch(/device we provided/)
+  })
+
   it('states its own limits inside the permanent record', () => {
     // Without this, somebody eventually treats it as the dealership's written
     // estimate. It is not, and the record has to say so where it will be read

@@ -5,7 +5,10 @@ import {
 } from './codes'
 import { isSessionIdle, SESSION_IDLE_MINUTES, sessionIdleDeadline } from './session'
 import { buildDeviceSnapshot, FORBIDDEN_KEYS, sanitizeDecisions } from './snapshot'
-import { menuTotals, nextTabletState, withoutTap, type TabletState } from './tablet-state'
+import {
+  menuTotals, nextTabletState, withAuthorisation, withoutTap,
+  type PendingTaps, type PolledSession, type TabletState,
+} from './tablet-state'
 import { defaultSelection } from '@/lib/menu/selection'
 import type { Opportunity, PrepSheet } from '@/lib/prep-sheet'
 
@@ -400,17 +403,24 @@ describe('what a poll does to the tablet', () => {
   const s = sheet([opp(), opp({ id: 'o2', title: 'Cabin filter', urgency: 'LOW' })])
   const snapshot = buildDeviceSnapshot(s, defaultSelection(s.opportunities))
 
-  const presenting = (sessionId: string): TabletState => ({
+  const presenting = (sessionId: string, over: Partial<TabletState> = {}): TabletState => ({
     phase: 'PRESENTING',
     sessionId,
     deviceName: 'Lane 3',
     snapshot,
     decisions: {},
-  })
+    selfServe: false,
+    authorized: null,
+    ...over,
+  } as TabletState)
 
-  const polled = (id: string, decisions: Record<string, string> = {}) => ({
+  const polled = (
+    id: string,
+    decisions: Record<string, string> = {},
+    over: Partial<PolledSession> = {},
+  ) => ({
     deviceName: 'Lane 3',
-    session: { id, snapshot, decisions },
+    session: { id, snapshot, decisions, selfServe: false, authorized: null, ...over },
   })
 
   it('keeps the taps in flight while the same session polls again', () => {
@@ -526,6 +536,125 @@ describe('what the tablet footer counts', () => {
 
   it('keeps a call-me out of the yeses', () => {
     const totals = menuTotals(snapshot, { o1: 'CALL_ME', o2: 'DECLINED' })
-    expect(totals).toEqual({ accepted: 0, callMe: 1, acceptedTotal: 0 })
+    expect(totals).toEqual({
+      accepted: 0, declined: 1, callMe: 1, answered: 2, acceptedTotal: 0,
+    })
+  })
+
+  /*
+    Q6. A handed-over tablet says "4 of 6 answered" over its confirm bar and the
+    advisor's mirror reads back the same figure, so the two screens describing
+    one moment cannot disagree about how far through it the customer is.
+  */
+  it('counts all three answers as answered, and never a cleared one', () => {
+    expect(menuTotals(snapshot, { o1: 'ACCEPTED', o2: 'DECLINED' }).answered).toBe(2)
+    expect(menuTotals(snapshot, { o1: 'CALL_ME' }).answered).toBe(1)
+    // Tapping the same button twice takes the answer back. An absence is not
+    // an answer, on either screen.
+    expect(menuTotals(snapshot, { o1: 'PENDING', o2: 'PENDING' }).answered).toBe(0)
+    expect(menuTotals(snapshot, {}).answered).toBe(0)
+  })
+
+  it('will not let a ghost id inflate how far through they are', () => {
+    const totals = menuTotals(snapshot, { o1: 'ACCEPTED', 'from-the-last-menu': 'DECLINED' })
+    expect(totals.answered).toBe(1)
+    expect(totals.declined).toBe(0)
+  })
+})
+
+// ===========================================================================
+
+describe('a tablet handed to the customer', () => {
+  /*
+    Q6. The same tablet, the same snapshot, the same shared menu — plus the
+    link's finish. What is new in the pure layer is a session that can be
+    *over*: the customer typed their name and sent it, the server stops taking
+    taps, and the glass becomes a record of what they chose.
+
+    Every case here is checked against an attended session as well, because the
+    one thing this must not do is change the conversation an advisor is already
+    holding.
+  */
+  const s = sheet([opp(), opp({ id: 'o2', title: 'Cabin filter', urgency: 'LOW' })])
+  const snapshot = buildDeviceSnapshot(s, defaultSelection(s.opportunities))
+
+  const screen = (over: Partial<TabletState> = {}, pending: PendingTaps = {}) => ({
+    state: {
+      phase: 'PRESENTING',
+      sessionId: 's1',
+      deviceName: 'Lane 3',
+      snapshot,
+      decisions: {},
+      selfServe: true,
+      authorized: null,
+      ...over,
+    } as TabletState,
+    pending,
+  })
+
+  const poll = (over: Partial<PolledSession> = {}) => ({
+    deviceName: 'Lane 3',
+    session: {
+      id: 's1', snapshot, decisions: {}, selfServe: true, authorized: null, ...over,
+    } as PolledSession,
+  })
+
+  const betty = { at: '2026-08-18T14:04:00.000Z', name: 'Betty Lewis' }
+
+  it('carries the mode and the sign-off onto the screen', () => {
+    const next = nextTabletState(screen().state, {}, poll({ authorized: betty }))
+    expect(next.state).toMatchObject({ selfServe: true, authorized: betty })
+  })
+
+  it('drops the taps still in flight once they have sent it', () => {
+    /*
+      The server refuses a tap against an authorised session, so a paint left
+      over from one is an answer on the glass that the frozen authorisation does
+      not contain — under a banner saying it has been sent.
+    */
+    const next = nextTabletState(screen().state, { o1: 'ACCEPTED' }, poll({ authorized: betty }))
+    expect(next.pending).toEqual({})
+  })
+
+  it('leaves an attended session exactly as it was', () => {
+    // An advisor presenting a menu never authorises from the glass, so nothing
+    // above can reach this path — pinned so it stays that way.
+    const attended = screen({ selfServe: false }).state
+    const next = nextTabletState(attended, { o1: 'ACCEPTED' }, poll({ selfServe: false }))
+    expect(next.pending).toEqual({ o1: 'ACCEPTED' })
+    expect(next.state).toMatchObject({ selfServe: false, authorized: null })
+  })
+
+  it('paints the confirmation without waiting for the next poll', () => {
+    // They pressed the button. Up to 1.5 seconds of a menu that still looks
+    // answerable is the product losing the one action that matters most.
+    const next = withAuthorisation(screen({}, { o1: 'ACCEPTED' }), betty)
+    expect(next.state).toMatchObject({ authorized: betty })
+    expect(next.pending).toEqual({})
+  })
+
+  it('will not let a second confirmation rewrite the first', () => {
+    // A double tap, or a retried request. The record stops moving, and whose
+    // name is on it is the part that must not move at all.
+    const already = screen({ authorized: betty })
+    const next = withAuthorisation(already, { at: '2026-08-18T15:00:00.000Z', name: 'Someone Else' })
+    expect(next).toBe(already)
+    expect(next.state).toMatchObject({ authorized: betty })
+  })
+
+  it('has nothing to authorise on an idle tablet', () => {
+    const idle = { state: { phase: 'IDLE', deviceName: 'Lane 3' } as TabletState, pending: {} }
+    expect(withAuthorisation(idle, betty)).toBe(idle)
+  })
+
+  it('goes idle when the advisor takes a finished menu back', () => {
+    // F7/F8/F14 are unchanged by any of this: the session ending is the session
+    // ending, whoever was holding the tablet.
+    const next = nextTabletState(
+      screen({ authorized: betty }).state,
+      {},
+      { deviceName: 'Lane 3', session: null },
+    )
+    expect(next.state).toEqual({ phase: 'IDLE', deviceName: 'Lane 3' })
   })
 })

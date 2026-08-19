@@ -230,6 +230,26 @@ describe('menu events', () => {
     expect(event?.at.toISOString()).toBe('2026-08-10T16:00:00.000Z')
   })
 
+  it('says when they worked through it on their own', () => {
+    // Q6. The history line has to distinguish the advisor going through the
+    // menu with somebody from handing them the tablet and leaving them to it —
+    // the timeline is where an advisor reconstructs what kind of conversation
+    // this visit actually had.
+    const [event] = menuEvents(input({
+      appointments: [appointment()],
+      presentations: [presentation({
+        channel: 'TABLET_SELF_SERVE',
+        authorizedAt: new Date('2026-08-10T16:00:00Z'),
+        authorizedName: 'Betty Lewis',
+        decisions: { BRAKES: 'ACCEPTED', ALIGN: 'CALL_ME' },
+      })],
+    }))
+
+    expect(event?.title).toBe(
+      'Menu of 2 presented on the tablet, on their own · 1 yes, 1 call-me · authorised by Betty Lewis',
+    )
+  })
+
   it('says so plainly when nobody has answered yet', () => {
     const [event] = menuEvents(input({ appointments: [appointment()], presentations: [presentation()] }))
     expect(event?.title).toContain('no answer yet')
@@ -346,6 +366,26 @@ describe('open threads', () => {
       declines: [decline({ resolvedAt: new Date('2026-06-01T10:00:00Z') })],
     }))
     expect(threads).toEqual([])
+  })
+
+  it('chases a call-me left on a tablet the customer was handed', () => {
+    /*
+      Q6, and the one place a new channel value could have gone wrong quietly.
+      This reader filtered on a hand-written set of channel literals, which
+      would have compiled perfectly and dropped the highest-intent answer on the
+      sheet — from the flow most likely to produce one, because a customer alone
+      and unpressured asks to be called far more often than one being watched.
+    */
+    const threads = openThreads(input({
+      appointments: [appointment()],
+      presentations: [presentation({
+        channel: 'TABLET_SELF_SERVE',
+        decisions: { ALIGN: 'CALL_ME' },
+      })],
+    }))
+
+    expect(threads.map((t) => t.kind)).toEqual(['CALL_ME'])
+    expect(threads[0]?.title).toBe('Four-wheel alignment')
   })
 
   it('leaves a pending answer alone — nobody asked, so there is nothing to chase', () => {

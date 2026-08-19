@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import {
-  activeSessionForDevice, deviceFromToken, enrollDevice, recordDeviceDecisions,
+  activeSessionForDevice, authoriseDeviceSession, deviceFromToken, enrollDevice,
+  recordDeviceDecisions,
 } from '@/lib/pairing/store'
+import { isSelfServeChannel } from '@/lib/presentation/channel'
+import { isUsableAuthorisationName } from '@/lib/presentation/link'
 import { callerKey, FixedWindowLimiter } from '@/lib/rate-limit/window'
 
 export const runtime = 'nodejs'
@@ -10,10 +13,12 @@ export const dynamic = 'force-dynamic'
 /**
  * The entire surface a customer tablet can reach.
  *
- * One route, three actions, and not one of them takes an identifier from the
+ * One route, four actions, and not one of them takes an identifier from the
  * device. `enroll` creates an unclaimed device. `poll` returns whatever is
  * currently pushed to the device the token belongs to. `decide` records taps
- * against that same session.
+ * against that same session. `authorise` freezes those taps as the customer's
+ * own sign-off — on that same session, resolved from the token, with a typed
+ * name as the only thing the device gets to say about it.
  *
  * There is deliberately no endpoint here that accepts a customer id, an
  * appointment id or a search term. A device that cannot ask a question cannot
@@ -64,7 +69,7 @@ const NO_STORE = { 'Cache-Control': 'no-store, private' }
 const enrollLimiter = new FixedWindowLimiter({ limit: 10, windowMs: 60 * 60_000 })
 
 export async function POST(req: Request) {
-  let body: { action?: unknown; decisions?: unknown }
+  let body: { action?: unknown; decisions?: unknown; name?: unknown }
   try {
     body = (await req.json()) as typeof body
   } catch {
@@ -116,6 +121,25 @@ export async function POST(req: Request) {
               id: session.id,
               snapshot: session.snapshot,
               decisions: session.decisions,
+              /*
+                Whether this tablet was handed over, derived from the session's
+                channel rather than carried on the snapshot.
+
+                The snapshot is the customer-facing whitelist — built field by
+                field from what a customer needs to read — and how the advisor
+                chose to send it is not one of those things. Deriving it here
+                also means the tablet cannot be talked into offering a finish by
+                anything it was sent: the answer comes from the row.
+              */
+              selfServe: isSelfServeChannel(session.channel),
+              // Present once they have sent it, so a tablet that reloads or
+              // re-polls shows the confirmation rather than an open menu.
+              authorized: session.authorizedAt
+                ? {
+                    at: session.authorizedAt.toISOString(),
+                    name: session.authorizedName ?? '',
+                  }
+                : null,
             }
           : null,
       },
@@ -129,13 +153,80 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Not paired.' }, { status: 403, headers: NO_STORE })
     }
     const result = await recordDeviceDecisions(device.id, body.decisions)
-    if (!result) {
+    if (result.status === 'NO_SESSION') {
       return NextResponse.json(
         { error: 'Nothing is being presented on this tablet.' },
         { status: 409, headers: NO_STORE },
       )
     }
+    if (result.status === 'ALREADY_AUTHORISED') {
+      // They have already sent it. The tablet un-paints the tap and re-polls
+      // into the read-only record, which is the true state of the menu.
+      return NextResponse.json(
+        { error: 'These answers have already been sent to your advisor.' },
+        { status: 409, headers: NO_STORE },
+      )
+    }
     return NextResponse.json({ decisions: result.decisions }, { headers: NO_STORE })
+  }
+
+  // ---------------------------------------------------------- authorise
+  /*
+    The customer's sign-off on a menu they were handed.
+
+    Same bearer discipline as everything else here, and the same shape of
+    authority: the session is the one currently pushed to *this* device, found
+    from the token. The only thing the device contributes is the name typed on
+    the glass, which is the whole point of the step.
+
+    The name rule is the link's, deliberately unchanged — two characters,
+    trimmed. A shared tablet in a waiting room makes the typed name matter
+    more, not less, but "more" means it is worth asking for, not that it is
+    worth validating against a record. Rejecting "Bec" because the file says
+    "Rebecca" would block a real customer and stop nobody.
+  */
+  if (action === 'authorise') {
+    if (device.status !== 'PAIRED') {
+      return NextResponse.json({ error: 'Not paired.' }, { status: 403, headers: NO_STORE })
+    }
+
+    const name = typeof body.name === 'string' ? body.name : ''
+    if (!isUsableAuthorisationName(name)) {
+      return NextResponse.json(
+        { error: 'Please type your name to confirm.' },
+        { status: 400, headers: NO_STORE },
+      )
+    }
+
+    const result = await authoriseDeviceSession(device.id, name, new Date())
+
+    if (result.status === 'NO_SESSION') {
+      return NextResponse.json(
+        { error: 'Nothing is being presented on this tablet.' },
+        { status: 409, headers: NO_STORE },
+      )
+    }
+    if (result.status === 'NOT_SELF_SERVE') {
+      // An attended menu has no confirm bar, so nothing that renders this
+      // screen can reach here. Refused rather than quietly accepted.
+      return NextResponse.json(
+        { error: 'This menu is being presented by your advisor.' },
+        { status: 409, headers: NO_STORE },
+      )
+    }
+
+    // `ALREADY` answers with the authorisation that exists rather than an
+    // error: a double tap must show them what they confirmed, and must not
+    // rewrite whose name is on it.
+    return NextResponse.json(
+      {
+        authorized: {
+          at: result.authorized.at.toISOString(),
+          name: result.authorized.name,
+        },
+      },
+      { headers: NO_STORE },
+    )
   }
 
   return NextResponse.json({ error: 'Unknown action.' }, { status: 400, headers: NO_STORE })

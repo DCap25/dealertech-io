@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import {
   listPairedDevices, readSessionDecisions, sendMenuLink, sendMenuToDevice, takeBackMenu,
+  type PresentMode,
 } from '@/app/drive/present-actions'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import { isDecision } from '@/lib/presentation/decisions'
@@ -26,6 +27,12 @@ import { isDecision } from '@/lib/presentation/decisions'
  * answer in ten minutes or at lunchtime, and a spinner on the advisor's screen
  * for two hours is a lie about what is happening.
  *
+ * The tablet goes two ways. Presented, the advisor is standing next to it and
+ * the mirror is a convenience. Handed over, the mirror is the only thing they
+ * have: nobody is watching the customer work down the list, so the panel counts
+ * progress against the menu itself and — the state this was missing — says when
+ * they are finished and whose name is on it.
+ *
  * Not polled is not the same as not read, which is what it used to mean. A
  * link's answers land on the prep sheet when it loads and again whenever the
  * advisor comes back to the tab (`prep-sheet-view.tsx`), and the hand-off
@@ -37,6 +44,18 @@ const POLL_MS = 1500
 interface Device {
   id: string
   name: string | null
+}
+
+/**
+ * "Betty Lewis" → "Betty", for the one line an advisor reads at a glance.
+ *
+ * The full name still appears in the same panel and in the permanent record;
+ * this is only the heading, where the point is to recognise the person walking
+ * back towards the podium. Falls back to whatever was typed, because the rule
+ * for a confirmation name is deliberately forgiving and "Bec" is a real answer.
+ */
+function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] || name
 }
 
 export function SendToTablet({
@@ -59,6 +78,19 @@ export function SendToTablet({
   const [seen, setSeen] = useState(0)
   const [link, setLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  /*
+    Which conversation the advisor is about to have.
+
+    Held here rather than asked per device, because it is a decision about the
+    moment and not about the hardware — the same tablet is presented at the
+    podium at eight and handed to somebody in the waiting room at nine.
+  */
+  const [mode, setMode] = useState<PresentMode>('ATTENDED')
+  const [onTablet, setOnTablet] = useState<PresentMode>('ATTENDED')
+  /** What the customer answered on a handed-over tablet, once they send it. */
+  const [finished, setFinished] = useState<{ name: string } | null>(null)
+  const [itemsOnMenu, setItemsOnMenu] = useState(0)
+  const [callMe, setCallMe] = useState(0)
 
   useEffect(() => {
     void listPairedDevices().then((d) => setDevices(d.map((x) => ({ id: x.id, name: x.name }))))
@@ -97,10 +129,23 @@ export function SendToTablet({
       for (const [oppId, value] of Object.entries(result.decisions)) {
         if (isDecision(value)) onCustomerDecision(oppId, value)
       }
-      // Counted with the same guard the mirror uses, so "answered" can only
-      // ever mean a value the advisor's screen actually took.
-      setSeen(Object.values(result.decisions)
-        .filter((d) => isDecision(d) && d !== 'PENDING').length)
+      /*
+        Counted on the server against the session's own snapshot.
+
+        It used to be counted here off the keys of the decisions map, which is
+        the same number in the ordinary case and a different one whenever the
+        map holds an id that is not on the menu in front of the customer. The
+        tablet's footer already counts it the snapshot's way (`menuTotals`);
+        having the advisor's screen read the same figure is what makes "4 of 6
+        answered" one fact rather than two screens' opinions — which matters
+        far more once nobody is standing over the tablet to compare them.
+      */
+      setSeen(result.totals.answered)
+      setItemsOnMenu(result.totals.itemCount)
+      setCallMe(result.totals.callMe)
+      // The customer put their name to it. A fact about the visit, so it stays
+      // on screen even after the session itself goes quiet.
+      if (result.authorized) setFinished({ name: result.authorized.name })
       if (!result.active) setSessionId(null)
     }, POLL_MS)
     return () => clearInterval(id)
@@ -199,16 +244,59 @@ export function SendToTablet({
   }
 
   if (sessionId) {
+    /*
+      Three states, and they are genuinely three different things to know.
+
+      Presenting: the advisor is holding the conversation and the mirror is
+      there so they can watch answers land without leaning over the customer.
+      Handed over and still going: nobody is standing over it, so "3 of 6
+      answered" is the only sign of life there is. Finished: the customer typed
+      their name and sent it, which is the moment the advisor is waiting for and
+      used to look identical to somebody who had simply stopped tapping.
+    */
+    const heading = finished
+      ? `${firstName(finished.name)} is done`
+      : onTablet === 'SELF_SERVE'
+        ? `Handed over on ${sentTo}`
+        : `On ${sentTo}`
+
+    const detail = finished
+      ? [
+          `${seen} of ${itemsOnMenu} answered`,
+          ...(callMe > 0 ? [`${callMe} call-me`] : []),
+          `confirmed by ${finished.name}`,
+        ].join(', ')
+      : seen === 0
+        ? 'Waiting for them to start…'
+        : onTablet === 'SELF_SERVE'
+          // Out of how many, because nobody is watching them work through it and
+          // "3 answered" says nothing about whether they are nearly there.
+          ? `${seen} of ${itemsOnMenu} answered`
+          : `${seen} answered so far`
+
     return (
       <div className="rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">
-              On {sentTo}
+              {heading}
             </p>
             <p className="mt-0.5 text-xs text-emerald-800 dark:text-emerald-300">
-              {seen === 0 ? 'Waiting for them to start…' : `${seen} answered so far`}
+              {detail}
             </p>
+            {finished && (
+              /*
+                Said here as well as on the customer's screen.
+
+                The advisor is about to go over the answers with them, and the
+                thing that makes that conversation work is that nothing has been
+                decided yet. A "done" panel with no such line invites reading it
+                as an authorisation to start work, which it is not.
+              */
+              <p className="mt-1 text-xs text-emerald-800/80 dark:text-emerald-300/80">
+                Their answers, not an approval to start — go through them together.
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -236,9 +324,25 @@ export function SendToTablet({
                 if (isDecision(value)) onCustomerDecision(oppId, value)
               }
               setSessionId(null)
+              /*
+                The panel goes with the session, finished or not.
+
+                It is the control for a live menu, and the advisor has just
+                ended one — leaving "Betty is done" on screen with nothing left
+                to take back would be a panel that cannot be dismissed and a
+                tablet list they cannot get back to. What the customer answered
+                is not lost by this: it is on their sheet, forwarded two lines
+                above, and on the presentation row for good.
+              */
+              setFinished(null)
             }}
             className="touch-target rounded-xl border border-emerald-600 px-3.5 py-2 text-xs font-bold text-emerald-900 dark:text-emerald-100"
           >
+            {/*
+              Still "take it back" after they have finished. They are holding
+              the tablet and the advisor is about to go through the answers with
+              them; the button ends the same thing it always ended.
+            */}
             Take it back
           </button>
         </div>
@@ -248,6 +352,40 @@ export function SendToTablet({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {/*
+        Which conversation, chosen before the tablet is picked.
+
+        Two buttons rather than a second button per device: a store with three
+        tablets would otherwise get six, and the choice is about the moment
+        rather than the hardware. The send buttons then say which one it is, so
+        the mode cannot be set and forgotten a screen earlier.
+      */}
+      <div className="flex w-full flex-wrap items-center gap-2">
+        {([
+          ['ATTENDED', 'I will present it'],
+          ['SELF_SERVE', 'Hand it over'],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setMode(value)}
+            aria-pressed={mode === value}
+            className={`touch-target rounded-xl border px-3.5 py-2 text-xs font-bold transition ${
+              mode === value
+                ? 'border-neutral-900 bg-neutral-900 text-white dark:border-neutral-100 dark:bg-neutral-100 dark:text-neutral-900'
+                : 'border-[var(--border)]'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        <p className="text-xs text-neutral-500">
+          {mode === 'SELF_SERVE'
+            ? 'They work through it on their own and send it to you when they are done.'
+            : 'You turn the screen around and go through it with them.'}
+        </p>
+      </div>
+
       {devices.map((device) => (
         <button
           key={device.id}
@@ -256,10 +394,15 @@ export function SendToTablet({
           onClick={async () => {
             setBusy(true)
             setError(null)
-            const result = await sendMenuToDevice(appointmentId, device.id, includedIds)
+            const result = await sendMenuToDevice(appointmentId, device.id, includedIds, mode)
             setBusy(false)
             if (result.status === 'SENT' && result.sessionId) {
               setSessionId(result.sessionId)
+              // What this session is, as sent. `mode` is a control and can be
+              // changed for the next push; the panel has to describe this one.
+              setOnTablet(mode)
+              setFinished(null)
+              setSeen(0)
               const where = result.deviceName ?? device.name ?? 'the tablet'
               setSentTo(where)
               onPresented?.(where)
@@ -269,7 +412,11 @@ export function SendToTablet({
           }}
           className="touch-target rounded-xl border border-[var(--border)] px-3.5 py-2 text-xs font-bold transition hover:border-neutral-900 disabled:opacity-40 dark:hover:border-neutral-300"
         >
-          {busy ? 'Sending…' : `Send to ${device.name ?? 'tablet'}`}
+          {busy
+            ? 'Sending…'
+            : mode === 'SELF_SERVE'
+              ? `Hand ${device.name ?? 'tablet'} over`
+              : `Send to ${device.name ?? 'tablet'}`}
         </button>
       ))}
       {linkButton}

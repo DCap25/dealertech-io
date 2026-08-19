@@ -11,10 +11,32 @@ import type { DeviceSnapshot } from './snapshot'
  * Pure and I/O-free, so both are testable without a browser.
  */
 
+/**
+ * A customer's own sign-off, as it comes back over the wire.
+ *
+ * `at` is an ISO string rather than a Date because it arrives as JSON on a
+ * device. Nothing on the tablet does arithmetic with it — the screen says who
+ * confirmed, not when — so parsing it would be inventing a use.
+ */
+export interface TabletAuthorisation {
+  at: string
+  name: string
+}
+
 export interface PolledSession {
   id: string
   snapshot: DeviceSnapshot
   decisions: Record<string, string>
+  /**
+   * Whether this menu was handed over rather than presented.
+   *
+   * Derived on the server from the session's channel, never from the snapshot:
+   * the snapshot is the customer-facing whitelist and has no business carrying
+   * a fact about how the advisor sent it.
+   */
+  selfServe: boolean
+  /** Set once the customer has typed their name and sent it. */
+  authorized: TabletAuthorisation | null
 }
 
 export type TabletState =
@@ -28,6 +50,8 @@ export type TabletState =
       deviceName: string | null
       snapshot: DeviceSnapshot
       decisions: Record<string, string>
+      selfServe: boolean
+      authorized: TabletAuthorisation | null
     }
 
 /** What the tablet's own screen holds while a post is in flight. */
@@ -55,8 +79,13 @@ export type PendingTaps = Record<string, string>
  *  - The same session polls again, which is the ordinary case. The map is kept:
  *    dropping it here would make every tap flicker back to unanswered for the
  *    fraction of a second before the server's copy catches up.
+ *  - The customer finished a self-serve menu. The answers are a record now and
+ *    the server refuses further taps, so a tap still in flight is one nobody is
+ *    holding up — leaving it painted over a read-only list would put an answer
+ *    on the glass that the authorisation does not contain.
  *
- * So: `pending` survives if and only if the session id is unchanged.
+ * So: `pending` survives if and only if the session id is unchanged and the
+ * session has not been authorised.
  */
 export function nextTabletState(
   current: TabletState,
@@ -69,6 +98,7 @@ export function nextTabletState(
 
   const sameSession =
     current.phase === 'PRESENTING' && current.sessionId === poll.session.id
+  const finished = poll.session.authorized !== null
 
   return {
     state: {
@@ -77,9 +107,36 @@ export function nextTabletState(
       deviceName: poll.deviceName,
       snapshot: poll.session.snapshot,
       decisions: poll.session.decisions,
+      selfServe: poll.session.selfServe,
+      authorized: poll.session.authorized,
     },
-    pending: sameSession ? pending : {},
+    pending: sameSession && !finished ? pending : {},
   }
+}
+
+/**
+ * The customer typed their name and sent it.
+ *
+ * Applied here rather than waiting for the next poll because the screen has to
+ * change under their hand: they pressed the button, and up to a poll of a menu
+ * that still takes taps would be the product looking like it lost the one
+ * action that matters most in the whole flow.
+ *
+ * The taps in flight go with it, for the reason in `nextTabletState`. Anything
+ * that had already reached the server is in `decisions` and is what was frozen
+ * into the authorisation; anything that had not is refused from this moment on,
+ * so it belongs on no screen.
+ *
+ * A no-op on any other phase, and on a session that is already authorised: the
+ * record stops moving, and a second confirmation must not rewrite whose name
+ * is on the first.
+ */
+export function withAuthorisation(
+  screen: { state: TabletState; pending: PendingTaps },
+  authorized: TabletAuthorisation,
+): { state: TabletState; pending: PendingTaps } {
+  if (screen.state.phase !== 'PRESENTING' || screen.state.authorized) return screen
+  return { state: { ...screen.state, authorized }, pending: {} }
 }
 
 /**
@@ -123,17 +180,39 @@ export function withoutTap(pending: PendingTaps, id: string): PendingTaps {
  * rather than for truth because a tablet's snapshot is read back out of jsonb: a
  * row written before the field existed says nothing either way, and reading that
  * silence as "unpriced" would redact a total the customer was already shown.
+ *
+ * `answered` is the three real answers and never `PENDING`: a customer who taps
+ * a choice and taps it again has taken it back, which is an absence rather than
+ * an answer. It is the figure a handed-over tablet shows above its confirm bar
+ * and the one the advisor's mirror reads back — one derivation, so "4 of 6
+ * answered" cannot mean two different things on the two screens describing the
+ * same moment.
  */
+export interface MenuTotals {
+  accepted: number
+  declined: number
+  callMe: number
+  /** Accepted, declined and call-me together. What "N of M answered" counts. */
+  answered: number
+  acceptedTotal: number
+}
+
 export function menuTotals(
   snapshot: DeviceSnapshot,
   decisions: Record<string, string>,
-): { accepted: number; callMe: number; acceptedTotal: number } {
+): MenuTotals {
   const items = snapshot.tiers.flatMap((t) => t.items)
+  const count = (value: string) => items.filter((i) => decisions[i.id] === value).length
+
   const accepted = items.filter((i) => decisions[i.id] === 'ACCEPTED')
+  const declined = count('DECLINED')
+  const callMe = count('CALL_ME')
 
   return {
     accepted: accepted.length,
-    callMe: items.filter((i) => decisions[i.id] === 'CALL_ME').length,
+    declined,
+    callMe,
+    answered: accepted.length + declined + callMe,
     acceptedTotal: accepted
       .filter((i) => i.priceConfirmed !== false)
       .reduce((sum, i) => sum + i.customerOutOfPocket, 0),

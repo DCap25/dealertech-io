@@ -28,6 +28,17 @@ import type { HandOffPayload } from './types'
 function channelPhrase(channel: string): string {
   switch (channel.toUpperCase()) {
     case 'TABLET': return 'on a tablet at the dealership'
+    /*
+      Said apart from the attended tablet, in the record that has to survive a
+      dispute.
+
+      "The advisor went through the menu with them" and "they read it and
+      answered it on their own" are different accounts of the same hour, and the
+      difference is exactly what somebody two months later is trying to
+      establish. The default below — "on a device we provided" — is true of this
+      case and says nothing about the part that matters.
+    */
+    case 'TABLET_SELF_SERVE': return 'on a tablet at the dealership, working through it on their own'
     case 'LINK': return 'on their own phone, from a link we sent'
     case 'PRINT': return 'on a printed menu'
     default: return 'on a device we provided'

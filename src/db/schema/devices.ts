@@ -93,7 +93,18 @@ export const presentationSessions = pgTable(
     appointmentId: uuid('appointment_id').references(() => appointments.id, { onDelete: 'set null' }),
     advisorId: uuid('advisor_id').references(() => users.id, { onDelete: 'set null' }),
 
-    /** TABLET | LINK | PRINT. How this menu reached the customer. */
+    /**
+     * How this menu reached the customer.
+     *
+     * TABLET (the advisor presenting it) | TABLET_SELF_SERVE (the same tablet
+     * handed over, answered and finished by the customer alone) | LINK | PRINT.
+     *
+     * Text rather than an enum because the set of ways a dealership can put a
+     * menu in front of somebody is not finished, and an enum makes every future
+     * one a migration — TABLET_SELF_SERVE is the first proof of that: a new way
+     * to hold the same conversation, and no schema change. The vocabulary and
+     * the questions readers ask of it live in `presentation/channel.ts`.
+     */
     channel: text('channel').notNull().default('TABLET'),
     /**
      * Which conversation this was on the visit.

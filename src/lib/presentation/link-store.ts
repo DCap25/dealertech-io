@@ -4,6 +4,7 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { recordAudit } from '@/lib/audit/record'
+import { CHANNEL_LINK, type PresentationChannel } from './channel'
 import {
   authorisedLines, authorisedTotal, mergeCustomerAnswers, sanitizeDecisions,
   type Decision,
@@ -64,7 +65,7 @@ export async function createLinkPresentation(input: {
     deviceId: null,
     appointmentId: input.appointmentId,
     advisorId: input.advisorId,
-    channel: 'LINK',
+    channel: CHANNEL_LINK,
     sequence,
     accessTokenHash: tokenHash,
     expiresAt: linkExpiryFrom(input.now),
@@ -198,9 +199,17 @@ export async function authoriseLinkSession(
         appointmentId: session.appointmentId,
         itemsPresented: items.length,
         itemsAccepted: accepted.length,
-        acceptedAmount: accepted
-          .filter((i) => i.priceConfirmed)
-          .reduce((s, i) => s + i.customerOutOfPocket, 0),
+        /*
+          Through the shared helper rather than a filter written out here.
+
+          The figure is the same one `latestAuthorization` computes and the same
+          one the tablet's authorisation writes, and three copies of "accepted
+          and priced" is how they come to disagree. It also settles the absent
+          field the same way every customer-facing surface does — `!== false`,
+          because a snapshot written before `priceConfirmed` existed showed its
+          price, so a total claiming "at the prices shown" has to count it.
+        */
+        acceptedAmount: authorisedTotal(items, session.decisions),
       },
     })
   })
@@ -373,12 +382,15 @@ export async function repriceSinceAuthorisation(
  *
  * Channel is filtered explicitly rather than left to the caller to remember. A
  * tablet's answers already reach the advisor live, through the poll in
- * `send-to-tablet.tsx`; a link's reach them only through here.
+ * `send-to-tablet.tsx` — including a handed-over one, which is mirrored the
+ * same way and finishes in front of them. A link's reach them only through
+ * here, which is why `linkAnswersForVisit` asks for that channel and no other:
+ * pulling a tablet's in as well would be two paths writing one answer.
  */
 export async function presentationsForVisit(
   storeId: string,
   appointmentId: string,
-  options: { channel?: 'TABLET' | 'LINK' | 'PRINT' } = {},
+  options: { channel?: PresentationChannel } = {},
 ) {
   const where = [
     eq(schema.presentationSessions.storeId, storeId),
@@ -431,7 +443,7 @@ export async function linkAnswersForVisit(
   storeId: string,
   appointmentId: string,
 ): Promise<Record<string, Decision>> {
-  const rows = await presentationsForVisit(storeId, appointmentId, { channel: 'LINK' })
+  const rows = await presentationsForVisit(storeId, appointmentId, { channel: CHANNEL_LINK })
 
   return mergeCustomerAnswers(rows.map((row) => {
     const snapshot = row.snapshot as DeviceSnapshot | null

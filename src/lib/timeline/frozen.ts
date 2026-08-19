@@ -98,10 +98,17 @@ export function readPresentation(row: TimelinePresentation): FrozenPresentation 
   }
 }
 
-/** "on the tablet" · "to their phone" · "on paper", for the event sentence. */
+/**
+ * "on the tablet" · "to their phone" · "on paper", for the event sentence.
+ *
+ * Shorter than the DMS note's phrasing and deliberately so — this reads inside
+ * a line of history an advisor scans, not inside a record somebody litigates —
+ * but it draws the same distinction where there is one to draw.
+ */
 export function channelPhrase(channel: string): string {
   switch (channel) {
     case 'TABLET': return 'on the tablet'
+    case 'TABLET_SELF_SERVE': return 'on the tablet, on their own'
     case 'LINK': return 'to their phone'
     case 'PRINT': return 'on paper'
     default: return `via ${channel.toLowerCase()}`

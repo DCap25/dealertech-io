@@ -1,6 +1,9 @@
 import 'server-only'
 import { and, desc, eq, isNull, lt, or } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+import { recordAudit } from '@/lib/audit/record'
+import { isSelfServeChannel, tabletChannel } from '@/lib/presentation/channel'
+import { authorisedTotal } from '@/lib/presentation/decisions'
 // One count for both channels — see the note on `pushToDevice`.
 import { nextPresentationSequence } from '@/lib/presentation/sequence'
 import {
@@ -291,6 +294,14 @@ export async function revokeDevice(storeId: string, deviceId: string): Promise<v
  * the first conversation while links counted properly — the one fact migration
  * 0018 exists to record, wrong for one of the two channels (F10). The count is
  * shared with the link path rather than repeated here.
+ *
+ * `selfServe` is the whole of what "hand it over" changes on this side. Same
+ * snapshot, same whitelist, same freeze, same one-session-per-device rule — the
+ * difference is a channel value, which is what lets the tablet know to offer a
+ * finish and what lets the permanent record say the customer answered it alone.
+ * It is written to `channel` rather than to a new column deliberately: a column
+ * would be a migration, and every full-row read of this table would have to
+ * learn about it.
  */
 export async function pushToDevice(input: {
   storeId: string
@@ -298,6 +309,8 @@ export async function pushToDevice(input: {
   appointmentId: string | null
   advisorId: string
   snapshot: DeviceSnapshot
+  /** Handed to the customer to work through alone, rather than presented. */
+  selfServe?: boolean
 }): Promise<{ sessionId: string }> {
   const db = getDb()
 
@@ -320,6 +333,7 @@ export async function pushToDevice(input: {
       deviceId: input.deviceId,
       appointmentId: input.appointmentId,
       advisorId: input.advisorId,
+      channel: tabletChannel(input.selfServe ?? false),
       sequence,
       snapshot: input.snapshot,
       decisions: {},
@@ -387,23 +401,44 @@ export async function activeSessionForDevice(deviceId: string, now: Date = new D
 }
 
 /**
+ * What a tap did, or why it did nothing.
+ *
+ * Named outcomes rather than a nullable result because the two refusals mean
+ * different things to the person holding the tablet: one is a menu that is no
+ * longer there, the other is a menu they have already signed off. Both stop the
+ * tap; only one of them is a surprise.
+ */
+export type DeviceDecisionOutcome =
+  | { status: 'RECORDED'; decisions: Record<string, string> }
+  | { status: 'NO_SESSION' }
+  | { status: 'ALREADY_AUTHORISED' }
+
+/**
  * A customer tap.
  *
  * The session is resolved from the device's own token, never from an id the
  * device sends, and the decisions are filtered against the snapshot it was
  * actually given.
+ *
+ * Refused once the customer has authorised, exactly as `recordLinkDecisions`
+ * refuses a link that is no longer `OPEN`: the point of an authorisation record
+ * is that it stops moving, and a tap landing after it would leave the frozen
+ * `authorizedSnapshot` and the live `decisions` describing two different
+ * conversations. The tablet goes read-only at the same moment, but a screen is
+ * not a guarantee — the device surface has to hold this itself.
  */
 export async function recordDeviceDecisions(
   deviceId: string,
   incoming: unknown,
-): Promise<{ decisions: Record<string, string> } | null> {
+): Promise<DeviceDecisionOutcome> {
   // One clock for both halves: the tap is judged against the same instant it is
   // then stamped with, so an answer given on the boundary cannot be rejected as
   // idle and recorded as activity at the same time.
   const now = new Date()
 
   const session = await activeSessionForDevice(deviceId, now)
-  if (!session) return null
+  if (!session) return { status: 'NO_SESSION' }
+  if (session.authorizedAt) return { status: 'ALREADY_AUTHORISED' }
 
   const snapshot = session.snapshot as DeviceSnapshot
   const merged = {
@@ -416,7 +451,119 @@ export async function recordDeviceDecisions(
     .set({ decisions: merged, lastActivityAt: now })
     .where(eq(schema.presentationSessions.id, session.id))
 
-  return { decisions: merged }
+  return { status: 'RECORDED', decisions: merged }
+}
+
+/**
+ * What a customer's sign-off on a handed-over tablet did.
+ *
+ * `ALREADY` carries the authorisation that already exists rather than an error:
+ * a second submit — a double tap, a retried request — must show them what they
+ * confirmed, not tell them off, and must not rewrite whose name is on the
+ * record.
+ */
+export type DeviceAuthorisationOutcome =
+  | { status: 'AUTHORISED' | 'ALREADY'; authorized: { at: Date; name: string } }
+  | { status: 'NO_SESSION' }
+  | { status: 'NOT_SELF_SERVE' }
+
+/**
+ * The customer finishes a menu they were handed.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS LOOKS EXACTLY LIKE `authoriseLinkSession`
+ * ---------------------------------------------------------------------------
+ * Because it is the same act. Somebody who is not a member of staff read a menu
+ * alone, chose what they wanted, typed their name and sent it — the only
+ * difference from a link is that the glass belongs to the dealership. So the
+ * record it writes is the same record: `authorizedAt`, `authorizedName` and a
+ * frozen `authorizedSnapshot` holding what was shown *and* what was answered,
+ * plus a `MENU_AUTHORISED` audit row in the same transaction, so the log cannot
+ * claim a customer confirmed something the session does not show as authorised.
+ *
+ * `userId` is null and must stay null. A customer authorised this. Attributing
+ * it to the advisor who handed the tablet over would be a false statement in
+ * the one record that exists to prevent them — and a self-serve tablet is the
+ * case where that temptation is strongest, because a member of staff was
+ * standing somewhere in the building.
+ *
+ * The session is not ended. The customer is still holding the tablet and has
+ * just been told their answers went through; blanking the screen out from under
+ * that sentence would be the product taking the receipt away. It goes read-only
+ * instead, the advisor's mirror keeps the finished state (and the take-back
+ * button) live, and the idle window clears the glass thirty minutes after the
+ * last tap like any other tablet session.
+ *
+ * Only ever the device's own active session — the device sends a name and
+ * nothing else. There is still no endpoint here that accepts an identifier.
+ */
+export async function authoriseDeviceSession(
+  deviceId: string,
+  name: string,
+  now: Date,
+): Promise<DeviceAuthorisationOutcome> {
+  const session = await activeSessionForDevice(deviceId, now)
+  if (!session) return { status: 'NO_SESSION' }
+
+  /*
+    An attended menu cannot be signed off from the glass.
+
+    There is no confirm bar on it, so this is a device that has been made to
+    post something its screen never offered. Refusing keeps the two modes from
+    blurring: "the advisor was presenting this" and "the customer answered it
+    alone" are different claims about the same room, and the permanent record
+    is built to keep them apart.
+  */
+  if (!isSelfServeChannel(session.channel)) return { status: 'NOT_SELF_SERVE' }
+
+  if (session.authorizedAt) {
+    return {
+      status: 'ALREADY',
+      authorized: { at: session.authorizedAt, name: session.authorizedName ?? '' },
+    }
+  }
+
+  const trimmed = name.trim()
+  const snapshot = session.snapshot as DeviceSnapshot
+  const decisions = (session.decisions ?? {}) as Record<string, string>
+  const items = snapshot.tiers.flatMap((t) => t.items)
+
+  await getDb().transaction(async (tx) => {
+    await tx
+      .update(schema.presentationSessions)
+      .set({
+        authorizedAt: now,
+        authorizedName: trimmed,
+        authorizedSnapshot: {
+          snapshot,
+          decisions,
+          authorizedName: trimmed,
+          authorizedAt: now.toISOString(),
+        },
+        lastActivityAt: now,
+      })
+      .where(eq(schema.presentationSessions.id, session.id))
+
+    await recordAudit(tx, {
+      action: 'MENU_AUTHORISED',
+      entityType: 'presentation_sessions',
+      entityId: session.id,
+      storeId: session.storeId,
+      userId: null,
+      changes: {
+        authorizedName: trimmed,
+        appointmentId: session.appointmentId,
+        itemsPresented: items.length,
+        // Whole: a count of accepted items is the customer's answer and is
+        // never price-filtered. Only the money leaves an unpriced line out —
+        // see `authorisedTotal`, which both channels now share.
+        itemsAccepted: items.filter((i) => decisions[i.id] === 'ACCEPTED').length,
+        acceptedAmount: authorisedTotal(items, decisions),
+      },
+    })
+  })
+
+  return { status: 'AUTHORISED', authorized: { at: now, name: trimmed } }
 }
 
 /**

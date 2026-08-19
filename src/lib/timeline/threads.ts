@@ -1,3 +1,4 @@
+import { isAnswerableChannel } from '@/lib/presentation/channel'
 import { followUpPriority, needsFollowUp } from '@/lib/presentation/decisions'
 import { readPresentation } from './frozen'
 import type { OpenThread, TimelineInput } from './types'
@@ -45,14 +46,14 @@ function sameWork(a: string, b: string): boolean {
 
 const OPEN_TASK_STATUSES = new Set(['PENDING', 'IN_PROGRESS'])
 
-/**
- * Channels a customer can answer on.
- *
- * PRINT is excluded because nothing comes back from paper — a printed menu has
- * an empty `decisions` column by construction, so it would contribute nothing
- * anyway. Naming it is cheaper than leaving a reader to work that out.
- */
-const ANSWERABLE_CHANNELS = new Set(['TABLET', 'LINK'])
+/*
+  Which channels a customer can answer on is asked here and in three other
+  places, so it is answered once, in `presentation/channel.ts`. It used to be a
+  `Set` written out in this file — which was correct until a fourth channel
+  existed, and would then have quietly dropped every call-me a customer left on
+  a tablet they were handed. A set of literals cannot fail to compile when the
+  vocabulary grows; that is the whole argument for the shared helper.
+*/
 
 export function openThreads(input: TimelineInput): OpenThread[] {
   const label = (vehicleId: string | null) =>
@@ -73,7 +74,7 @@ export function openThreads(input: TimelineInput): OpenThread[] {
   const latestAnswer = new Map<string, OpenThread>()
 
   for (const p of input.presentations) {
-    if (!ANSWERABLE_CHANNELS.has(p.channel)) continue
+    if (!isAnswerableChannel(p.channel)) continue
 
     const { items, decisions } = readPresentation(p)
     const at = p.authorizedAt ?? p.startedAt
