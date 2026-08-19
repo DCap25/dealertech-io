@@ -32,6 +32,8 @@ export type ContractSource =
   | 'CSV_IMPORT'
   | 'PDF_EXTRACTION'
   | 'PHOTO_EXTRACTION'
+  /** An uploaded service agreement a model read and a human confirmed. */
+  | 'AI_EXTRACTION'
   | 'DMS'
 
 /**
@@ -41,7 +43,11 @@ export type ContractSource =
  * this, and a new extraction source added later must inherit them by default
  * rather than by somebody remembering to.
  */
-export const MACHINE_READ_SOURCES: ContractSource[] = ['PDF_EXTRACTION', 'PHOTO_EXTRACTION']
+export const MACHINE_READ_SOURCES: ContractSource[] = [
+  'PDF_EXTRACTION',
+  'PHOTO_EXTRACTION',
+  'AI_EXTRACTION',
+]
 
 export function isMachineRead(source: ContractSource): boolean {
   return MACHINE_READ_SOURCES.includes(source)

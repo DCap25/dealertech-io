@@ -291,12 +291,13 @@ export const SURFACES: GuideSurface[] = [
   },
   {
     path: '/vehicles/[vehicleId]/contract',
-    name: 'Add coverage from a photo',
+    name: 'Upload a service agreement',
     purpose:
-      'Get a service contract the customer owns into the system when the only copy is a piece of paper in the glovebox.',
+      'Get a service contract the customer owns into the system when the only copy is a PDF in their email or a piece of paper in the glovebox.',
     does: [
-      'Photograph or upload the contract document.',
-      'Check what was read off it before it is saved — nothing is trusted blind.',
+      'Upload the contract as a PDF, or a photo of it.',
+      'A model reads the details off it; check them before saving — nothing is trusted blind.',
+      'Saved coverage is marked as read from a document and stays unverified until somebody confirms it with the administrator.',
       'Once saved, the coverage engine uses it on every future visit, which is where it starts paying off.',
     ],
     audience: 'SERVICE',

@@ -7,6 +7,7 @@ import { TimelineFeed } from '@/components/timeline/timeline-feed'
 import { WearPanel } from '@/components/wear/wear-panel'
 import type { TermStatus } from '@/lib/warranty'
 import type { WearPrediction } from '@/lib/prep-sheet'
+import { isMachineRead } from '@/lib/coverage'
 import { Empty, money, Panel, shortDate, Stat } from '../../records-ui'
 import { demoNow } from '@/lib/demo-day'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
@@ -405,9 +406,19 @@ export default async function VehiclePage({
                         Prior authorization required{c.claimPhone ? ` — ${c.claimPhone}` : ''}
                       </p>
                     )}
-                    {c.source === 'PDF_EXTRACTION' && !c.verifiedAt && (
+                    {/*
+                      Every machine-read source, not just PDF_EXTRACTION. The
+                      check used to name one value, so a contract read off a
+                      photograph showed no warning at all while the coverage
+                      engine was quietly degrading its confidence — the screen
+                      and the engine disagreed about the same row. `isMachineRead`
+                      is the engine's own predicate, so a source added later
+                      inherits this by default rather than by somebody
+                      remembering.
+                    */}
+                    {isMachineRead(c.source) && !c.verifiedAt && (
                       <p className="mt-1 text-xs font-medium text-rose-700 dark:text-rose-400">
-                        Read from a document, not yet verified by a human.
+                        Read from a document, not yet verified with the administrator.
                       </p>
                     )}
                   </li>

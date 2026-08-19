@@ -14,8 +14,8 @@
  * WHAT GOES IN, AND WHAT MUST NOT
  * ---------------------------------------------------------------------------
  * Enough to answer "who did what, to which record, when, and what changed" —
- * ids and small facts. Not customer contact details, not the contents of a
- * photographed contract, and above all not credentials. This table outlives
+ * ids and small facts. Not customer contact details, not the contents of an
+ * uploaded contract, and above all not credentials. This table outlives
  * everything around it: rows are never updated or deleted (see 0020), so
  * anything written here is written permanently, and a bearer token that lands
  * in it stays valid and readable for as long as the log does.
@@ -32,7 +32,7 @@ export const AUDIT_ACTIONS = [
   'DMS_HANDOFF_PUSHED',
   /** A customer confirmed a menu on their own phone. */
   'MENU_AUTHORISED',
-  /** Coverage was added to a vehicle from a photographed document. */
+  /** Coverage was added to a vehicle from an uploaded document. */
   'CONTRACT_CONFIRMED',
   'STAFF_INVITED',
   'STAFF_INVITE_REVOKED',

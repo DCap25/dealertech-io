@@ -1,0 +1,64 @@
+-- One honest name for a contract a model read off an uploaded document.
+--
+-- ===========================================================================
+-- WHY
+-- ===========================================================================
+-- Contract ingestion used to have a camera in it. An advisor photographed the
+-- customer's service agreement at the podium, a vision model read the image,
+-- and the confirmed result was written with `source = 'PHOTO_EXTRACTION'`
+-- (0007). Photographing a legal document across a service counter was always
+-- the interim answer, and PLAN.md's locked decision says so: manual templates,
+-- CSV deal-jacket import, and AI PDF extraction.
+--
+-- The upload path that replaces it takes a PDF *or* an image — a customer who
+-- already has a photo of their contract on their phone still has a perfectly
+-- good file — and runs both through the same extraction. So the old value now
+-- names the wrong thing: most rows it would label were never photographed by
+-- anyone here. `AI_EXTRACTION` says what is actually true of every row on that
+-- path — a machine read it, a human confirmed it — regardless of file format.
+--
+-- ===========================================================================
+-- WHY PHOTO_EXTRACTION IS NOT REMOVED
+-- ===========================================================================
+-- Rows already carry it. Postgres has no DROP VALUE, and even if it did, the
+-- provenance of those rows is not wrong — somebody did photograph them, and the
+-- coverage engine's trust rules apply to both values identically
+-- (MACHINE_READ_SOURCES in src/lib/coverage/types.ts, which now lists all
+-- three). The value stays readable and stops being written.
+--
+-- ===========================================================================
+-- ENUM VALUES AND THE TRANSACTION THE RUNNER OPENS
+-- ===========================================================================
+-- `scripts/apply-migrations.ts` hands each file to `sql.unsafe(text)` as one
+-- simple query, and Postgres wraps a multi-statement simple query in an
+-- implicit transaction block. `ALTER TYPE … ADD VALUE` is allowed there from
+-- PG12 on, with one live restriction: **the new value cannot be used until the
+-- transaction commits.** So this file adds the value and does nothing else —
+-- no backfill, no DEFAULT referencing it, no row written with it. 0007 added a
+-- value to this very type through this same runner; this follows it exactly.
+--
+-- ===========================================================================
+-- DOES THIS BREAK READS BEFORE IT IS APPLIED? NO — AND THAT IS WORTH SAYING
+-- ===========================================================================
+-- 0026, 0028 and 0029 each had to carry this warning because they added a
+-- column or a value the *deployed code read back*, so shipping the code first
+-- meant a live query selecting a column that did not exist yet.
+--
+-- This one is the other shape. `AI_EXTRACTION` is only ever WRITTEN by the
+-- confirm action, and only on a code path a person has to walk into (upload a
+-- document, review the extraction, press confirm). Nothing reads it, no view
+-- selects it, no default mentions it. Until this file is applied:
+--
+--   * every existing read keeps working, including rows with the old values;
+--   * the coverage engine's TypeScript union already lists AI_EXTRACTION, and
+--     TypeScript unions are not enforced by Postgres, so a read is unaffected;
+--   * the one thing that fails is confirming an uploaded contract, which
+--     errors loudly with `invalid input value for enum contract_source` rather
+--     than writing anything wrong.
+--
+-- A loud failure on one action beats a silent one anywhere, but it is still a
+-- failure: APPLY THIS BEFORE DEPLOYING the upload flow. `npm run db:apply`.
+--
+-- Idempotent — safe to run twice.
+
+ALTER TYPE contract_source ADD VALUE IF NOT EXISTS 'AI_EXTRACTION';

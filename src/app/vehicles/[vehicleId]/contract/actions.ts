@@ -5,28 +5,60 @@ import { and, eq } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { requireUser } from '@/lib/auth/session'
-import { captureContract, confirmCapture, rejectCapture } from '@/lib/contract-capture/store'
+import { fenceSales } from '@/lib/auth/sales'
+import { FixedWindowLimiter } from '@/lib/rate-limit/window'
+import {
+  confirmContract, rejectContractDocument, uploadContractDocument,
+} from '@/lib/contract-capture/store'
 import { reviewExtraction } from '@/lib/contract-capture/review'
-import type { ExtractedContract, ExtractionDraft } from '@/lib/contract-capture/types'
+import { buildConfirmedValues, readSubmittedContract } from '@/lib/contract-capture/confirm'
+import { checkUpload } from '@/lib/contract-capture/upload'
+import type { ExtractionDraft, ExtractionOutcome } from '@/lib/contract-capture/types'
 
-/** Bigger than this is a photograph of something other than one page. */
-const MAX_IMAGE_BYTES = 12 * 1024 * 1024
-const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
+/**
+ * Uploading a service agreement, and confirming what a model read off it.
+ *
+ * Thin on purpose. The rules live in pure modules under
+ * src/lib/contract-capture — what a file has to be (`checkUpload`), what the
+ * model's answer means (`normaliseExtraction`), whether a draft is safe to save
+ * (`reviewExtraction`), and what actually gets written (`buildConfirmedValues`).
+ * All four are tested. What is left here is session, scope, spend and routing.
+ */
 
-export interface CaptureState {
+/**
+ * The spend guard.
+ *
+ * Every extraction is a paid call over a multi-megabyte document, so this is
+ * money rather than data. Twelve an hour per advisor is far above any real
+ * podium workflow — a store confirming a dozen contracts in an hour is having
+ * an extraordinary day — and far below what a stuck retry loop or a leaned-on
+ * button could spend before anyone noticed.
+ *
+ * Keyed by user rather than address: the cost follows the account, and the
+ * limiter's own docs are clear that a forwarded address is a bucketing key
+ * rather than an identity. A signed-in user id is the real subject here.
+ *
+ * The limiter is an in-memory speed bump per server instance — see
+ * src/lib/rate-limit/window.ts for exactly how much that is and is not worth.
+ * It is the second line regardless: the first is that extraction only ever
+ * runs on an explicit upload, once, never on a page load or a retry.
+ */
+const extractionLimiter = new FixedWindowLimiter({ limit: 12, windowMs: 60 * 60_000 })
+
+export interface UploadState {
   status: 'IDLE' | 'DRAFT' | 'ERROR' | 'SAVED'
-  captureId?: string
+  documentId?: string
   draft?: ExtractionDraft
-  provider?: string
+  outcome?: ExtractionOutcome
   message?: string
 }
 
 /**
  * The vehicle, re-read from its id.
  *
- * The VIN a draft is checked against comes from here, never from the form.
- * A client that could supply the VIN could supply one that matches the
- * document, which would defeat the only blocking check in the flow.
+ * The VIN a draft is checked against comes from here, never from the form. A
+ * client that could supply the VIN could supply one that matches the document,
+ * which would defeat the only blocking check in the flow.
  */
 async function loadVehicle(storeId: string, vehicleId: string) {
   const [vehicle] = await withCurrentUserScope((db) => db
@@ -58,164 +90,149 @@ async function currentOwnerId(storeId: string, vehicleId: string): Promise<strin
   return link?.customerId ?? null
 }
 
-export async function extractFromPhoto(
-  _previous: CaptureState,
+function vehicleContext(vehicle: {
+  vin: string
+  make: string
+  model: string | null
+  modelYear: number
+}) {
+  return {
+    vehicleVin: vehicle.vin,
+    vehicleLabel: `${vehicle.modelYear} ${vehicle.make} ${vehicle.model ?? ''}`.trim(),
+  }
+}
+
+export async function uploadAndExtract(
+  _previous: UploadState,
   formData: FormData,
-): Promise<CaptureState> {
+): Promise<UploadState> {
   const user = await requireUser()
+  fenceSales(user.role)
 
   const vehicleId = String(formData.get('vehicleId') ?? '')
-  const file = formData.get('photo')
+  const file = formData.get('document')
 
-  if (!(file instanceof File) || file.size === 0) {
-    return { status: 'ERROR', message: 'Choose a photo of the contract first.' }
-  }
-  if (!ALLOWED.has(file.type)) {
-    return { status: 'ERROR', message: `${file.type || 'That file'} is not an image we can read.` }
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    return { status: 'ERROR', message: 'That image is larger than 12MB. Take it again at a lower resolution.' }
-  }
+  /*
+    Validate before anything expensive. The size and type checks run against
+    the File's own metadata, so a rejected upload never gets base64-encoded,
+    never reaches object storage, and never reaches a paid API.
+  */
+  const check = checkUpload(file instanceof File ? file : null)
+  if (!check.ok) return { status: 'ERROR', message: check.message }
 
   const vehicle = await loadVehicle(user.storeId, vehicleId)
   if (!vehicle) return { status: 'ERROR', message: 'That vehicle is not at this store.' }
 
+  const gate = extractionLimiter.check(user.id, Date.now())
+  if (!gate.ok) {
+    return {
+      status: 'ERROR',
+      message: `That is a lot of documents in one hour. Try again in ${Math.ceil(
+        gate.retryAfterSeconds / 60,
+      )} minutes, or add the coverage by hand.`,
+    }
+  }
+
   try {
-    const buffer = Buffer.from(await file.arrayBuffer())
-    const result = await captureContract({
+    const buffer = Buffer.from(await (file as File).arrayBuffer())
+    const result = await uploadContractDocument({
       storeId: user.storeId,
       vehicleId,
       customerId: await currentOwnerId(user.storeId, vehicleId),
-      capturedByUserId: user.id,
-      imageBase64: buffer.toString('base64'),
-      mediaType: file.type,
-      context: {
-        vehicleVin: vehicle.vin,
-        vehicleLabel: `${vehicle.modelYear} ${vehicle.make} ${vehicle.model ?? ''}`.trim(),
-      },
+      uploadedByUserId: user.id,
+      fileBase64: buffer.toString('base64'),
+      mediaType: check.mediaType,
+      context: vehicleContext(vehicle),
     })
 
     return {
       status: 'DRAFT',
-      captureId: result.captureId,
+      documentId: result.documentId,
       draft: result.draft,
-      provider: result.provider,
+      outcome: result.outcome,
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'Unknown error'
-    return { status: 'ERROR', message: `Could not read that photo. ${detail}` }
+    return { status: 'ERROR', message: `Could not store that document. ${detail}` }
   }
 }
 
 /**
  * Save what the advisor confirmed.
  *
- * The draft is re-checked here against the vehicle's real VIN before anything
- * is written, so the blocking rule cannot be skipped by posting straight to
- * the action.
+ * The submitted values — not the extracted ones — are re-read through the same
+ * normalisers and re-checked against the vehicle's real VIN before anything is
+ * written, so the blocking rule cannot be skipped by posting straight to the
+ * action.
  */
 export async function saveConfirmed(
-  _previous: CaptureState,
+  _previous: UploadState,
   formData: FormData,
-): Promise<CaptureState> {
+): Promise<UploadState> {
   const user = await requireUser()
+  fenceSales(user.role)
 
-  const captureId = String(formData.get('captureId') ?? '')
+  const documentId = String(formData.get('documentId') ?? '')
   const vehicleId = String(formData.get('vehicleId') ?? '')
   const vehicle = await loadVehicle(user.storeId, vehicleId)
-  if (!vehicle || !captureId) {
-    return { status: 'ERROR', message: 'That capture is no longer available.' }
+  if (!vehicle || !documentId) {
+    return { status: 'ERROR', message: 'That upload is no longer available.' }
   }
 
-  const str = (k: string) => {
-    const v = String(formData.get(k) ?? '').trim()
-    return v === '' ? null : v
-  }
-  const num = (k: string) => {
-    const v = str(k)
-    if (v === null) return null
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-  }
-
-  const confirmed = {
-    productType: str('productType'),
-    adminCompany: str('adminCompany'),
-    contractNumber: str('contractNumber'),
-    purchaseDate: str('purchaseDate'),
-    expirationDate: str('expirationDate'),
-    termMonths: num('termMonths'),
-    termMiles: num('termMiles'),
-    deductibleAmount: num('deductibleAmount') ?? 0,
-    vin: str('vin'),
-  }
-
-  // Re-run the same rules over what was actually submitted.
-  const asExtraction = Object.fromEntries(
-    Object.entries(confirmed).map(([k, v]) => [
-      k,
-      { value: v, confidence: 'HIGH' as const, sourceText: null },
-    ]),
-  ) as unknown as ExtractedContract
-
-  const recheck = reviewExtraction(asExtraction, {
-    vehicleVin: vehicle.vin,
-    vehicleLabel: `${vehicle.modelYear} ${vehicle.make}`,
+  const submitted = readSubmittedContract((name) => {
+    const raw = formData.get(name)
+    if (raw === null) return null
+    const value = String(raw).trim()
+    return value === '' ? null : value
   })
 
+  const recheck = reviewExtraction(submitted, vehicleContext(vehicle))
   if (!recheck.saveable) {
     return {
       status: 'ERROR',
-      captureId,
+      documentId,
       draft: recheck,
       message: recheck.issues.find((i) => i.severity === 'BLOCKING')?.message,
     }
   }
-  if (!confirmed.productType || !confirmed.adminCompany || !confirmed.purchaseDate) {
-    return {
-      status: 'ERROR',
-      captureId,
-      draft: recheck,
-      message: 'Product, administrator and purchase date are needed before this can be saved.',
-    }
+
+  const payload = buildConfirmedValues(submitted)
+  if (!payload.ok) {
+    return { status: 'ERROR', documentId, draft: recheck, message: payload.message }
   }
 
-  await confirmCapture({
-    captureId,
+  await confirmContract({
+    documentId,
     storeId: user.storeId,
     vehicleId,
     customerId: await currentOwnerId(user.storeId, vehicleId),
     reviewedByUserId: user.id,
-    values: {
-      productType: confirmed.productType,
-      adminCompany: confirmed.adminCompany,
-      contractNumber: confirmed.contractNumber,
-      purchaseDate: confirmed.purchaseDate,
-      expirationDate: confirmed.expirationDate,
-      termMonths: confirmed.termMonths,
-      termMiles: confirmed.termMiles,
-      deductibleAmount: confirmed.deductibleAmount,
-    },
+    values: payload.values,
   })
 
   revalidatePath(`/vehicles/${vehicleId}`)
   revalidatePath('/drive')
 
-  return { status: 'SAVED', message: 'Coverage added. It is now on this vehicle’s prep sheet.' }
+  return {
+    status: 'SAVED',
+    message: 'Coverage added. It is now on this vehicle’s prep sheet.',
+  }
 }
 
-export async function discardCapture(
-  _previous: CaptureState,
+export async function discardUpload(
+  _previous: UploadState,
   formData: FormData,
-): Promise<CaptureState> {
+): Promise<UploadState> {
   const user = await requireUser()
-  const captureId = String(formData.get('captureId') ?? '')
-  if (!captureId) return { status: 'IDLE' }
+  fenceSales(user.role)
 
-  await rejectCapture({
-    captureId,
+  const documentId = String(formData.get('documentId') ?? '')
+  if (!documentId) return { status: 'IDLE' }
+
+  await rejectContractDocument({
+    documentId,
     reviewedByUserId: user.id,
     reason: String(formData.get('reason') ?? 'Discarded by advisor'),
   })
-  return { status: 'IDLE', message: 'Discarded. The photo is kept on the vehicle record.' }
+  return { status: 'IDLE', message: 'Discarded. The document is kept on the vehicle record.' }
 }

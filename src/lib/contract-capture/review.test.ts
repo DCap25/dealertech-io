@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { emptyExtraction, reviewExtraction } from './review'
+import { EXTRACTED_FIELDS } from './types'
 import type { ExtractedContract, ExtractionContext } from './types'
 
 const CONTEXT: ExtractionContext = {
@@ -16,11 +17,17 @@ function extraction(over: Partial<ExtractedContract> = {}): ExtractedContract {
     productType: field('TIRE_WHEEL'),
     adminCompany: field('Safeguard'),
     contractNumber: field('SG-88214'),
+    coverageTier: field('Platinum'),
+    tierType: field('EXCLUSIONARY'),
     purchaseDate: field('2023-04-11'),
+    purchaseMileage: field(12_400),
     expirationDate: field('2028-04-11'),
+    expirationMiles: field(87_400),
     termMonths: field(60),
     termMiles: field(75_000),
     deductibleAmount: field(0),
+    deductibleType: field('NONE'),
+    requiresPriorAuthorization: field(true),
     vin: field('1FTFW1E84MFA12345'),
     ...over,
   }
@@ -92,12 +99,26 @@ describe('essentials', () => {
     const draft = reviewExtraction(
       extraction({
         expirationDate: field(null),
+        expirationMiles: field(null),
         termMonths: field(null),
         termMiles: field(null),
       }),
       CONTEXT,
     )
-    expect(draft.issues.find((i) => i.field === 'document')?.message).toMatch(/whole page/i)
+    expect(draft.issues.find((i) => i.field === 'document')?.message).toMatch(/every page/i)
+  })
+
+  it('does not warn about an ending when only an odometer limit is given', () => {
+    // "Expires at 100,000 miles" with no dates and no term is a real contract.
+    const draft = reviewExtraction(
+      extraction({
+        expirationDate: field(null),
+        termMonths: field(null),
+        termMiles: field(null),
+      }),
+      CONTEXT,
+    )
+    expect(draft.issues.find((i) => i.field === 'document')).toBeUndefined()
   })
 })
 
@@ -164,10 +185,71 @@ describe('fieldsNeedingReview', () => {
   })
 
   it('flags every field on a blank draft', () => {
-    // Hand entry after a failed extraction. Nothing is confirmed, so
-    // everything is up for review.
+    // Hand entry after a failed extraction, or with no provider at all.
+    // Nothing is confirmed, so everything is up for review.
     const draft = reviewExtraction(emptyExtraction(), CONTEXT)
-    expect(draft.fieldsNeedingReview).toHaveLength(9)
+    expect(draft.fieldsNeedingReview).toEqual(EXTRACTED_FIELDS)
     expect(draft.saveable).toBe(false)
+  })
+})
+
+describe('the tier check', () => {
+  it('warns when a service contract does not say which way its list reads', () => {
+    // Exclusionary lists what is NOT covered; inclusionary lists what IS. The
+    // engine defaults to exclusionary — the generous reading — so an
+    // inclusionary contract mistaken for one means promising coverage on a
+    // component that was never named.
+    const draft = reviewExtraction(
+      extraction({ productType: field('VSC'), tierType: field(null) }),
+      CONTEXT,
+    )
+    const issue = draft.issues.find((i) => i.field === 'tierType')
+    expect(issue?.severity).toBe('WARNING')
+    expect(issue?.message).toMatch(/more generous reading/i)
+  })
+
+  it('stays quiet on a product with no component list to read either way', () => {
+    // A key replacement policy has no schedule of covered components, so the
+    // question does not arise and the warning would be noise.
+    const draft = reviewExtraction(
+      extraction({ productType: field('KEY'), tierType: field(null) }),
+      CONTEXT,
+    )
+    expect(draft.issues.find((i) => i.field === 'tierType')).toBeUndefined()
+  })
+
+  it('stays quiet once the tier type is known', () => {
+    const draft = reviewExtraction(
+      extraction({ productType: field('VSC'), tierType: field('INCLUSIONARY') }),
+      CONTEXT,
+    )
+    expect(draft.issues.find((i) => i.field === 'tierType')).toBeUndefined()
+  })
+})
+
+describe('mileages', () => {
+  it('catches coverage that would end at or below the mileage at sale', () => {
+    // A transposed digit. The contract expired before it started, which is
+    // never what the document says.
+    const draft = reviewExtraction(
+      extraction({ purchaseMileage: field(48_000), expirationMiles: field(24_000) }),
+      CONTEXT,
+    )
+    expect(draft.issues.find((i) => i.field === 'expirationMiles')?.message).toMatch(/misread/i)
+    // Still saveable — a warning, because the advisor may be right.
+    expect(draft.saveable).toBe(true)
+  })
+
+  it('flags an odometer with an extra digit in it', () => {
+    const draft = reviewExtraction(extraction({ purchaseMileage: field(1_240_000) }), CONTEXT)
+    expect(draft.issues.find((i) => i.field === 'purchaseMileage')?.message).toMatch(/extra digit/i)
+  })
+
+  it('accepts a sensible pair', () => {
+    const draft = reviewExtraction(
+      extraction({ purchaseMileage: field(12_400), expirationMiles: field(112_400) }),
+      CONTEXT,
+    )
+    expect(draft.issues.filter((i) => i.field === 'expirationMiles')).toEqual([])
   })
 })

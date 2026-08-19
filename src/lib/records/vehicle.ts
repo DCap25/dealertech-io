@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { schema } from '@/db/client'
 import { computeWarrantySnapshot, type WarrantySnapshot } from '@/lib/warranty'
 import { reconcileOdometer } from '@/lib/odometer/reconcile'
+import type { ContractSource } from '@/lib/coverage'
 import { withUserScope } from '@/db/scoped'
 import {
   predictWorstCorner, predictWear, TIRE_THRESHOLDS, BRAKE_THRESHOLDS,
@@ -64,7 +65,13 @@ export interface VehicleRecord {
     purchaseDate: Date
     requiresPriorAuthorization: boolean
     claimPhone: string | null
-    source: string
+    /**
+     * The engine's own union rather than `string`, so the vehicle page can ask
+     * `isMachineRead(source)` and have the compiler check it. Widening this to
+     * `string` is how the page came to hard-code one machine-read source and
+     * silently miss the others.
+     */
+    source: ContractSource
     verifiedAt: Date | null
   }[]
   entitlements: {

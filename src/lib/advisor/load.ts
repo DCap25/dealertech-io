@@ -303,6 +303,22 @@ async function loadRepairOrderScoped(db: ScopedDb,
     id: c.id, productType: c.productType, adminCompany: c.adminCompany,
     contractNumber: c.contractNumber ?? undefined,
     purchaseDate: new Date(c.purchaseDate), termMonths: c.termMonths, termMiles: c.termMiles,
+    /*
+      The odometer at sale, which this mapping used to drop.
+
+      `contractExpirationMiles` reads it: a contract with a mileage term and a
+      known sale mileage expires at sale + term, and one without is treated as
+      an absolute limit. Leaving it undefined therefore silently converted
+      "36,000 miles of coverage from 48,000" into "expires at 36,000" — a
+      contract that has already run out before the car arrived. The prep sheet
+      never had this bug because the DMS adapter carries the column; only this
+      path did, so the same vehicle could read covered on one screen and
+      expired on the other.
+
+      Nearly nothing wrote `purchase_mileage` before now, which is why it went
+      unnoticed. Extraction fills it in, so the gap is reachable.
+    */
+    purchaseMileage: c.purchaseMileage ?? undefined,
     expirationDate: c.expirationDate ? new Date(c.expirationDate) : undefined,
     expirationMiles: c.expirationMiles ?? undefined,
     deductibleAmount: num(c.deductibleAmount), deductibleType: c.deductibleType,

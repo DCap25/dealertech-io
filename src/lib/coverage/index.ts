@@ -4,6 +4,7 @@ export {
   vscCoversComponent,
   warrantyTermCovering,
 } from './engine'
+export { isMachineRead, MACHINE_READ_SOURCES } from './types'
 export type {
   Contract,
   ContractSource,

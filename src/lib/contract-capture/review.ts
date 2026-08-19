@@ -1,4 +1,5 @@
 import { normalizeVin } from '@/lib/vin/validate'
+import { EXTRACTED_FIELDS } from './types'
 import type {
   ExtractedContract, ExtractedField, ExtractionContext, ExtractionDraft, ExtractionIssue,
 } from './types'
@@ -18,6 +19,8 @@ const REVIEW_AT: Record<string, boolean> = { LOW: true, MEDIUM: true, HIGH: fals
 const MAX_TERM_MONTHS = 120
 const MAX_TERM_MILES = 250_000
 const MAX_DEDUCTIBLE = 1000
+/** An odometer above this on a contract document is a misread, not a car. */
+const MAX_ODOMETER = 500_000
 
 function parseIsoDate(value: string | null): Date | null {
   if (!value) return null
@@ -118,6 +121,60 @@ function checkTerms(contract: ExtractedContract): ExtractionIssue[] {
   return out
 }
 
+/**
+ * Odometer figures, which are easy to misread by a factor of ten.
+ *
+ * An expiry mileage below the mileage at sale is the one worth catching: it
+ * means the contract expired before it started, which is never what the
+ * document says and always a transposed digit.
+ */
+function checkMileages(contract: ExtractedContract): ExtractionIssue[] {
+  const out: ExtractionIssue[] = []
+  const at = contract.purchaseMileage.value
+  const until = contract.expirationMiles.value
+
+  for (const [field, value] of [
+    ['purchaseMileage', at],
+    ['expirationMiles', until],
+  ] as const) {
+    if (value !== null && value > MAX_ODOMETER) {
+      out.push(issue(field, 'WARNING', `${value.toLocaleString()} miles is higher than any odometer on a contract. Check for an extra digit.`))
+    }
+  }
+
+  if (at !== null && until !== null && until <= at) {
+    out.push(
+      issue(
+        'expirationMiles',
+        'WARNING',
+        `Coverage would end at ${until.toLocaleString()} miles, at or below the ${at.toLocaleString()} on the car when it was sold. One of the two was misread.`,
+      ),
+    )
+  }
+  return out
+}
+
+/**
+ * The tier check.
+ *
+ * Exclusionary contracts list what is *not* covered; inclusionary ones list
+ * what *is*. The engine defaults to exclusionary, which is the generous read —
+ * so an inclusionary contract mistaken for one means promising coverage on a
+ * component that was never named. That is the "eat a transmission" failure,
+ * and an unread tier type is worth a warning rather than a silent default.
+ */
+function checkTier(contract: ExtractedContract): ExtractionIssue[] {
+  if (contract.tierType.value !== null) return []
+  if (contract.productType.value !== 'VSC') return []
+  return [
+    issue(
+      'tierType',
+      'WARNING',
+      'Could not tell whether this contract lists what is covered or what is excluded. Exclusionary is assumed, which is the more generous reading — check the document.',
+    ),
+  ]
+}
+
 function checkEssentials(contract: ExtractedContract): ExtractionIssue[] {
   const out: ExtractionIssue[] = []
 
@@ -135,9 +192,14 @@ function checkEssentials(contract: ExtractedContract): ExtractionIssue[] {
   }
   // A contract with no end at all is more likely a misread than a lifetime
   // product, but it is not impossible — so it warns rather than blocks.
-  if (!contract.expirationDate.value && !contract.termMonths.value && !contract.termMiles.value) {
+  if (
+    !contract.expirationDate.value &&
+    !contract.termMonths.value &&
+    !contract.termMiles.value &&
+    !contract.expirationMiles.value
+  ) {
     out.push(
-      issue('document', 'WARNING', 'Nothing on this document says when the coverage ends. Check you photographed the whole page.'),
+      issue('document', 'WARNING', 'Nothing on this document says when the coverage ends. Check you uploaded every page.'),
     )
   }
   return out
@@ -150,11 +212,13 @@ export function reviewExtraction(
   const issues = [
     ...checkVin(contract.vin, context),
     ...checkEssentials(contract),
+    ...checkTier(contract),
     ...checkDates(contract),
     ...checkTerms(contract),
+    ...checkMileages(contract),
   ]
 
-  const fieldsNeedingReview = (Object.keys(contract) as (keyof ExtractedContract)[]).filter(
+  const fieldsNeedingReview = EXTRACTED_FIELDS.filter(
     (key) => REVIEW_AT[contract[key].confidence] ?? true,
   )
 
@@ -166,18 +230,31 @@ export function reviewExtraction(
   }
 }
 
-/** An empty draft, for the hand-entry path when extraction fails entirely. */
+/**
+ * An empty draft — the hand-entry path.
+ *
+ * Reached three ways, and they are not failures to hide: extraction was never
+ * available (no API key), the model was called and errored, or the model read
+ * the document and found nothing it recognised. In all three the advisor gets
+ * the same form and types what is in front of them.
+ */
 export function emptyExtraction(): ExtractedContract {
   const blank = <T>(): ExtractedField<T> => ({ value: null, confidence: 'LOW', sourceText: null })
   return {
     productType: blank(),
     adminCompany: blank(),
     contractNumber: blank(),
+    coverageTier: blank(),
+    tierType: blank(),
     purchaseDate: blank(),
+    purchaseMileage: blank(),
     expirationDate: blank(),
+    expirationMiles: blank(),
     termMonths: blank(),
     termMiles: blank(),
     deductibleAmount: blank(),
+    deductibleType: blank(),
+    requiresPriorAuthorization: blank(),
     vin: blank(),
   }
 }

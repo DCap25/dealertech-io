@@ -5,12 +5,12 @@ import { schema } from '@/db/client'
 import { withCurrentUserScope } from '@/db/scoped'
 import { requireUser } from '@/lib/auth/session'
 import { fenceSales } from '@/lib/auth/sales'
-import { CaptureForm } from './capture-form'
+import { UploadForm } from './upload-form'
 
 export const dynamic = 'force-dynamic'
-export const metadata = { title: 'Add coverage from a photo' }
+export const metadata = { title: 'Upload a service agreement' }
 
-export default async function ContractCapturePage({
+export default async function ContractUploadPage({
   params,
 }: {
   params: Promise<{ vehicleId: string }>
@@ -46,16 +46,16 @@ export default async function ContractCapturePage({
       </Link>
 
       <header className="mt-2 border-b border-[var(--border)] pb-5">
-        <h1 className="text-3xl font-bold tracking-tight">Add coverage from a photo</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Upload a service agreement</h1>
         <p className="mt-1.5 leading-relaxed text-neutral-600 dark:text-neutral-400">
-          Photograph a customer&rsquo;s service contract and the details are read off it for you to
-          check. Once confirmed it sits on the prep sheet for every future visit, so nobody has to
-          ask them again.
+          Upload the customer&rsquo;s contract — a PDF or a photo of one — and the details are read
+          off it for you to check. Once confirmed it sits on the prep sheet for every future visit,
+          so nobody has to ask them again.
         </p>
       </header>
 
       <div className="mt-6">
-        <CaptureForm vehicleId={vehicle.id} vehicleLabel={label} vin={vehicle.vin} />
+        <UploadForm vehicleId={vehicle.id} vehicleLabel={label} vin={vehicle.vin} />
       </div>
     </main>
   )

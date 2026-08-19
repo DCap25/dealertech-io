@@ -8,15 +8,16 @@ import type { OwnedProduct, OwnershipSummary } from '@/lib/prep-sheet/ownership'
 /**
  * A customer standing at the podium is the one moment they have the paperwork
  * on them, or on their phone. Every visit after this one is a visit where
- * somebody has to ask them again.
+ * somebody has to ask them again — so the ask is for the file itself, whatever
+ * form it is in, rather than for a photo taken across the counter.
  */
-function CaptureLink({ vehicleId }: { vehicleId: string }) {
+function UploadLink({ vehicleId }: { vehicleId: string }) {
   return (
     <Link
       href={`/vehicles/${vehicleId}/contract`}
       className="touch-target mt-3 inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-3.5 py-2 text-xs font-bold transition hover:border-neutral-900 dark:hover:border-neutral-300"
     >
-      <span aria-hidden>📷</span> Photograph a contract
+      <span aria-hidden>📄</span> Upload service agreements
     </Link>
   )
 }
@@ -54,7 +55,7 @@ export function OwnershipRow({
         <p className="mt-1.5 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
           {summary.emptyNote}
         </p>
-        {vehicleId && <CaptureLink vehicleId={vehicleId} />}
+        {vehicleId && <UploadLink vehicleId={vehicleId} />}
       </Card>
     )
   }
@@ -82,11 +83,11 @@ export function OwnershipRow({
           {vehicleId && (
             <Link
               href={`/vehicles/${vehicleId}/contract`}
-              title="Photograph a contract"
+              title="Upload a service agreement"
               className="touch-target inline-flex items-center rounded-lg px-2 py-1 text-xs font-semibold text-neutral-500 transition hover:text-neutral-900 dark:hover:text-white"
             >
-              <span aria-hidden>📷</span>
-              <span className="ml-1.5 hidden sm:inline">Add from photo</span>
+              <span aria-hidden>📄</span>
+              <span className="ml-1.5 hidden sm:inline">Upload agreement</span>
             </Link>
           )}
         </div>

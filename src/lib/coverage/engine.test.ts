@@ -541,4 +541,26 @@ describe('machine-read contracts', () => {
     })
     expect(result.requiredActions.join(' ')).not.toMatch(/read from a document/i)
   })
+
+  it('treats an uploaded, AI-extracted contract with the same suspicion', () => {
+    // AI_EXTRACTION (0031) is what the upload path writes, and it inherits the
+    // rule through MACHINE_READ_SOURCES rather than through anyone remembering
+    // to add it at the two call sites.
+    const result = evaluate({ contracts: [vsc({ source: 'AI_EXTRACTION' })] })
+    expect(result.confidence).toBe('LOW')
+    expect(result.requiredActions.join(' ')).toMatch(/read from a document/i)
+  })
+
+  it('keeps warning on an AI-extracted contract an advisor merely confirmed', () => {
+    /*
+      The advisor's confirm does NOT set verifiedAt — see confirmContract in
+      src/lib/contract-capture/store.ts. Agreeing that a transcription matches
+      the paper is not the same as an administrator agreeing the policy is in
+      force, and a contract can transcribe perfectly and still be cancelled,
+      lapsed, or void. So a confirmed upload arrives here exactly as it is
+      written: machine-read and unverified.
+    */
+    const result = evaluate({ contracts: [vsc({ source: 'AI_EXTRACTION', verifiedAt: undefined })] })
+    expect(result.requiredActions.join(' ')).toMatch(/not been verified by a human/i)
+  })
 })

@@ -127,8 +127,21 @@ export const contractStatusEnum = pgEnum('contract_status', [
   'ACTIVE', 'EXPIRED', 'CANCELLED', 'EXHAUSTED', 'PENDING_VERIFICATION',
 ])
 
+/**
+ * Where a contract record came from.
+ *
+ * `AI_EXTRACTION` (0031) is what an uploaded service agreement — PDF or image —
+ * becomes once a model has read it and an advisor has confirmed it. It replaces
+ * `PHOTO_EXTRACTION` as the value new rows are written with: the upload path
+ * accepts both formats through one extraction, so a source value that names the
+ * *camera* would be a lie on most of the rows it labelled.
+ *
+ * `PHOTO_EXTRACTION` stays because rows already carry it. Dropping an enum
+ * value is not something you do to a column with live data in it, and the
+ * provenance of those rows is still true — a person did photograph them.
+ */
 export const contractSourceEnum = pgEnum('contract_source', [
-  'MANUAL', 'CSV_IMPORT', 'PDF_EXTRACTION', 'PHOTO_EXTRACTION', 'DMS',
+  'MANUAL', 'CSV_IMPORT', 'PDF_EXTRACTION', 'PHOTO_EXTRACTION', 'AI_EXTRACTION', 'DMS',
 ])
 
 export const confidenceEnum = pgEnum('confidence', ['HIGH', 'MEDIUM', 'LOW'])
