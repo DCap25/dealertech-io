@@ -1198,6 +1198,26 @@ authorisation claim; the customer is never re-asked by the software.
 eventually, but it needs the state-law question settled properly, and a
 re-authorisation flow that is subtly wrong is worse than a phone call.
 
+> **Q6 is BUILT** — `2179010` (Opus, Fable-verified), option (a) as
+> recommended below. The mode is a distinct `channel` value
+> (`TABLET_SELF_SERVE` — no schema change; 0018's text-by-design comment
+> blessed it), with the channel vocabulary given one home in
+> `presentation/channel.ts` after the build's audit found
+> `timeline/threads.ts` holding a literal `{TABLET, LINK}` set that would
+> have dropped every call-me from exactly this flow. Two corrections to the
+> assessment below: `pushToDevice` never set the channel column at all, and
+> the gaps were four, not three — the device surface had no notion of an
+> authorised session, so taps would have kept landing after the sign-off
+> (now refused, `ALREADY_AUTHORISED`). The tablet's confirm writes the link
+> path's exact authorisation shape (`userId: null`, F6's `authorisedTotal` —
+> now the single derivation for all three permanent-record money reads), the
+> mirror gains the finished state ("Betty is done · 4 of 6 answered, 1
+> call-me, confirmed by Betty Lewis"), and attended mode is byte-identical,
+> pinned by test. Known caveat by design: a prep-sheet reload between the
+> customer finishing and take-back drops the mirror and the answers wait on
+> the row; closing that means a visit-scoped tablet read, deliberately out
+> of this piece.
+
 **Q6 — Self-serve tablet mode (added 2026-08-18, Dan's idea).** Hand the
 customer the tablet to work through the menu alone — the doctor's-office
 questionnaire — with the advisor going over the answers together afterwards.
