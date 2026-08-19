@@ -3,6 +3,7 @@ import { WorkspaceNav } from '@/components/auth/workspace-nav'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
 import { firstServiceCue } from '@/lib/prep-sheet'
 import { CoverageChips, money, PayerBadge, timeOf, UrgencyBadge } from './ui'
+import { defaultWeekView, type WeekView } from '@/lib/drive/week'
 import { demoNow } from '@/lib/demo-day'
 import { requireUser, getCurrentStore } from '@/lib/auth/session'
 import { fenceSales } from '@/lib/auth/sales'
@@ -16,7 +17,7 @@ export const metadata = {
 export default async function DrivePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string }>
+  searchParams: Promise<{ date?: string; view?: string }>
 }) {
   // Enforced here, not only in the middleware. The middleware is a separate
   // deploy artifact on the host, and this page must not serve a dealership
@@ -43,6 +44,21 @@ export default async function DrivePage({
   const day = params.date ? new Date(`${params.date}T12:00:00`) : demoNow()
   const sheets = await loadDriveDay(store.id, day, day)
 
+  /*
+    Mine is emphasis, not a filter. The drive is one physical lane and every
+    car on it is real — hiding a colleague's 10:15 makes an advisor walk past
+    a customer the page claimed was not there. So "Mine" keeps the whole day
+    and dims the cards on other books; unassigned stays full-strength because
+    the pool is exactly what an advisor might claim next. Same vocabulary and
+    default as the week page, so the toggle means one thing everywhere.
+  */
+  const view: WeekView =
+    params.view === 'mine' || params.view === 'all'
+      ? params.view
+      : defaultWeekView(user.isAdvisor)
+  const viewQuery = (v: WeekView) =>
+    params.date ? `/drive?date=${params.date}&view=${v}` : `/drive?view=${v}`
+
   const totalOpportunity = sheets.reduce((s, x) => s + x.totals.opportunityValue, 0)
   const totalCovered = sheets.reduce((s, x) => s + x.totals.coveredValue, 0)
   const safetyCount = sheets.filter((s) =>
@@ -60,14 +76,31 @@ export default async function DrivePage({
         </div>
         <div className="mt-1 flex flex-wrap items-baseline justify-between gap-3">
           <h1 className="text-3xl font-bold tracking-tight">Today&rsquo;s drive</h1>
-          {/* Carries the day being viewed, so a walk-in on Thursday's drive
-              books onto Thursday. */}
-          <Link
-            href={params.date ? `/drive/book?date=${params.date}` : '/drive/book'}
-            className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-bold text-white dark:bg-white dark:text-neutral-900"
-          >
-            Book an appointment
-          </Link>
+          <div className="flex items-center gap-2">
+            {/* The toggle is a filter, not a permission — same as the week. */}
+            <nav className="flex rounded-lg border border-neutral-200 text-sm font-semibold dark:border-neutral-800">
+              <Link
+                href={viewQuery('mine')}
+                className={`rounded-l-lg px-3 py-1.5 ${view === 'mine' ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900' : ''}`}
+              >
+                Mine
+              </Link>
+              <Link
+                href={viewQuery('all')}
+                className={`rounded-r-lg px-3 py-1.5 ${view === 'all' ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900' : ''}`}
+              >
+                Everyone
+              </Link>
+            </nav>
+            {/* Carries the day being viewed, so a walk-in on Thursday's drive
+                books onto Thursday. */}
+            <Link
+              href={params.date ? `/drive/book?date=${params.date}` : '/drive/book'}
+              className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-bold text-white dark:bg-white dark:text-neutral-900"
+            >
+              Book an appointment
+            </Link>
+          </div>
         </div>
         <p className="mt-1 text-neutral-600 dark:text-neutral-400">
           {day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} ·{' '}
@@ -103,11 +136,19 @@ export default async function DrivePage({
           {sheets.map((sheet) => {
             const top = sheet.opportunities.slice(0, 3)
             const firstService = firstServiceCue(sheet, day)
+            /*
+              Whose book, said with a name, not a colour. Colour on this page
+              already means urgency and payer, and roughly one man in twelve
+              cannot tell a per-advisor palette apart anyway — a labelled chip
+              is legible to everyone and needs no legend.
+            */
+            const advisorId = sheet.appointment?.advisorId ?? null
+            const dimmed = view === 'mine' && advisorId !== null && advisorId !== user.id
             return (
               <li key={sheet.appointment?.id}>
                 <Link
                   href={`/drive/${sheet.appointment?.id}`}
-                  className="block rounded-xl border border-neutral-200 p-4 transition hover:border-neutral-900 hover:shadow-sm dark:border-neutral-800 dark:hover:border-neutral-400"
+                  className={`block rounded-xl border border-neutral-200 p-4 transition hover:border-neutral-900 hover:shadow-sm dark:border-neutral-800 dark:hover:border-neutral-400 ${dimmed ? 'opacity-50 hover:opacity-100' : ''}`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -136,6 +177,18 @@ export default async function DrivePage({
                             {sheet.appointment?.soldByName
                               ? ` · sold by ${sheet.appointment.soldByName}`
                               : ''}
+                          </span>
+                        )}
+                        {advisorId ? (
+                          <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+                            {advisorId === user.id
+                              ? 'my book'
+                              : sheet.appointment?.advisorName ?? 'assigned'}
+                          </span>
+                        ) : (
+                          // Same amber as the week view — one look, one meaning.
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                            unassigned
                           </span>
                         )}
                         <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
