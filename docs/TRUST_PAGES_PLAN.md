@@ -1,0 +1,203 @@
+# Trust, Legal & Footer Pages — Scope
+
+**Status: PROPOSED — awaiting Dan's decisions on the open questions in §6,
+then an Opus build brief per §5.**
+
+What has to exist at the bottom of the marketing page, what each page must
+say, and — as important — what we should refuse to say. The reference point
+Dan asked about is Tekion's trust portal (tekion.com/trust-portal/compliance),
+surveyed 2026-08-19; §2 maps their list onto our stage honestly.
+
+The thesis of the whole product is that the transparent dealership wins. The
+same bet applies to us: a legal footer that is honest about being an
+early-stage vendor — real architecture, real subprocessors, no rented badges —
+is worth more with a fixed-ops director than a wall of certification logos we
+do not hold. Every page below is scoped to say only things that are true of
+the code as it exists, and several of them turn out to be *better* than the
+industry boilerplate because of it.
+
+---
+
+## 1. The facts the pages must describe
+
+Established by reading the code, not by assumption. The build must not
+contradict any of these; where one changes, the page that states it changes
+in the same commit.
+
+- **Two data roles.** For the demo-request form (`demo_requests` — name,
+  email, phone, dealership, DMS) we are the **controller**: it is our lead,
+  nobody else's. For everything inside the product — dealership customers'
+  names, VINs, service history, contracts with signatures on them — we are a
+  **service provider / processor** acting for the dealer, who is the
+  controller. The privacy policy has to keep these two lanes separate or it
+  will promise the wrong things about the wrong data.
+- **Dealerships are covered financial institutions** under the FTC Safeguards
+  Rule (GLBA). The landing page already says so out loud. That makes us a
+  Safeguards *service provider*, which is a contractual posture (we commit to
+  safeguards; the dealer is required to obtain that commitment) — not a badge.
+  This is the single most load-bearing compliance fact for a US dealership
+  vendor and it costs nothing but honesty to state properly.
+- **Subprocessors, the complete list:** Supabase (Postgres, auth, private
+  document storage), Stripe (billing), Anthropic (AI extraction and Co-Pilot;
+  API data is not used for model training), Netlify (hosting). There is no
+  fifth. A subprocessor list this short is a selling point; publish it.
+- **No cookies for anonymous visitors.** The only cookies in the codebase are
+  the Supabase session and `dt_active_store`, both set at sign-in, both
+  strictly functional. The marketing schema states its own rule:
+  *"Attribution, captured without cookies or third-party scripts."* No
+  analytics, no pixels, no tag manager, no third-party JS anywhere.
+- **No SMS** (TCPA, deliberate, v1) — links are copy-and-paste.
+- **AI governance is already real:** extracted contract fields land as
+  `AI_EXTRACTION` with `verifiedAt` null and are never trusted until a human
+  confirms them; the coverage engine degrades confidence on machine-read
+  sources and says so on screen; every confirmation is audit-logged with the
+  actor. This is a genuine, testable answer to "how do you govern AI use" —
+  most vendors our size have a paragraph of adjectives instead.
+- **Security architecture worth describing:** RLS FORCEd on every table with
+  a deny-by-default route allowlist; bearer credentials (invites, menu links,
+  device tokens) 32 random bytes, SHA-256 at rest; customer documents in a
+  private bucket behind 10-minute signed URLs; append-only audit log with
+  credential redaction; encryption in transit and at rest via Supabase.
+- **What we do not have:** SOC 2, ISO anything, a compliance team, or a
+  security certification. Any page that implies otherwise is a lie with a
+  paper trail.
+
+## 2. Tekion's list, mapped to our stage
+
+Tekion lists SOC 1/2 Type II, ISO 27001/27701/42001, GLBA, GDPR, CPRA, a DPA,
+a Modern Slavery statement, and a hosted status page. They are a
+multi-thousand-employee DMS vendor; that list is a decade of compliance
+budget. Copying its *shape* is right; copying its *claims* would be fatal.
+
+| Tekion has | Our v1 answer |
+|---|---|
+| SOC 1 / SOC 2 Type II | Not held. Say so, plainly, with one sentence on when it becomes worth pursuing (customer count, not vibes). Do not say "in progress" unless it is. |
+| ISO 27001 / 27701 | Not held. The security page describes the actual controls instead — which is what an auditor would check anyway. |
+| ISO 42001 (AI governance) | Not held — but the human-confirmation invariant (§1) is a concrete AI-governance practice, stated with the mechanism, not the framework name. |
+| GLBA | **Applies now.** Safeguards service-provider commitment, stated on the compliance page and reflected in the terms. |
+| GDPR | Does not apply — US dealerships only, no EU offering. One honest sentence, revisited if that changes. |
+| CPRA / CCPA | Thresholds almost certainly not met yet ($25M revenue / 100k consumers), but the privacy policy grants the access/deletion rights anyway — cheap for us at this size, and it future-proofs the document. |
+| DPA | Worth having as a short document for dealer contracts (processor commitments, subprocessor list, breach notice). v1: a page; countersignable PDF later. |
+| Cookie policy + consent manager | **We need no consent banner** — see §4. A short cookies section that says "none until you sign in" beats a banner. |
+| Modern Slavery statement | UK statutory requirement for large turnover. Not applicable; skip without comment. |
+| status.tekion.com | See the status decision in §3. |
+
+## 3. The pages, one by one
+
+All public → each route must be added to the public prefix list in
+`src/lib/auth/routes.ts`, or deny-by-default will bounce visitors to /login.
+
+**P1 — Shared footer component.** The current footer lives only in
+`src/app/page.tsx` (product links + the advisory-coverage disclaimer). Extract
+to a component used by `/`, `/demo`, `/request-demo`, and every new page below.
+Adds a second row: Privacy · Terms · Security · Compliance · Status · Press ·
+Legal, plus the one-line cookie sentence (§4) and © line with the legal
+entity name (open question Q1).
+
+**P2 — `/legal/privacy` — Privacy Policy.** Two-lane structure per §1: (a)
+what we collect as controller (demo requests, account emails) and why; (b)
+what we process as the dealer's service provider and that questions about a
+dealership's records go to the dealership. Subprocessor list. Retention
+honestly stated. CCPA-style rights granted regardless of thresholds. Contact
+address (Q2). Plain-language summary up top — the house voice, not the
+usual fog.
+
+**P3 — `/legal/terms` — Terms of Service.** B2B only. Must match the code:
+the billing lifecycle, proration and cancellation behaviour in
+`src/lib/billing/` is the contract's billing section — the terms describe what
+the code does, not a generic template. Must carry the three product
+disclaimers already on the landing page (coverage advisory, recall candidates,
+DMS as system of record) with the same wording. Dealer owns dealership data;
+we take a processing licence, not ownership. Governing law is Q3.
+
+**P4 — `/legal/cookies`** — one honest page (see §4). Also linked from the
+privacy policy.
+
+**P5 — `/security`.** The architecture from §1, written for a fixed-ops
+director and their IT contact: tenancy isolation, credential handling,
+document storage, audit log, AI data handling (Anthropic does not train on
+API data; extraction is human-confirmed), responsible-disclosure contact
+(Q2), and the certifications paragraph that says what we do not hold.
+
+**P6 — `/compliance`** (the Tekion-analogue trust page). The §2 table's
+right-hand column as prose: Safeguards service-provider posture front and
+centre, TCPA stance, AI governance with the mechanism, subprocessors, and the
+not-yet list. Short FAQ like Tekion's, answering only what we can answer
+truthfully (encryption, backups, who can see what, where data lives).
+
+**P7 — `/status`.** Decision needed (Q4):
+- *(a) Hosted status provider* (BetterStack/Instatus free tiers) — real
+  uptime history, incident comms, independent of our own outage. Cost: an
+  external service and a subdomain.
+- *(b) Self-built `/status` page* — live health check of app + database plus
+  links to Supabase/Stripe/Anthropic/Netlify status pages. Free, but it dies
+  with the site, which is the one moment a status page earns its keep, and a
+  public DB-touching route needs rate-limiting care.
+- **Recommendation: (a)** on a free tier, linked as `status.dealertech.io`;
+  (b) is theatre precisely when it matters.
+
+**P8 — `/press`.** One page: what DealerTech is in two paragraphs, founder
+contact (Q2), logo/wordmark downloads. No "News" section until news exists —
+an empty news page ages the product. Fold news in later.
+
+**Explicitly out of scope for this build:** SOC 2 pursuit, a cookie consent
+manager, GDPR machinery, a countersignable DPA PDF, a security.txt bounty
+programme (a plain `/.well-known/security.txt` pointing at the disclosure
+email *is* in scope — it is ten lines).
+
+## 4. The cookie banner question — recommendation: none
+
+Dan asked for "cookies decline or agree etc." The honest answer is that we do
+not need one, and adding one would make us look *worse*:
+
+- Consent banners are required (ePrivacy/GDPR; CCPA for sale/share) for
+  non-essential cookies — analytics, advertising, tracking. We set none.
+  Anonymous visitors to the marketing page receive **zero cookies**; signed-in
+  users receive two strictly-necessary ones, which are exempt from consent in
+  every regime that could plausibly apply to us.
+- A banner on a site with no trackable cookies is compliance theatre, invites
+  the question "consent to what?", and quietly signals we track like everyone
+  else.
+- The differentiating move is the opposite: a footer line — *"No tracking, no
+  analytics, no cookies until you sign in"* — linking to P4, which explains
+  the two functional cookies and commits that adding any non-essential cookie
+  means adding real consent first.
+- **The tripwire:** the moment anyone adds analytics, this decision reopens.
+  The build should pin the claim with a test asserting the marketing page's
+  rendered response sets no cookies, so the page cannot silently start lying.
+
+## 5. Notes for the Opus build brief (when Dan approves)
+
+- **routes.ts:** every new route into the public prefix list, with the
+  house-style comment on why each is public. Check `routes.test.ts` patterns.
+- **Copilot completeness test:** `src/lib/copilot/` has a test that walks the
+  route tree so new pages fail the suite until the app guide learns them —
+  determine whether it covers public marketing routes, and either teach the
+  guide or (if workspace-only) confirm these routes are exempt.
+- **Content as code:** static TSX in the existing marketing idiom (Section /
+  Eyebrow / H2 / Lede components in page.tsx — consider extracting them too).
+  No CMS, no MDX dependency, no new packages.
+- **Terms/billing fidelity:** the terms' billing section must be written by
+  reading `src/lib/billing/` (lifecycle states, proration, cancellation), not
+  from a template.
+- **Drafts are drafts:** privacy and terms pages ship with a visible
+  "last updated" date, and Dan should have a lawyer read both before real
+  contracts hang off them (Q5). The pages are the honest starting text, not
+  legal advice.
+- **The no-cookie test** from §4.
+- **security.txt** under `/.well-known/`, pointing at the Q2 address.
+
+## 6. Open questions for Dan
+
+- **Q1 — Legal entity.** Exact registered name and address for the © line,
+  terms, and privacy policy. (An LLC? These documents need the real name.)
+- **Q2 — Contact addresses.** privacy@, security@, press@ dealertech.io — do
+  they exist / route to you? One shared inbox is fine; the pages need
+  addresses that answer.
+- **Q3 — Governing law / venue** for the terms. Usually your home state.
+- **Q4 — Status page:** hosted provider (recommended) or self-built?
+- **Q5 — Lawyer review** of privacy + terms before the first paying contract
+  references them: yes (recommended) or ship-and-iterate?
+- **Q6 — Compliance ambition:** is SOC 2 something to name a timeline for on
+  the compliance page, or stay silent beyond "when customer count warrants
+  it"? Naming a date creates an obligation; silence is safer and still honest.
