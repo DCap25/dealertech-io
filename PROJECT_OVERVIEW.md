@@ -191,7 +191,7 @@ they discount the brake warning too — which was the one that mattered.
 | `dms/` | The adapter contract, mappers, hand-off records, authorization notes. |
 | `billing/` | The commercial layer: the lifecycle state machine, the access ladder it drives, Stripe mapping and webhooks, reconciliation, proration, and cancellation. Everything that decides is pure; `subscription-ops.ts` and `run.ts` do the I/O. |
 | `team/`, `invites/`, `manager/`, `platform/` | Roster, invitations, department board, tenant provisioning. |
-| `copilot/` | Claude-backed assistant over the prep sheet context (falls back to a mock provider with no API key). |
+| `copilot/` | Claude-backed assistant, two competences behind one panel: visit coaching over the prep sheet context, and app help grounded on a checked-in, role-sliced product guide covering every surface — a completeness test walks the route tree, so a new page fails the suite until the guide learns it. Reachable from a floating launcher on every workspace page (never on a customer surface) and from the prep sheet's own entry. Falls back to a mock provider with no API key. |
 
 ### The DMS boundary
 
