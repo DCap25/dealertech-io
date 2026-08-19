@@ -26,6 +26,19 @@ export async function middleware(request: NextRequest) {
   if (!url || !key) return response
 
   const supabase = createServerClient(url, key, {
+    /*
+      Must match src/lib/supabase/server.ts exactly. This is the client that
+      actually writes the refreshed session on most requests, so a difference
+      here would quietly be the real cookie policy — and a token refresh
+      landing without httpOnly would undo the whole thing on the first page
+      load after sign-in. The reasoning for each flag is written out in full at
+      the top of src/lib/supabase/server.ts.
+    */
+    cookieOptions: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+    },
     cookies: {
       getAll() {
         return request.cookies.getAll()

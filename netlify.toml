@@ -28,8 +28,26 @@
 # The workspace is behind a session; nothing in it should ever be indexed or
 # cached by an intermediary. The marketing site sets its own headers via the
 # framework and is unaffected.
+#
+# A wildcard does not cover its own root: "/drive/*" matches /drive/week but
+# not /drive itself, which is the landing page every signed-in advisor sees
+# first. So each surface with children is listed twice, once bare and once with
+# the wildcard. Every path here also appears in public/robots.txt; the two are
+# maintained together.
+[[headers]]
+  for = "/drive"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
 [[headers]]
   for = "/drive/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/customers"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
     Cache-Control = "private, no-store"
@@ -53,6 +71,12 @@
     Cache-Control = "private, no-store"
 
 [[headers]]
+  for = "/advisor"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
   for = "/advisor/*"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
@@ -60,6 +84,102 @@
 
 [[headers]]
   for = "/follow-up"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/bdc"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/bdc/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/introduce"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/introduce/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/devices"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/devices/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/team"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/billing"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/import"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/setup"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+# The platform console. Not a dealership surface at all — it lists tenants and
+# leads — so it is the last thing that should ever appear in a search result.
+[[headers]]
+  for = "/admin"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/admin/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+# Token surfaces. These carry no session — a customer opening a menu link and a
+# tablet on the drive are not signed-in users — but they are not marketing
+# either, and the URL itself is the credential. Indexing one, or letting a
+# proxy keep a copy, would be the same leak as indexing the workspace.
+[[headers]]
+  for = "/m/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/invite/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-store"
+
+[[headers]]
+  for = "/present"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
     Cache-Control = "private, no-store"

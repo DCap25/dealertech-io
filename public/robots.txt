@@ -1,0 +1,29 @@
+# The marketing and trust pages are meant to be found. The workspace is not.
+#
+# The header in netlify.toml is the real control — X-Robots-Tag: noindex on
+# every path below. This file only saves crawlers the request. Keep the two
+# lists the same; a path removed from one and left in the other is a surface
+# nobody is actually protecting.
+#
+# No Sitemap line: there is no sitemap.
+
+User-agent: *
+Allow: /
+
+Disallow: /drive
+Disallow: /customers
+Disallow: /vehicles
+Disallow: /manager
+Disallow: /advisor
+Disallow: /follow-up
+Disallow: /bdc
+Disallow: /introduce
+Disallow: /devices
+Disallow: /team
+Disallow: /billing
+Disallow: /import
+Disallow: /setup
+Disallow: /admin
+Disallow: /m/
+Disallow: /invite/
+Disallow: /present
