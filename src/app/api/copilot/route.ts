@@ -108,10 +108,17 @@ export async function POST(req: Request) {
 
   // Decisions are advisor UI state and exist nowhere else yet, so they are the
   // one thing we do take from the client — and only as an id → enum map.
+  //
+  // The list is every answer except PENDING, which is absence and needs no
+  // entry — and it must stay the same list `handoff-actions.ts` accepts. It
+  // used to omit CALL_ME: the same hand-written-list drift F5 fixed on the
+  // tablet mirror, one surface over, and it meant the Co-Pilot was grounded
+  // on a sheet where the customer's "call me about this" read as unanswered —
+  // the one answer the advisor most needs help acting on.
   const decisions: Record<string, OpportunityDecision> = {}
   if (body.decisions && typeof body.decisions === 'object') {
     for (const [id, value] of Object.entries(body.decisions as Record<string, unknown>)) {
-      if (value === 'ACCEPTED' || value === 'DECLINED' || value === 'SKIPPED') {
+      if (value === 'ACCEPTED' || value === 'DECLINED' || value === 'CALL_ME' || value === 'SKIPPED') {
         decisions[id] = value
       }
     }

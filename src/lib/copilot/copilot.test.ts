@@ -117,6 +117,21 @@ describe('buildCopilotContext', () => {
     const ctx = buildCopilotContext(sheet())
     expect(ctx.opportunities[0]?.decision).toBe('PENDING')
   })
+
+  it('grounds a call-me as a call-me, and never as money', () => {
+    // The route used to filter CALL_ME out of the decisions map (the same
+    // hand-written-list drift F5 fixed on the tablet mirror), so the model was
+    // told the customer had not answered — on the one line where they had
+    // asked to be called. The context passes the answer through verbatim and
+    // keeps it out of both totals: not accepted money, and not still-winnable.
+    const s = sheet({
+      opportunities: [opportunity(), opportunity({ id: 'opp-2', estimatedAmount: 400 })],
+    })
+    const ctx = buildCopilotContext(s, { 'opp-1': 'CALL_ME' })
+    expect(ctx.opportunities.find((o) => o.id === 'opp-1')?.decision).toBe('CALL_ME')
+    expect(ctx.acceptedValue).toBe(0)
+    expect(ctx.remainingValue).toBe(400)
+  })
 })
 
 describe('renderContext', () => {
