@@ -138,13 +138,17 @@ The UI is a renderer over it; the nightly job calls the same functions.
 
 | Surface | Route | What it does |
 |---|---|---|
-| Today's drive | `/drive` | The day's appointments, ranked |
+| Today's drive | `/drive` | The day's appointments, ranked, each chip-labelled with whose book it sits on; Mine dims other advisors' cards rather than hiding them |
+| The week | `/drive/week` | Seven days as advisors' books — a Mine view of your own columns and an Everyone view where uneven books read down a row |
+| Book an appointment | `/drive/book` | A slot grid over the scheduling engine — day rules, capacity, and the advisor-assignment cascade |
+| Delivery introduction | `/introduce` | Sales walks the buyer to a named advisor and the first maintenance visit is booked before the keys leave the building; the whole of the SALES role's surface |
 | Prep sheet | `/drive/[appointmentId]` | The core screen: coverage, warranty, history, ranked opportunities, talk tracks |
 | Write-up | `/advisor/write-up/[appointmentId]` | Start the visit |
 | Repair order | `/advisor/ro/[roId]` | Work the RO, close and deliver |
 | Scorecard | `/advisor/scorecard` | The advisor's own numbers |
 | Follow-up | `/follow-up` | Declined work and cadence tasks, per vehicle |
-| Customers / vehicles | `/customers`, `/vehicles/[vehicleId]` | Records, ownership, coverage, visit history |
+| Customers / vehicles | `/customers`, `/vehicles/[vehicleId]` | Records, ownership, coverage, and the timeline — one customer's history across visits, menus, decisions and follow-ups |
+| Contract upload | `/vehicles/[vehicleId]/contract` | Upload a service agreement (PDF or image); Claude extracts the terms, a human confirms every field |
 | BDC | `/bdc` | Outbound desk |
 | Manager | `/manager` | Department board |
 | Team | `/team` | Roster: invite, change role, remove, restore |
@@ -162,6 +166,12 @@ one derivation** (`buildDeviceSnapshot`):
 
 Plus **on paper** (`PrintableMenu`) — different markup, same data, because a
 drive with one dead tablet still has customers on it.
+
+The paired tablet also has a **self-serve mode** — handed to a customer in the
+waiting room like a clinic questionnaire, it walks the menu one item at a time
+at their own pace. The answers arrive as the `TABLET_SELF_SERVE` channel and
+merge into the same decision model as every other surface; they are
+preferences, never authorizations, like everything else a customer taps.
 
 Every item offers three answers of equal visual weight, with *Not today* first:
 
@@ -186,6 +196,9 @@ they discount the brake warning too — which was the one that mattered.
 | `odometer/` | Rollback detection — an odometer cannot go backwards, and each explanation for why it appears to has different consequences. |
 | `reconcile/` | Settles declines and follow-up tasks when an RO closes, scoped per vehicle. |
 | `cadence/` | Scheduled follow-up rules and tasks. |
+| `scheduling/` | The appointment book: day rules, slot generation, capacity, and the advisor-assignment cascade (requested → owning → balanced → claimed at write-up). DealerTech owns the book; the schedule is the advisor's, not the technician's; tech hours stay DMS territory (`docs/DRIVE_PLAN.md` D1–D3). |
+| `timeline/` | The advisor's CRM read model — one customer's history across visits, menus, decisions, declines and open follow-up threads, assembled read-only from the tables that already record it. |
+| `contract-capture/` | Uploaded service agreements read by Claude: schema-validated extraction, a normaliser that returns null rather than guessing, and staged fields a human confirms. Machine-read data lands as `AI_EXTRACTION` with `verifiedAt` null — nothing extracted is trusted until a person verifies it. |
 | `performance/` | Visit outcomes and advisor scorecards. |
 | `pairing/` | Tablet pairing codes and the customer-safe device snapshot. |
 | `dms/` | The adapter contract, mappers, hand-off records, authorization notes. |
@@ -249,16 +262,16 @@ src/
   components/   prep-sheet/, present/, explainer/, copilot/, ui/
   lib/          the engines — pure, I/O-free, unit-tested
   db/
-    schema/     48 tables across tenancy, customers, service, coverage,
+    schema/     55 tables across tenancy, customers, service, coverage,
                 communication, retention, devices, documents, handoffs,
-                integration, marketing
-    migrations/ 0000–0019, hand-written and idempotent
+                integration, marketing, scheduling
+    migrations/ 0000–0031, hand-written and idempotent
     scoped.ts   withUserScope() — runs work as the authenticated role
 scripts/        migrations, seeds, RLS verification, sync runners, smoke
 netlify/        the scheduled pricing sync
 ```
 
-**~1,020 unit tests across 50 files.** Every engine has one.
+**~1,360 unit tests across 63 files.** Every engine has one.
 
 ### Security model
 
@@ -310,6 +323,13 @@ the only record of a bug that took a long time to find.
 - `DEPLOYING.md` — Netlify setup, environment variables, Supabase redirects,
   storage, the morning sync
 - `src/db/README.md` — migrations, the `db:push` trap, closing the RLS gap
+- `docs/DRIVE_PLAN.md` — the scheduling layer: the six decisions (who owns the
+  book, whose schedule it is, where tech hours live) and the four build phases
+- `docs/MENU_REVIEW.md` — the menu-flow audit: fourteen findings, every one
+  fixed and adversarially verified, plus the §7 product questions
+- `docs/SERVICE_VIDEO_PROMPTS.md` / `docs/SERVICE_ANIMATION_PROMPTS.md` — one
+  Grok Imagine prompt per customer-menu service, photorealistic and animated
+  sets
 - `AGENTS.md` / `CLAUDE.md` — this Next.js version has breaking changes from
   training data; read `node_modules/next/dist/docs/` before writing code
 
