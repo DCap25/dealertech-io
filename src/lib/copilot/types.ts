@@ -12,6 +12,14 @@ export type CopilotIntent =
   | 'TALK_TRACK'
   | 'OBJECTION'
   | 'FREEFORM'
+  /**
+   * The second competence: how DealerTech itself works.
+   *
+   * The odd one out, and deliberately so. Every intent above is grounded in one
+   * customer's visit; this one is grounded in the product guide and the asker's
+   * role, and carries no customer data at all — see `app-guide.ts`.
+   */
+  | 'APP_HELP'
 
 /** Objections common enough to be one tap rather than typing. */
 export const COMMON_OBJECTIONS = [

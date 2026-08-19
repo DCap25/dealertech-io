@@ -10,6 +10,19 @@ import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
  * Side panel on desktop, bottom sheet on a tablet held in portrait. It knows
  * the visit only by appointment id — every fact in an answer is re-derived
  * server-side, so nothing here can invent coverage.
+ *
+ * ---------------------------------------------------------------------------
+ * TWO COMPETENCES, ONE PANEL
+ * ---------------------------------------------------------------------------
+ * With an `appointmentId` it is the visit Co-Pilot: coverage, what to present
+ * next, talk tracks, objections. Without one it answers questions about how
+ * DealerTech itself works, grounded in the product guide and the asker's role.
+ *
+ * One component rather than two, because a fork would be two copies of the
+ * streaming, the abort handling, the copy button and the keyboard conventions —
+ * and the second copy is the one that quietly stops matching. The mode changes
+ * which questions are offered and which intent an ask carries; everything the
+ * panel *is* stays the same.
  */
 
 export interface CopilotTarget {
@@ -45,7 +58,26 @@ const INTENT_LABEL: Record<CopilotIntent, string> = {
   TALK_TRACK: 'Generate talk track',
   OBJECTION: 'Handle objection',
   FREEFORM: 'Question',
+  APP_HELP: 'How DealerTech works',
 }
+
+/**
+ * The openers in app-help mode.
+ *
+ * Real sentences rather than topic labels: the answer a person gets is the
+ * answer to the question shown on the button, so a promised action is never
+ * really a menu — the same reasoning as `autoIntent` below.
+ */
+const APP_HELP_STARTERS: { label: string; question: string }[] = [
+  { label: 'Send a menu', question: 'How do I get the menu in front of a customer?' },
+  { label: 'What they see', question: 'What does the customer see when I send them a link?' },
+  { label: 'Book a visit', question: 'How do I book an appointment?' },
+  { label: 'Declined work', question: 'Where does declined work go, and how do I follow it up?' },
+]
+
+/** The one app-help question worth offering without leaving a visit. */
+const THIS_SCREEN_QUESTION =
+  'What is the prep sheet for, and what can I do on it?'
 
 function ActionButton({
   children, onClick, disabled, primary,
@@ -96,17 +128,19 @@ function AnswerText({ text }: { text: string }) {
 
 export function CopilotPanel({
   appointmentId,
-  decisions,
-  target,
+  decisions = {},
+  target = {},
   open,
   onOpenChange,
 }: {
-  appointmentId: string
-  decisions: Record<string, OpportunityDecision>
-  target: CopilotTarget
+  /** The visit this is about. Absent puts the panel in app-help mode. */
+  appointmentId?: string
+  decisions?: Record<string, OpportunityDecision>
+  target?: CopilotTarget
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const visitMode = Boolean(appointmentId)
   const [turns, setTurns] = useState<Turn[]>([])
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
@@ -147,7 +181,7 @@ export function CopilotPanel({
       const label =
         intent === 'OBJECTION' && extra.objection
           ? `Objection: "${extra.objection}"`
-          : intent === 'FREEFORM' && extra.question
+          : extra.question
             ? extra.question
             : target.opportunityTitle && (intent === 'TALK_TRACK' || intent === 'OBJECTION')
               ? `${INTENT_LABEL[intent]} — ${target.opportunityTitle}`
@@ -236,14 +270,16 @@ export function CopilotPanel({
       />
       <aside
         role="dialog"
-        aria-label="Service Co-Pilot"
+        aria-label={visitMode ? 'Service Co-Pilot' : 'DealerTech Co-Pilot'}
         className="expand-in fixed inset-x-0 bottom-0 z-50 flex h-[85dvh] flex-col rounded-t-2xl border-t border-[var(--border)] bg-[var(--surface)] shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:h-auto sm:w-[27rem] sm:rounded-none sm:border-l sm:border-t-0"
       >
         <header className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
           <div className="min-w-0">
             <h2 className="text-sm font-bold">Co-Pilot</h2>
             <p className="truncate text-xs text-neutral-500">
-              {target.opportunityTitle ?? target.coverageLabel ?? 'This visit'}
+              {visitMode
+                ? (target.opportunityTitle ?? target.coverageLabel ?? 'This visit')
+                : 'How DealerTech works'}
             </p>
           </div>
           <button
@@ -259,8 +295,9 @@ export function CopilotPanel({
           {turns.length === 0 && (
             <div className="rounded-xl bg-[var(--surface-muted)] p-4">
               <p className="text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
-                I can see this customer, their vehicle, what they already own and every
-                opportunity on the sheet. Ask me anything, or start with one of these.
+                {visitMode
+                  ? 'I can see this customer, their vehicle, what they already own and every opportunity on the sheet. Ask me anything, or start with one of these.'
+                  : 'Ask me how DealerTech works — any screen you can open, and what the customer sees at the other end. I have no customer in front of me here; for a question about a particular visit, open its prep sheet and ask from there.'}
               </p>
             </div>
           )}
@@ -299,37 +336,71 @@ export function CopilotPanel({
         </div>
 
         <div className="border-t border-[var(--border)] px-4 py-3">
-          <div className="grid grid-cols-2 gap-2">
-            <ActionButton onClick={() => ask('NEXT_STEP')} disabled={busy} primary>
-              Best next step
-            </ActionButton>
-            <ActionButton onClick={() => ask('EXPLAIN_COVERAGE')} disabled={busy}>
-              Explain coverage
-            </ActionButton>
-            <ActionButton onClick={() => ask('TALK_TRACK')} disabled={busy}>
-              Talk track
-            </ActionButton>
-            <ActionButton
-              onClick={() => ask('OBJECTION', { objection: COMMON_OBJECTIONS[0] })}
-              disabled={busy}
-            >
-              Handle objection
-            </ActionButton>
-          </div>
+          {visitMode ? (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <ActionButton onClick={() => ask('NEXT_STEP')} disabled={busy} primary>
+                  Best next step
+                </ActionButton>
+                <ActionButton onClick={() => ask('EXPLAIN_COVERAGE')} disabled={busy}>
+                  Explain coverage
+                </ActionButton>
+                <ActionButton onClick={() => ask('TALK_TRACK')} disabled={busy}>
+                  Talk track
+                </ActionButton>
+                <ActionButton
+                  onClick={() => ask('OBJECTION', { objection: COMMON_OBJECTIONS[0] })}
+                  disabled={busy}
+                >
+                  Handle objection
+                </ActionButton>
+              </div>
 
-          <div className="mt-2.5 flex gap-1.5 overflow-x-auto pb-1">
-            {COMMON_OBJECTIONS.map((o) => (
-              <button
-                key={o}
-                type="button"
-                disabled={busy}
-                onClick={() => ask('OBJECTION', { objection: o })}
-                className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs transition hover:border-neutral-900 disabled:opacity-40 dark:hover:border-neutral-300"
-              >
-                “{o}”
-              </button>
-            ))}
-          </div>
+              <div className="mt-2.5 flex gap-1.5 overflow-x-auto pb-1">
+                {COMMON_OBJECTIONS.map((o) => (
+                  <button
+                    key={o}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => ask('OBJECTION', { objection: o })}
+                    className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs transition hover:border-neutral-900 disabled:opacity-40 dark:hover:border-neutral-300"
+                  >
+                    “{o}”
+                  </button>
+                ))}
+                {/*
+                  The other competence, without leaving the visit.
+
+                  The floating help button stands down on the prep sheet rather
+                  than fighting this screen's own launcher, so this chip is how
+                  "how does any of this work" is reachable from here. It asks
+                  APP_HELP, which is grounded in the product guide and never
+                  touches the customer on the sheet behind it.
+                */}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => ask('APP_HELP', { question: THIS_SCREEN_QUESTION })}
+                  className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs transition hover:border-neutral-900 disabled:opacity-40 dark:hover:border-neutral-300"
+                >
+                  How this screen works
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {APP_HELP_STARTERS.map((s, i) => (
+                <ActionButton
+                  key={s.label}
+                  onClick={() => ask('APP_HELP', { question: s.question })}
+                  disabled={busy}
+                  primary={i === 0}
+                >
+                  {s.label}
+                </ActionButton>
+              ))}
+            </div>
+          )}
 
           <form
             className="mt-2.5 flex gap-2"
@@ -338,14 +409,14 @@ export function CopilotPanel({
               const q = question.trim()
               if (!q || busy) return
               setQuestion('')
-              void ask('FREEFORM', { question: q })
+              void ask(visitMode ? 'FREEFORM' : 'APP_HELP', { question: q })
             }}
           >
             <input
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               maxLength={500}
-              placeholder="Ask about this visit…"
+              placeholder={visitMode ? 'Ask about this visit…' : 'Ask how DealerTech works…'}
               className="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm outline-none focus:border-neutral-900 dark:focus:border-neutral-300"
             />
             <button

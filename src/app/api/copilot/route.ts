@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { loadDriveDay } from '@/lib/prep-sheet/load'
 import {
-  SYSTEM_PROMPT, buildCopilotContext, buildUserPrompt, getProvider, sourceLabel,
+  APP_HELP_SYSTEM_PROMPT, SYSTEM_PROMPT, appHelpSourceLabel, buildAppGuide,
+  buildAppHelpPrompt, buildCopilotContext, buildUserPrompt, getProvider, selectMode,
+  sourceLabel,
 } from '@/lib/copilot'
-import type { CopilotIntent, CopilotRequest } from '@/lib/copilot'
+import type { CopilotGrounding, CopilotIntent, CopilotRequest } from '@/lib/copilot'
 import type { OpportunityDecision } from '@/lib/prep-sheet/presentation'
 import { demoNow } from '@/lib/demo-day'
 import { getCurrentUser, getCurrentStore } from '@/lib/auth/session'
@@ -16,7 +18,7 @@ export const dynamic = 'force-dynamic'
 const DAY = () => demoNow()
 
 const INTENTS: CopilotIntent[] = [
-  'EXPLAIN_COVERAGE', 'NEXT_STEP', 'TALK_TRACK', 'OBJECTION', 'FREEFORM',
+  'EXPLAIN_COVERAGE', 'NEXT_STEP', 'TALK_TRACK', 'OBJECTION', 'FREEFORM', 'APP_HELP',
 ]
 
 /** Long enough for a real question, short enough not to be a prompt-stuffing vector. */
@@ -81,12 +83,50 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Malformed request body.' }, { status: 400 })
   }
 
-  const appointmentId = str(body.appointmentId, 64)
   const intent = INTENTS.find((i) => i === body.intent)
-  if (!appointmentId || !intent) {
-    return NextResponse.json(
-      { error: 'appointmentId and a known intent are required.' },
-      { status: 400 },
+  if (!intent) {
+    return NextResponse.json({ error: 'A known intent is required.' }, { status: 400 })
+  }
+
+  /*
+    Which competence this question wants.
+
+    Pure, so the one edge that matters is tested rather than reasoned about:
+    APP_HELP never reaches a visit even when asked from inside a prep sheet,
+    and a visit intent with no appointment is refused rather than quietly
+    answered from the product guide.
+  */
+  const selection = selectMode({ intent, appointmentId: str(body.appointmentId, 64) })
+  if ('error' in selection) {
+    return NextResponse.json({ error: selection.error }, { status: 400 })
+  }
+
+  const request: CopilotRequest = {
+    intent,
+    opportunityId: str(body.opportunityId, 64),
+    coverageKey: str(body.coverageKey, 128),
+    objection: str(body.objection),
+    question: str(body.question),
+  }
+
+  /*
+    App help: the product guide and who is asking, and nothing else.
+
+    No store row is loaded and no drive day is read — there is no customer in
+    this answer, so there is nothing to derive. The store's name comes off the
+    session the auth check already resolved, and the guide is sliced to what
+    this role can actually reach so an answer never coaches somebody into a
+    page the product would redirect them out of.
+  */
+  if (selection.mode === 'APP_HELP') {
+    const guide = buildAppGuide(user.role, { isPlatformAdmin: user.isPlatformAdmin })
+    return answer(
+      req,
+      request,
+      APP_HELP_SYSTEM_PROMPT,
+      buildAppHelpPrompt(request, guide, user.storeName),
+      { kind: 'APP', guide },
+      appHelpSourceLabel(guide),
     )
   }
 
@@ -101,7 +141,7 @@ export async function POST(req: Request) {
    * tampered payload cannot put words in the model's mouth about coverage.
    */
   const sheets = await loadDriveDay(store.id, DAY(), DAY())
-  const sheet = sheets.find((s) => s.appointment?.id === appointmentId)
+  const sheet = sheets.find((s) => s.appointment?.id === selection.appointmentId)
   if (!sheet) {
     return NextResponse.json({ error: 'Appointment not found.' }, { status: 404 })
   }
@@ -124,15 +164,33 @@ export async function POST(req: Request) {
     }
   }
 
-  const request: CopilotRequest = {
-    intent,
-    opportunityId: str(body.opportunityId, 64),
-    coverageKey: str(body.coverageKey, 128),
-    objection: str(body.objection),
-    question: str(body.question),
-  }
-
   const context = buildCopilotContext(sheet, decisions, DAY())
+
+  return answer(
+    req,
+    request,
+    SYSTEM_PROMPT,
+    buildUserPrompt(request, context),
+    { kind: 'VISIT', context },
+    sourceLabel(request, context),
+  )
+}
+
+/**
+ * Stream one answer.
+ *
+ * Both modes end here, so the streaming, the error handling and the headers
+ * cannot drift apart between them — the only thing that differs is the two
+ * strings and the grounding they were built from.
+ */
+async function answer(
+  req: Request,
+  request: CopilotRequest,
+  system: string,
+  user: string,
+  grounding: CopilotGrounding,
+  source: string,
+): Promise<Response> {
   const provider = await getProvider()
 
   const encoder = new TextEncoder()
@@ -140,12 +198,7 @@ export async function POST(req: Request) {
     async start(controller) {
       try {
         for await (const chunk of provider.stream(
-          {
-            system: SYSTEM_PROMPT,
-            user: buildUserPrompt(request, context),
-            request,
-            context,
-          },
+          { system, user, request, grounding },
           req.signal,
         )) {
           controller.enqueue(encoder.encode(chunk))
@@ -165,7 +218,7 @@ export async function POST(req: Request) {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': 'no-store',
-      'X-Copilot-Source': sourceLabel(request, context),
+      'X-Copilot-Source': source,
       'X-Copilot-Provider': provider.name,
     },
   })

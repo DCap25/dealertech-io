@@ -1,4 +1,6 @@
 import { mockAnswer } from './mock-answer'
+import { mockAppHelpAnswer } from './app-help'
+import type { AppGuide } from './app-guide'
 import type { CopilotContext, CopilotRequest } from './types'
 
 /**
@@ -9,12 +11,24 @@ import type { CopilotContext, CopilotRequest } from './types'
  * single env var, not a refactor.
  */
 
+/**
+ * What the answer is allowed to be built from.
+ *
+ * A union rather than two optional fields, because the two competences must not
+ * be able to overlap: an app-help answer that could reach a `CopilotContext` is
+ * one refactor away from putting a customer's coverage into an answer about how
+ * the software works.
+ */
+export type CopilotGrounding =
+  | { kind: 'VISIT'; context: CopilotContext }
+  | { kind: 'APP'; guide: AppGuide }
+
 export interface CopilotCall {
   system: string
   user: string
   /** The mock composes from these directly; a real model sees only the prompts. */
   request: CopilotRequest
-  context: CopilotContext
+  grounding: CopilotGrounding
 }
 
 export interface CopilotProvider {
@@ -28,7 +42,10 @@ const MOCK_CHUNK_MS = 18
 export const mockProvider: CopilotProvider = {
   name: 'mock',
   async *stream(call, signal) {
-    const text = mockAnswer(call.request, call.context)
+    const text =
+      call.grounding.kind === 'APP'
+        ? mockAppHelpAnswer(call.request, call.grounding.guide)
+        : mockAnswer(call.request, call.grounding.context)
     // Split on whitespace but keep it, so line breaks in the answer survive.
     const chunks = text.match(/\S+\s*/g) ?? [text]
     for (const chunk of chunks) {

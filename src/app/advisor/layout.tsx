@@ -1,1 +1,1 @@
-export { AppFrame as default } from '@/components/ui/site-footer'
+export { AppFrame as default } from '@/components/ui/app-frame'

@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { AccountBanner } from './account-banner'
 
 /**
  * The line at the bottom of every page.
@@ -26,6 +25,10 @@ import { AccountBanner } from './account-banner'
  * The root layout is not the place for it: `/` and `/demo` are statically
  * prerendered, and choosing a footer there would mean reading the request path
  * and turning the marketing site dynamic to decide the wording of one line.
+ *
+ * The workspace wrapper that used to live here is now `./app-frame.tsx` — the
+ * same argument, moved one file over so a client component cannot travel from
+ * it into a customer's bundle.
  */
 
 function Line({ children, clearsActionBar = false }: {
@@ -57,30 +60,21 @@ export function Copyright() {
 }
 
 /**
- * Inside the product. Wraps a whole section of the workspace.
+ * The workspace wrapper lives in `app-frame.tsx`, not here.
  *
- * Also where the account notice goes, for the same reason the footer does:
- * "every page in the workspace" has to survive the next page somebody adds,
- * and a banner pasted into sixteen files will be missing from the seventeenth.
- *
- * Note what this does NOT cover — `CustomerFrame` is a separate wrapper, so a
- * customer holding a tablet or opening a menu link can never be shown the
- * dealership's billing state. That separation is load-bearing, not incidental.
+ * It carries the account notice and the Co-Pilot's floating launcher as well as
+ * this footer, and the launcher is a client component — keeping it out of this
+ * file is what stops it reaching the bundle for the two customer screens below.
+ * See the note in that file.
  */
-export function AppFrame({ children }: { children: ReactNode }) {
-  return (
-    <>
-      <AccountBanner />
-      {children}
-      <PoweredBy />
-    </>
-  )
-}
 
 /**
  * The two screens a customer holds — the paired tablet and the link on their
  * own phone. Same line as the rest of the product, moved up clear of the
  * action bar those two pin to the bottom of the screen.
+ *
+ * Nothing in this module reaches a client component, so nothing staff-facing
+ * can arrive in a customer's browser through it.
  */
 export function CustomerFrame({ children }: { children: ReactNode }) {
   return (
