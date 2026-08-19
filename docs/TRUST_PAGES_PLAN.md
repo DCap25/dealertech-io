@@ -1,7 +1,8 @@
 # Trust, Legal & Footer Pages — Scope
 
-**Status: PROPOSED — awaiting Dan's decisions on the open questions in §6,
-then an Opus build brief per §5.**
+**Status: BUILT AND VERIFIED (2026-08-19) — see §8 for the verification
+record. Publishing still waits on the §6 leftovers: the registered address,
+the info@ mailbox going live, and the lawyer pass (Q5).**
 
 What has to exist at the bottom of the marketing page, what each page must
 say, and — as important — what we should refuse to say. The reference point
@@ -42,8 +43,9 @@ in the same commit.
   API data is not used for model training), Netlify (hosting). There is no
   fifth. A subprocessor list this short is a selling point; publish it.
 - **No cookies for anonymous visitors.** The only cookies in the codebase are
-  the Supabase session and `dt_active_store`, both set at sign-in, both
-  strictly functional. The marketing schema states its own rule:
+  the Supabase session (set at sign-in, now explicitly httpOnly — see §8) and
+  `dt_active_store` (set when a rooftop is picked, so a one-store user may
+  never receive it), both strictly functional. The marketing schema states its own rule:
   *"Attribution, captured without cookies or third-party scripts."* No
   analytics, no pixels, no tag manager, no third-party JS anywhere.
 - **No SMS** (TCPA, deliberate, v1) — links are copy-and-paste.
@@ -277,3 +279,63 @@ with this build and the parent-site question can wait without cost. One
 follow-on worth noting: The DAS Board's own legal pages
 (src/pages/legal in that repo) should eventually agree with these on entity
 name, subprocessors and tone — a later pass, in that repo.
+
+## 8. Verification record (2026-08-19)
+
+Opus built the nine pages per §3–§5; the build was then verified
+adversarially — three lanes, each instructed to contradict the pages rather
+than confirm them — before anything was committed. The rule being enforced:
+every sentence on these pages is a claim about the code, so either the
+sentence changes or the code does. Both happened.
+
+**Where the pages were wrong, and which way each fix went:**
+
+- **"Session cookies that page scripts cannot read" was false** —
+  `@supabase/ssr` defaults to `httpOnly: false` and nothing overrode it. The
+  *code* changed: both `createServerClient` sites now set
+  `httpOnly: true` explicitly (safe here — there is no browser client), and
+  the sentence went back on the security and cookie pages once it was true.
+- **The data-export promise had no feature behind it.** The access policy
+  permits export after closure; nothing implements it. The *pages* changed:
+  export is "we run it for you on request", with the self-serve button named
+  as roadmap. Building it stays on the list.
+- **"New work cannot be saved" when suspended was a banner nothing enforced.**
+  The *code* changed: `checkWork()` in session.ts now guards seventeen drive
+  write actions, `MANAGE_STAFF` guards all three roster mutations (restore
+  included — it was the bypass), and the customer menu link refuses as a
+  closed list rather than leaking the dealership's billing state to their
+  customer. Three teardown actions are deliberately unguarded (take back a
+  menu, discard an upload, unpair a device): revoking access and clearing
+  drafts must never be hostage to an invoice. ADD_STORE and EXPORT_DATA have
+  no tenant-facing call sites to guard; the reasoning is written at
+  `createStore`. Found along the way and fixed: a trial-expired store used to
+  read "This account is suspended" — refusals now derive from the banner so
+  the two cannot disagree.
+- **"You will be billed once more" on cancellation** was wrong on the card
+  rail (advance billing; `cancel_at_period_end` invoices nothing further).
+  Reworded, with the invoice-rail caveat kept.
+- **Smaller wording corrections:** audit log "cannot be deleted including by
+  us" softened to the policy-level truth on three pages (the privileged
+  connection exists and the pages must not pretend otherwise); NHTSA named as
+  a fifth external party on the security page (VINs go there; a complete list
+  is only worth having if it is complete); tablet pairing code described as
+  the ten-minute claim ticket it is rather than folded into "32 bytes,
+  hashed"; cookie timing corrected (session at sign-in, store cookie on
+  pick); "homepage or the demo" attribution trimmed (the form exists only on
+  the homepage); staff-access wording pinned to what is actually audited
+  (grants and revocations, not each read); noindex headers extended to the
+  workspace surfaces netlify.toml missed, plus robots.txt.
+- **The tripwire test got its blind spots closed:** the marketing-surface
+  test now scans the root layout and globals.css, and its own comments say
+  what it still cannot see.
+
+**Operational note for whoever suspends an account:** `closeRepairOrder` is a
+write, so suspending a dealership mid-day leaves open ROs unclosable until
+payment recovers. Suspend after close of business. Documented at the guard.
+
+**Still open before real contracts hang off these pages:** registered
+address (Q1), the info@dealertech.io mailbox actually existing (Q2),
+governing state (Q3), the lawyer pass (Q5) — all one-file edits in
+`src/lib/site/legal.ts` when they land. Roadmap debts the pages now name:
+self-serve data export, hosted status provider when there are customers to
+notify, a rehearsed restore behind the DR answer.
