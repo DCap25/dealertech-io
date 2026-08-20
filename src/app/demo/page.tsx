@@ -57,6 +57,78 @@ export default function DemoPage() {
 
       <DemoForm />
 
+      {/*
+        The coverage answer is the hook, not the product. A visitor convinced
+        by this screen used to have nowhere to go but the booking form; now the
+        page says out loud that this is one screen of a workspace, names the
+        rest, and offers the two ways in — a walkthrough, or the tour code a
+        walkthrough comes with. The workspace itself stays behind the code on
+        purpose: this page gives away outputs, not the product.
+      */}
+      <section className="mt-14 border-t border-[var(--rule)] pt-10">
+        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--signal)]">
+          One screen of it
+        </p>
+        <h2 className="mt-2 max-w-2xl text-2xl font-bold tracking-tight sm:text-3xl">
+          The coverage answer is where the workspace starts, not where it ends.
+        </h2>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--ink-soft)]">
+          In the product, this answer arrives already worked into the advisor&rsquo;s morning: a
+          prep sheet per appointment, a customer menu built to be handed over, and a follow-up
+          list that never lets a declined job go quiet.
+        </p>
+
+        <div className="mt-8 grid gap-4 sm:grid-cols-3">
+          {(
+            [
+              [
+                'The prep sheet',
+                'Every appointment arrives as a one-screen brief — coverage still active, declined work re-priced, maintenance projected to the odometer they will actually arrive with, tires predicted to a date. Ranked by what to present first.',
+                '/#how',
+              ],
+              [
+                'The menu',
+                'Three answers of equal weight, Not today first, and the covered total as the first number the customer sees. Built to be physically handed over mid-conversation with nothing on it needing to be explained away.',
+                '/#menu',
+              ],
+              [
+                'The follow-up',
+                'Every decline becomes a dated task with a dollar figure and a talk track. So does expiring prepaid maintenance and a customer gone quiet. Your BDC works a ranked list instead of a spreadsheet.',
+                '/#how',
+              ],
+            ] as const
+          ).map(([title, body, href]) => (
+            <Link
+              key={title}
+              href={href}
+              className="rounded-2xl border border-[var(--rule)] bg-[var(--paper)] p-5 transition hover:border-[var(--ink)]"
+            >
+              <h3 className="text-base font-bold">{title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">{body}</p>
+            </Link>
+          ))}
+        </div>
+
+        <div className="mt-8 flex flex-wrap items-center gap-3">
+          <Link
+            href="/#demo"
+            className="touch-target inline-flex items-center rounded-xl bg-[var(--ink)] px-6 py-3 text-sm font-semibold text-[var(--paper)] transition hover:opacity-85"
+          >
+            Book a walkthrough
+          </Link>
+          <Link
+            href="/tour"
+            className="touch-target inline-flex items-center rounded-xl border border-[var(--rule)] px-6 py-3 text-sm font-semibold transition hover:border-[var(--ink)]"
+          >
+            Have a tour code? →
+          </Link>
+        </div>
+        <p className="mt-3 text-sm text-[var(--ink-soft)]">
+          A walkthrough comes with a tour code — the whole workspace, explored at your own pace as
+          an advisor, a manager, or the BDC.
+        </p>
+      </section>
+
       <footer className="mt-12 border-t border-neutral-200 pt-6 text-xs text-neutral-500 dark:border-neutral-800">
         <p>
           VIN decoding uses the free NHTSA vPIC service. Recall data comes from NHTSA by
