@@ -13,6 +13,22 @@ const PUBLIC_PREFIXES = [
   '/auth', // callback + sign-out handlers
   '/demo', // the marketing demo surface
   /**
+   * The gated demo tour's front door.
+   *
+   * Public in the routing sense and gated in every sense that matters. The
+   * person standing at it is a prospect who has booked a walkthrough and has no
+   * account — deny-by-default would send them to a sign-in page for a product
+   * they are still evaluating, which is the same dead end invitations used to
+   * hit. What they hold instead is a ten-character code, hashed at rest,
+   * expiring in seven days, revocable, and rate-limited on the way in.
+   *
+   * Only the door. Picking a role signs the visitor into a seeded demo staff
+   * account, and everything beyond that point is protected exactly as it is for
+   * anybody else — the tour is a real session for a real (fictional) user, not
+   * an exemption from the fence.
+   */
+  '/tour',
+  /**
    * Getting an account in the first place.
    *
    * Both are reached by definition without a session — a prospect starting a

@@ -51,6 +51,32 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/demo')).toBe(true)
   })
 
+  it('lets a prospect reach the gated tour door without an account', () => {
+    /*
+      The person entering a tour code has no session and is not going to get one
+      until they pick a role, so deny-by-default would bounce them to a sign-in
+      page for a product they are still evaluating. The gate is the code — ten
+      characters, hashed at rest, seven-day expiry, revocable, rate-limited —
+      not the route table.
+    */
+    expect(isPublicPath('/tour')).toBe(true)
+  })
+
+  it('does not open the workspace the tour lands in', () => {
+    /*
+      The half worth asserting. A tour is a real Supabase session for a real
+      (fictional) demo account, so everything past the door is protected the
+      ordinary way — /tour being public must not be read as the tour route
+      opening the product.
+    */
+    expect(isPublicPath('/drive')).toBe(false)
+    expect(isPublicPath('/manager')).toBe(false)
+    expect(isPublicPath('/bdc')).toBe(false)
+    // And the prefix trap, as with /demo and /signup.
+    expect(isPublicPath('/tours-admin')).toBe(false)
+    expect(isPublicPath('/tour-codes')).toBe(false)
+  })
+
   it('lets anyone read the trust and legal pages', () => {
     /*
       These exist to be read by somebody without an account — that is their

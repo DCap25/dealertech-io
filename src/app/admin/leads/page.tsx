@@ -2,9 +2,11 @@ import Link from 'next/link'
 import { headers } from 'next/headers'
 import { requirePlatformAdmin } from '@/lib/auth/session'
 import { loadLeadCounts, loadLeads } from '@/lib/platform/load'
+import { listTourCodes } from '@/lib/demo-tour/store'
 import { knownMakes } from '@/lib/warranty'
 import { ProvisionForm } from '../provision-form'
 import { OutcomeForm } from './outcome-form'
+import { TourCodes } from './tour-codes'
 import { ago } from '../ui'
 
 export const dynamic = 'force-dynamic'
@@ -54,12 +56,31 @@ export default async function LeadsPage({
   // One instant for every relative time on the page — see the note on `ago`.
   const now = nowMs()
 
-  const [leads, counts] = await Promise.all([
+  const [leads, counts, tourCodes] = await Promise.all([
     loadLeads(200, { uncontactedOnly }),
     // Aggregated, not derived from the list above — which is filtered, and so
     // cannot know how many contacted leads exist. See `loadLeadCounts`.
     loadLeadCounts(),
+    /*
+      Every code in one query rather than one per lead.
+
+      Two hundred leads would otherwise be two hundred round trips, and each of
+      them opens its own scoped transaction — `withCurrentUserScope` is the
+      transaction, and the pool is `max: 1`, so they would serialise into a page
+      that takes minutes. Same instant for every status, from the clock above.
+    */
+    listTourCodes({ asOf: new Date(now) }),
   ])
+
+  // Grouped once. A `.filter()` inside the map below would be quadratic on a
+  // page that already renders two hundred rows.
+  const codesByLead = new Map<string, typeof tourCodes>()
+  for (const code of tourCodes) {
+    if (!code.demoRequestId) continue
+    const bucket = codesByLead.get(code.demoRequestId)
+    if (bucket) bucket.push(code)
+    else codesByLead.set(code.demoRequestId, [code])
+  }
 
   // Built server-side so a copied invitation link is right behind a proxy or
   // on a custom domain rather than whatever the browser happens to think.
@@ -77,7 +98,9 @@ export default async function LeadsPage({
       <h1 className="mt-3 text-3xl font-bold tracking-tight">Leads</h1>
       <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
         Demo requests from the marketing site. Nothing here is a tenant yet — provisioning one
-        creates the dealership and an invitation, and marks the lead contacted.
+        creates the dealership and an invitation, and marks the lead contacted. A tour code lets
+        them walk the seeded demo store at <span className="font-mono">/tour</span> before any of
+        that; it is shown once, lasts seven days, and can be withdrawn.
       </p>
 
       <div className="mt-5 flex gap-2">
@@ -156,6 +179,20 @@ export default async function LeadsPage({
               )}
 
               <OutcomeForm leadId={l.id} notes={l.notes} contacted={l.contacted} />
+
+              {/*
+                Above provisioning, deliberately, because it comes first in
+                time: a walkthrough is booked and toured long before anybody
+                stands up their dealership. A lead that never gets a code
+                usually never gets a tenant either.
+              */}
+              <TourCodes
+                leadId={l.id}
+                dealershipName={l.dealershipName}
+                contactName={l.name}
+                codes={codesByLead.get(l.id) ?? []}
+                now={now}
+              />
 
               <ProvisionForm
                 leadId={l.id}

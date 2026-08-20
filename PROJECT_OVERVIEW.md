@@ -240,6 +240,14 @@ the UI has one shape to render regardless of vendor. `DMS_ADAPTER=mock` with
   the inbound demo requests and what was said on the call. All of it returns
   **404** to a non-platform-admin rather than 403, so it does not announce
   itself.
+- **Gated demo tours.** `/demo` — the coverage engine — stays open to anyone
+  with a VIN. The *workspace* tour does not: a lead who books a walkthrough is
+  issued a code from their own row on `/admin/leads`, and `/tour` trades it for
+  a role picker that signs them into the seeded demo store as an advisor, a
+  service manager or the BDC desk. Ten characters from the unambiguous
+  alphabet, SHA-256 at rest, seven-day expiry, revocable, rate-limited, and one
+  audit row per redemption (`src/lib/demo-tour/`). Every tour shares the one
+  seeded store — see §6.
 
 ### Scheduled work
 
@@ -262,10 +270,10 @@ src/
   components/   prep-sheet/, present/, explainer/, copilot/, ui/
   lib/          the engines — pure, I/O-free, unit-tested
   db/
-    schema/     55 tables across tenancy, customers, service, coverage,
+    schema/     56 tables across tenancy, customers, service, coverage,
                 communication, retention, devices, documents, handoffs,
                 integration, marketing, scheduling
-    migrations/ 0000–0031, hand-written and idempotent
+    migrations/ 0000–0033, hand-written and idempotent
     scoped.ts   withUserScope() — runs work as the authenticated role
 scripts/        migrations, seeds, RLS verification, sync runners, smoke
 netlify/        the scheduled pricing sync
@@ -348,6 +356,17 @@ Stated plainly so nobody discovers them the hard way.
   honest fix when it is worth the dependency.
 - `advisor/actions.ts` still has no test coverage of its own; the write paths
   are exercised by hand and by `src/db/transaction.test.ts`.
+- **Every demo tour shares the one seeded store.** Two prospects touring in the
+  same week see each other's edits, and `npm run db:seed` wipes and rebuilds
+  that store — do not re-seed on a day with walkthroughs booked. A tour visitor
+  is a real signed-in user, not a read-only sandbox. `/tour` says the first two
+  out loud rather than letting a prospect discover them; the head comment in
+  `src/lib/demo-tour/codes.ts` records where a per-prospect tenant would slot
+  in and why it is a project rather than an afternoon (the seed builds one
+  deterministic dealership with fixed uuids).
+- `DEMO_TOUR_PASSWORD` must be re-set whenever `npm run demo:rotate` runs, or
+  the gated tour refuses every valid code. The rotate script now prints that
+  reminder.
 
 ### Rotating the credentials
 

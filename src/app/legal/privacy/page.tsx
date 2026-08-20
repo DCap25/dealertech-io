@@ -111,8 +111,24 @@ export default function PrivacyPage() {
       </P>
       <P>
         We use it to reply to you, to prepare a walkthrough that is about your store rather than a
-        generic one, and to keep track of whether we have already got back to you — including any
-        note we make about that conversation. That is the whole list.
+        generic one, to keep track of whether we have already got back to you — including any note
+        we make about that conversation — and, if we give you a tour code, to know whether you have
+        used it. That is the whole list.
+      </P>
+
+      <H3>Tour codes</H3>
+      <P>
+        If we arrange a walkthrough we may issue you an access code for a guided tour of a
+        demonstration dealership. What we store against it is a label naming who it was issued to
+        (usually your dealership and your name), a link to your demo request, when it expires, how
+        many times it has been used and when it was last used. We never store the code itself, only
+        an irreversible hash of it — which is also why we cannot tell you what it was afterwards and
+        will issue a new one instead.
+      </P>
+      <P>
+        The tour signs you into a shared, fictional dealership. Nothing you do inside it is recorded
+        against you personally beyond the count above and a log entry noting which of the three
+        roles you chose; there is no real customer data in there, and please do not put any in.
       </P>
 
       <H3>Accounts</H3>
@@ -217,6 +233,12 @@ export default function PrivacyPage() {
       <Term label="Demo requests">
         Kept while they are useful as a business record, and deleted on request. There is no
         automatic expiry.
+      </Term>
+      <Term label="Tour codes">
+        A code stops working seven days after it is issued, or sooner if we withdraw it. The row
+        recording that it existed is not deleted when it expires — that is how we can answer who was
+        given a way in and when — and it survives the deletion of the demo request it was attached
+        to, with the link to that request cleared. Deleted on request, like the rest.
       </Term>
       <Term label="Dealership data">
         Kept for as long as the dealership&rsquo;s account is active, because deleting a service

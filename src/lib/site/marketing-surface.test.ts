@@ -97,7 +97,32 @@ const PUBLIC_SOURCE_DIRS = [
  * stylesheet would contain and what `next/font` demonstrably does not leave in
  * the source.
  */
-const PUBLIC_SOURCE_FILES = ['app/layout.tsx', 'app/page.tsx']
+const PUBLIC_SOURCE_FILES = [
+  'app/layout.tsx',
+  'app/page.tsx',
+  /*
+    The gated tour's door: the page an anonymous visitor loads, and the form
+    component it mounts.
+    ---------------------------------------------------------------------------
+    NAMED FILE BY FILE, BECAUSE app/tour/actions.ts IS DELIBERATELY NOT HERE
+    ---------------------------------------------------------------------------
+    Sweeping `app/tour` as a directory would pull in the server actions, which
+    read `next/headers` for the rate limiter and end in a Supabase sign-in that
+    writes the session cookie. Both would trip the list below, and both are
+    exactly what the cookie policy already describes: "signing in sets one
+    strictly necessary cookie". A redemption *is* a sign-in.
+    So the tripwire is kept over the part the promise is about — what a visitor
+    receives before they act. The page and the form must stay as cookie-free and
+    script-free as any other marketing surface; the action they submit to is a
+    sign-in and is held to the sign-in's rules instead.
+    That split is also why the code a visitor types is carried in a hidden form
+    field rather than a short-lived cookie. See the note at the top of
+    src/app/tour/actions.ts — a cookie there would have made
+    "an anonymous visitor receives zero cookies" false.
+  */
+  'app/tour/page.tsx',
+  'app/tour/tour-gate.tsx',
+]
 
 function filesUnder(dir: string): string[] {
   const out: string[] = []

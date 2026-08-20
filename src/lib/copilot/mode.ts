@@ -71,6 +71,17 @@ export function showsHelpLauncher(pathname: string): boolean {
   // Signed-out doors and the marketing site. They are not the product, and
   // there is no signed-in user for the API to answer as.
   if (pathname === '/' || pathname === '/demo' || pathname.startsWith('/demo/')) return false
+  /*
+    The gated tour's front door. A marketing surface with a code box on it —
+    nobody is signed in yet, so the endpoint would have no `getCurrentUser()` to
+    answer as and every tap would 401.
+
+    Only the door. The tour itself signs the visitor into a seeded demo advisor
+    and lands them in the real workspace, where the launcher appears exactly as
+    it does for any other advisor. That is the point of the tour, and it is why
+    there is nothing to exempt beyond this one path.
+  */
+  if (pathname === '/tour' || pathname.startsWith('/tour/')) return false
   if (pathname === '/login' || pathname.startsWith('/login/')) return false
   if (pathname === '/signup' || pathname.startsWith('/signup/')) return false
   if (pathname === '/invite' || pathname.startsWith('/invite/')) return false

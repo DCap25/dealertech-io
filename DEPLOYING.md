@@ -28,6 +28,7 @@ exists in your local `.env.local`.
 | `DMS_ADAPTER` | `mock` | |
 | `DMS_MOCK_SCENARIO` | `AS_SEEDED` | |
 | `ANTHROPIC_API_KEY` | optional | Leave unset and the Co-Pilot runs its mock provider. |
+| `DEMO_TOUR_PASSWORD` | whatever `npm run demo:rotate` last printed | The shared demo-staff password, used server-side by `/tour` to sign a prospect in. **Without it the gated tour refuses every valid code** rather than falling back to the committed default. Re-set it every time you rotate. Server only — never `NEXT_PUBLIC_`. |
 | `CRON_SECRET` | you generate it | Any long random string. Authenticates both scheduled jobs. **Without it they refuse every request and never run** — they fail closed on purpose. |
 | `STRIPE_SECRET_KEY` | Stripe → the DealerTech account → API keys | A **restricted** key (`rk_...`), not the secret key. Leave unset and billing is off. See below. |
 | `STRIPE_WEBHOOK_SECRET` | Stripe → Webhooks → your endpoint | Signing secret. **Without it the endpoint refuses every delivery** rather than trusting unverified JSON. |

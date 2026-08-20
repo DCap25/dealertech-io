@@ -64,6 +64,31 @@ export const AUDIT_ACTIONS = [
   /** Somebody rang a lead back and wrote down what happened. */
   'LEAD_OUTCOME_RECORDED',
   /**
+   * A gated demo tour: issued, withdrawn, and walked.
+   *
+   * `DEMO_TOUR_REDEEMED` is the one that earns its place. The code table keeps
+   * a `uses` counter, which answers "did they ever look" and nothing else — it
+   * cannot say which role they picked, in what order, or whether the person on
+   * Wednesday was the same one from Monday. That detail belongs in an
+   * append-only record rather than in a second mutable table, so it lands here
+   * with the code id, the role, and the demo account the visitor was signed
+   * into.
+   *
+   * It is also the only action on this list written by a request with no
+   * signed-in human behind it at the moment it starts. `userId` carries the
+   * seeded demo account the tour signed in as, which is true and useful, and
+   * `storeId` stays null — the code belongs to DealerTech, not to the fictional
+   * dealership it happens to open.
+   *
+   * The code itself never appears in `changes`. It would be a live bearer
+   * credential sitting in a table that is never deleted; `FORBIDDEN_KEY_PARTS`
+   * below would redact a key called `code_hash`, and nothing should be relying
+   * on that.
+   */
+  'DEMO_TOUR_CODE_ISSUED',
+  'DEMO_TOUR_CODE_REVOKED',
+  'DEMO_TOUR_REDEEMED',
+  /**
    * DealerTech staff granted themselves a role at a dealership.
    *
    * The single mechanism by which anyone outside a store can reach its

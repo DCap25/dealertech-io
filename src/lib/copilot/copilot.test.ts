@@ -367,6 +367,17 @@ describe('the guide covers the whole app', () => {
     '/demo', // the marketing demo surface
     '/login', // the sign-in form; there is nothing to explain and nobody signed in to explain it to
     /*
+      The gated tour's front door — a code box on the marketing site, exempt
+      for the same reason /demo is.
+
+      Note carefully what this does NOT exempt. A tour signs the visitor into a
+      seeded demo advisor and drops them in the real workspace, so every screen
+      they then open is a screen the guide already covers and the Co-Pilot
+      already answers about. That is the tour working; the guide needs nothing
+      added for it.
+    */
+    '/tour',
+    /*
       The trust and legal pages. Same argument as the marketing site, listed
       one per line so each is an individually reviewable claim rather than a
       prefix that would quietly swallow a future `/legal/something` that does
@@ -573,6 +584,16 @@ describe('showsHelpLauncher', () => {
   it('stays off the signed-out doors and the operations console', () => {
     for (const path of ['/', '/demo', '/login', '/signup', '/invite/tok', '/admin', '/admin/leads']) {
       expect(showsHelpLauncher(path)).toBe(false)
+    }
+  })
+
+  it('stays off the tour door and appears everywhere the tour goes', () => {
+    // The door is a code box with nobody signed in behind it — a launcher there
+    // would 401 on every tap. One click later the visitor IS a signed-in demo
+    // advisor, and the whole point of the tour is that they get the real thing.
+    expect(showsHelpLauncher('/tour')).toBe(false)
+    for (const path of ['/drive', '/manager', '/bdc']) {
+      expect(showsHelpLauncher(path), path).toBe(true)
     }
   })
 

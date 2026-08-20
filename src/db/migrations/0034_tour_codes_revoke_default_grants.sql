@@ -1,0 +1,71 @@
+-- Take back the privileges Supabase handed out before 0033 ran.
+--
+-- ===========================================================================
+-- WHAT 0033 GOT WRONG, FOUND BY LOOKING
+-- ===========================================================================
+-- 0033 ends with `GRANT SELECT ON public.demo_tour_codes TO authenticated` and
+-- a comment saying SELECT is the only grant, because every write path is
+-- privileged. Checking the live table afterwards showed something else:
+--
+--   anon           DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE
+--   authenticated  DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE
+--
+-- The cause is Supabase's `ALTER DEFAULT PRIVILEGES`, which grants everything
+-- on any new table in `public` to `anon`, `authenticated` and `service_role`
+-- the moment it is created. So the GRANT in 0033 added nothing — the row was
+-- already full — and the comment beside it described an intention rather than a
+-- state.
+--
+-- 0001 did `REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon`, which was a
+-- one-time sweep and cannot reach a table created twenty-nine migrations later.
+-- 0004 then did the per-table version for `demo_requests`, which is why that
+-- table reads `authenticated: SELECT` today and this one did not. Same table,
+-- same threat model, different privilege set, for no reason anybody chose.
+--
+-- ===========================================================================
+-- WHY IT MATTERS EVEN THOUGH RLS IS FORCED
+-- ===========================================================================
+-- Row-level security covers most of the gap and not all of it, and the parts it
+-- misses are the reason this is worth a migration rather than a note:
+--
+--   * TRUNCATE IS NOT SUBJECT TO RLS AT ALL. A grant of TRUNCATE to `anon` is a
+--     grant to empty the table, policies or no policies. Nothing in this
+--     application ever connects as `anon` — `withAnonymousScope` sets the
+--     `authenticated` role with no claims — so this is not a live exposure
+--     today. It is a privilege nobody decided to hand out, on a table holding
+--     credentials, and taking it back costs one line.
+--   * UPDATE and DELETE with a SELECT-only policy do not error. They match zero
+--     rows and report success, which is the silent-write failure src/db/README
+--     describes and 0021 was written about. A grant that cannot do anything is
+--     still a grant somebody will later read as permission to try.
+--
+-- What RLS does cover: SELECT and INSERT both refuse. `demo_tour_codes_read` is
+-- `FOR SELECT TO authenticated USING (is_platform_admin())`, so a signed-in
+-- dealership user reads nothing and `anon` — which the policy does not name at
+-- all — reads nothing either. An INSERT with no INSERT policy raises outright.
+-- The table was never readable or writable by the wrong person; it was simply
+-- more permissive on paper than the migration that created it claimed.
+--
+-- ===========================================================================
+-- WHAT THIS LEAVES
+-- ===========================================================================
+-- `authenticated: SELECT`, and nothing for `anon` — exactly what 0033's comment
+-- said and exactly what `demo_requests` has carried since 0004. Every write
+-- (issue, revoke, and the counter bump on redemption) continues to run on the
+-- privileged connection, for the reasons set out in src/lib/demo-tour/store.ts.
+--
+-- `service_role` and `postgres` are deliberately untouched. `postgres` is the
+-- privileged connection this application actually uses and needs everything;
+-- `service_role` is Supabase's own and is left as Supabase configures it,
+-- consistent with every other table here.
+--
+-- Idempotent — REVOKE and GRANT are both safe to replay. Applied with
+-- `npm run db:apply`; see src/db/README.md.
+
+REVOKE ALL ON public.demo_tour_codes FROM anon;
+REVOKE ALL ON public.demo_tour_codes FROM authenticated;
+
+-- The one privilege the console genuinely needs. The row-level policy from
+-- 0033 still narrows it to platform staff — a grant is not a policy, and this
+-- is the grant half.
+GRANT SELECT ON public.demo_tour_codes TO authenticated;

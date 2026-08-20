@@ -98,6 +98,19 @@ async function main() {
   console.log(`    ${password}\n`)
   console.log('Put it in a password manager. It is not stored anywhere else,')
   console.log('and it must not be committed.')
+  console.log('')
+  /*
+    The one thing a rotation silently breaks.
+
+    /tour signs a prospect into these same accounts using DEMO_TOUR_PASSWORD,
+    so a rotation that stops there leaves the gated tour refusing every valid
+    code — and the failure surfaces in front of a prospect, which is the worst
+    possible place to discover it. Printed rather than left to a doc nobody
+    reads at the moment of rotating.
+  */
+  console.log('ALSO UPDATE DEMO_TOUR_PASSWORD — in .env.local and on Netlify.')
+  console.log('The gated demo tour at /tour signs into these accounts and will')
+  console.log('refuse every valid code until it matches.')
   console.log('─'.repeat(58))
 }
 
