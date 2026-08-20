@@ -3,6 +3,7 @@ import { DemoRequestForm } from './request-demo/demo-form'
 import { CoverageContrast } from '@/components/marketing/coverage-contrast'
 import { DepartmentPreview } from '@/components/marketing/department-preview'
 import { LeakCalculator } from '@/components/marketing/leak-calculator'
+import { MenuPreview } from '@/components/marketing/menu-preview'
 import { PrepSheetPreview } from '@/components/marketing/prep-sheet-preview'
 import { MarketingFooter } from '@/components/marketing/site-footer'
 import { WearPreview } from '@/components/marketing/wear-preview'
@@ -10,7 +11,7 @@ import { WearPreview } from '@/components/marketing/wear-preview'
 export const metadata = {
   title: 'Know who pays before you write the RO',
   description:
-    'DealerTech reads the coverage your customer already owns, predicts what wears out next, and never lets a declined job go quiet. Service drive intelligence for franchise dealerships.',
+    'A selling tool for service advisors: DealerTech reads the coverage your customer already owns, predicts what wears out next, and never lets a declined job go quiet. A model reads the service contract so nobody types it — no model decides what a customer is charged.',
 }
 
 /* ------------------------------------------------------------------ bits */
@@ -103,7 +104,12 @@ function Step({
   )
 }
 
-function Honest({ title, body }: { title: string; body: string }) {
+/**
+ * `body` takes nodes rather than a string only so the AI card can link out to
+ * the page that carries the long version of its claim. Every other card is
+ * still a plain sentence and should stay that way.
+ */
+function Honest({ title, body }: { title: string; body: React.ReactNode }) {
   return (
     <div className="border-l-2 border-[var(--rule)] pl-4">
       <h3 className="text-sm font-bold">{title}</h3>
@@ -190,6 +196,17 @@ export default function HomePage() {
               <strong className="text-[var(--ink)]">who pays</strong> before they write the RO, and
               nothing goes quiet after the customer leaves.
             </p>
+            {/*
+              The thesis, stated once and early. It is the first line of
+              PROJECT_OVERVIEW.md and the page used to imply it without ever
+              saying it — which left a reader to decide for themselves whether
+              this was a CRM.
+            */}
+            <p className="mt-4 max-w-xl text-base leading-relaxed text-[var(--ink-soft)]">
+              It is a selling tool before it is a CRM. Every screen exists to raise how often an
+              advisor presents the right work and is believed — on the bet that the advisor a
+              customer trusts is the highest-selling one on the drive.
+            </p>
 
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <a
@@ -253,6 +270,10 @@ export default function HomePage() {
       <Section id="how">
         <Eyebrow>How it works</Eyebrow>
         <H2>One question, answered before the customer walks up.</H2>
+        <Lede>
+          Three screens between the appointment and the follow-up call. All three exist to move one
+          number: how often an advisor presents everything on the car and pitches the right thing.
+        </Lede>
 
         <div className="mt-12 grid gap-10 lg:grid-cols-3">
           <Step
@@ -270,6 +291,80 @@ export default function HomePage() {
             title="The follow-up that happens"
             body="Every decline becomes a dated task with a talk track and a dollar figure. So does expiring prepaid maintenance, warranty about to lapse, and a customer who has gone quiet. Your BDC works a ranked list instead of a spreadsheet."
           />
+        </div>
+
+        {/*
+          The positive half of the AI story. The refusal half is a card in the
+          honesty section; both have to keep saying what /responsible-ai says.
+        */}
+        <p className="mt-14 max-w-3xl border-t border-[var(--rule)] pt-6 text-sm leading-relaxed text-[var(--ink-soft)]">
+          <strong className="text-[var(--ink)]">Where AI earns its place:</strong> a model reads an
+          uploaded service contract — administrator, contract number, deductible, term in months and
+          miles — so nobody types a dozen fields off a PDF, and a person confirms every one of them
+          against the paper before it counts as coverage. An in-product Co-Pilot answers the
+          how-do-I questions a new advisor would otherwise queue at the manager&rsquo;s desk. That is
+          the entire list, and{' '}
+          <Link
+            href="/responsible-ai"
+            className="font-semibold text-[var(--ink)] underline underline-offset-4"
+          >
+            what a model is never allowed to decide
+          </Link>{' '}
+          is written down.
+        </p>
+      </Section>
+
+      {/* ---------------------------------------------------------- menu */}
+      <Section id="menu">
+        <Eyebrow>The customer conversation</Eyebrow>
+        <H2>Turn the screen around and have nothing to explain away.</H2>
+        <Lede>
+          The advisor presents everything on the car and pitches the thing that matters — and this
+          is the screen that decides whether they are believed. Every customer-facing screen in the
+          product is built to be physically handed over mid-conversation with nothing on it that
+          needs explaining away. The first number on it is what the customer does{' '}
+          <strong className="text-[var(--ink)]">not</strong> have to pay.
+        </Lede>
+
+        <div className="mt-12 grid gap-10 lg:grid-cols-2 lg:items-center">
+          <div>
+            <h3 className="text-2xl font-bold tracking-tight">
+              Three answers, and &ldquo;Not today&rdquo; comes first.
+            </h3>
+            <p className="mt-4 leading-relaxed text-[var(--ink-soft)]">
+              Every item offers <strong className="text-[var(--ink)]">Not today</strong> ·{' '}
+              <strong className="text-[var(--ink)]">Call me about this</strong> ·{' '}
+              <strong className="text-[var(--ink)]">Yes</strong>, in three columns of identical
+              width. A decline that is smaller or greyer than the acceptance is spotted instantly,
+              and the customer who spots it discounts the brake warning too — which was the one that
+              mattered.
+            </p>
+            <p className="mt-4 leading-relaxed text-[var(--ink-soft)]">
+              &ldquo;Call me about this&rdquo; is the answer customers want most often and no menu
+              ever offers them. It is not a polite no: it is somebody who believes the
+              recommendation and is not ready today, so it outranks a decline on the follow-up list
+              by a wide margin and somebody actually rings them.
+            </p>
+            <p className="mt-4 leading-relaxed text-[var(--ink-soft)]">
+              The same menu reaches the customer four ways, off the same data every time — the
+              advisor&rsquo;s screen turned around, a paired tablet handed across the counter, a
+              link on the customer&rsquo;s own phone after the technician has been under the car,
+              and printed on paper for the morning a tablet is dead.
+            </p>
+            <p className="mt-4 leading-relaxed text-[var(--ink-soft)]">
+              Prices resolve from your own op-code price book, pulled every morning. Where no op
+              code matches, the customer reads &ldquo;price to be confirmed&rdquo; rather than our
+              estimate and the item stays out of the total. Quoting $84 and invoicing $106 is the
+              exact conversation this product exists to prevent.
+            </p>
+          </div>
+          <div className="mkt-reveal">
+            <MenuPreview />
+            <p className="mt-3 text-xs text-[var(--ink-soft)]">
+              Illustrative figures. The real menu carries the same three answers, the same width
+              apart.
+            </p>
+          </div>
         </div>
       </Section>
 
@@ -402,6 +497,25 @@ export default function HomePage() {
               body="Service contract terms are contracts, and they vary. Every answer carries a confidence level and routes prior-authorisation claims to the admin before teardown. We will never tell an advisor something is covered as though it were settled."
             />
             <Honest
+              title="No AI decides what a customer is charged."
+              body={
+                <>
+                  A model reads uploaded contracts and answers how-do-I questions in the product.
+                  That is the whole list. Coverage is a deterministic waterfall with a reasoning
+                  trace, prices come from your own op-code book, and every extracted field is
+                  confirmed by a person before it counts — because the answers a customer is quoted
+                  from should be reproducible, not generated.{' '}
+                  <Link
+                    href="/responsible-ai"
+                    className="font-semibold text-[var(--ink)] underline underline-offset-4"
+                  >
+                    Responsible AI
+                  </Link>
+                  .
+                </>
+              }
+            />
+            <Honest
               title="Recalls are shown as candidates, not certainties."
               body="There is no public VIN-level open-recall feed — NHTSA publishes by make, model and year, without remedy status. So we surface campaigns to verify in the OEM portal rather than pretending to know."
             />
@@ -435,10 +549,23 @@ export default function HomePage() {
             <dl className="mt-9 space-y-4 text-sm">
               {[
                 ['01', '30-minute walkthrough on your own vehicles'],
-                ['02', 'We import your service history and declined work'],
-                ['03', 'Your advisors see prep sheets the next morning'],
+                [
+                  '02',
+                  <>
+                    You get a{' '}
+                    <Link
+                      href="/tour"
+                      className="font-semibold text-[var(--ink)] underline underline-offset-4"
+                    >
+                      tour code
+                    </Link>{' '}
+                    — explore the workspace yourself, as an advisor, a manager, or the BDC
+                  </>,
+                ],
+                ['03', 'We import your service history and declined work'],
+                ['04', 'Your advisors see prep sheets the next morning'],
               ].map(([n, text]) => (
-                <div key={n} className="flex gap-4 border-t border-[var(--rule)] pt-4">
+                <div key={String(n)} className="flex gap-4 border-t border-[var(--rule)] pt-4">
                   <dt className="font-mono text-[var(--signal)]">{n}</dt>
                   <dd>{text}</dd>
                 </div>
