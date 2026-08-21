@@ -98,20 +98,19 @@ export default function DemoPage() {
         </div>
 
         <p className="mt-4 text-sm text-[var(--ink-soft)]">
-          A{' '}
           <Link
             href="/#demo"
             className="font-semibold text-[var(--ink)] underline underline-offset-4"
           >
-            walkthrough
+            Ask for a tour code
           </Link>{' '}
-          comes with a tour code — the whole workspace, explored at your own pace as an advisor,
-          a manager, or the BDC.{' '}
+          and explore the whole workspace at your own pace — as an advisor, a manager, or the
+          BDC. The walkthrough comes after, on your own VINs.{' '}
           <Link
             href="/tour"
             className="font-semibold text-[var(--ink)] underline underline-offset-4"
           >
-            Have a tour code? →
+            Have a code? →
           </Link>
         </p>
       </section>

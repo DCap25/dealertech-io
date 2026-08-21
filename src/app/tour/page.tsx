@@ -76,9 +76,10 @@ export default function TourPage() {
         <p>
           <strong>No code?</strong>{' '}
           <Link href="/#demo" className="font-semibold underline underline-offset-4">
-            Book a walkthrough
+            Ask for one
           </Link>{' '}
-          and we will send you one — they last seven days. The{' '}
+          and it goes out within one business day — codes last seven days, and the walkthrough
+          comes after you have had a look around. The{' '}
           <Link href="/demo" className="font-semibold underline underline-offset-4">
             coverage engine
           </Link>{' '}

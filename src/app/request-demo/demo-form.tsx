@@ -18,7 +18,7 @@ export function DemoRequestForm({ source = 'homepage' }: { source?: string }) {
     return (
       <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-8 text-center dark:border-emerald-800 dark:bg-emerald-950">
         <p className="text-lg font-bold text-emerald-900 dark:text-emerald-100">
-          Got it. We&rsquo;ll be in touch within one business day.
+          Got it. Your tour code goes out within one business day.
         </p>
         <p className="mt-2 text-sm text-emerald-800 dark:text-emerald-300">
           In the meantime, the coverage engine is live and open — paste any VIN into the{' '}
@@ -100,7 +100,7 @@ export function DemoRequestForm({ source = 'homepage' }: { source?: string }) {
         disabled={pending}
         className="w-full rounded-lg bg-neutral-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-700 disabled:opacity-50 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
       >
-        {pending ? 'Sending…' : 'Request a walkthrough'}
+        {pending ? 'Sending…' : 'Get a tour code'}
       </button>
 
       {state.error && (

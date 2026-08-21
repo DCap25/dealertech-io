@@ -543,14 +543,13 @@ export default function HomePage() {
               and you get the founder on the phone rather than a support queue.
             </Lede>
             <p className="mt-4 max-w-2xl leading-relaxed text-[var(--ink-soft)]">
-              A walkthrough takes 30 minutes. Bring a VIN off your own lot and we&rsquo;ll run it
-              live.
+              Start self-guided: ask below and we send you a tour code. When you&rsquo;ve poked
+              around, the walkthrough is where we run your own VINs.
             </p>
             <dl className="mt-9 space-y-4 text-sm">
               {[
-                ['01', '30-minute walkthrough on your own vehicles'],
                 [
-                  '02',
+                  '01',
                   <>
                     You get a{' '}
                     <Link
@@ -559,9 +558,10 @@ export default function HomePage() {
                     >
                       tour code
                     </Link>{' '}
-                    — explore the workspace yourself, as an advisor, a manager, or the BDC
+                    — explore the whole workspace yourself, as an advisor, a manager, or the BDC
                   </>,
                 ],
+                ['02', 'Then a 30-minute walkthrough — bring a VIN off your own lot and we run it live'],
                 ['03', 'We import your service history and declined work'],
                 ['04', 'Your advisors see prep sheets the next morning'],
               ].map(([n, text]) => (
