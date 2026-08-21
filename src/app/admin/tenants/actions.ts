@@ -11,6 +11,8 @@ import {
 } from '@/lib/billing/subscription-ops'
 import { putOnInvoiceRail } from '@/lib/billing/invoice-rail'
 import { buildAuditRow } from '@/lib/audit/events'
+import { createInvitationOn } from '@/lib/invites/create'
+import { normaliseEmail } from '@/lib/invites/invite'
 import type { LifecycleEvent } from '@/lib/billing/lifecycle'
 
 /**
@@ -509,4 +511,83 @@ export async function revokeSupportAccess(
 
   revalidatePath(`/admin/tenants/${organizationId}`)
   return { ok: 'Access revoked.' }
+}
+
+// ===========================================================================
+
+export interface ReinviteState {
+  error?: string
+  /** Shown once. Only the hash is stored, so there is nothing to recover. */
+  link?: string
+  email?: string
+}
+
+/**
+ * Send the administrator's invitation again.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS A NEW LINK AND NOT THE OLD ONE
+ * ---------------------------------------------------------------------------
+ * The go-live checklist wants to put the invitation back in front of somebody
+ * when it has not been accepted, and the obvious version of that — show the
+ * link again — cannot be built. Only the SHA-256 of an invitation token is
+ * stored (`createInvitation`), deliberately, so that a database dump grants
+ * nobody entry to anybody's dealership. There is nothing to show.
+ *
+ * So this issues a fresh one, which is better anyway: the old link may have
+ * expired, and `createInvitationOn` revokes any pending invitation for that
+ * address first, so the dealership never ends up with two working links and no
+ * idea which is current.
+ *
+ * `STAFF_INVITED` rather than a new audit action. It is exactly what happened
+ * — somebody was invited to a store with a named role — and inventing a
+ * platform-flavoured synonym would give the log two words for one act.
+ *
+ * Runs privileged, like every other action on this page: a platform admin
+ * holds no role at the dealership they are inviting into.
+ */
+export async function reissueAdminInvite(
+  _previous: ReinviteState,
+  formData: FormData,
+): Promise<ReinviteState> {
+  const admin = await requirePlatformAdmin()
+  const organizationId = String(formData.get('organizationId') ?? '')
+  const storeId = String(formData.get('storeId') ?? '')
+  const email = normaliseEmail(String(formData.get('email') ?? ''))
+
+  if (!storeId) return { error: 'No rooftop named.' }
+  if (!email.includes('@')) return { error: 'Enter the address to invite.' }
+
+  const db = getDb()
+
+  try {
+    const token = await db.transaction(async (tx) => {
+      const { token } = await createInvitationOn(tx, {
+        storeId,
+        email,
+        role: 'ADMIN',
+        invitedByUserId: admin.id,
+      })
+
+      const row = buildAuditRow({
+        action: 'STAFF_INVITED',
+        entityType: 'store_invitations',
+        entityId: null,
+        storeId,
+        userId: admin.id,
+        // The address and the role, never the token — it is a live bearer
+        // credential and this table is never deleted (0020).
+        changes: { email, role: 'ADMIN', reissuedByPlatform: true },
+      })
+      if (row) await tx.insert(schema.auditLog).values(row)
+
+      return token
+    })
+
+    revalidatePath(`/admin/tenants/${organizationId}`)
+    return { link: `/invite/${token}`, email }
+  } catch (cause) {
+    const why = cause instanceof Error ? cause.message : String(cause)
+    return { error: `Could not issue an invitation: ${why}` }
+  }
 }

@@ -482,8 +482,22 @@ export const SURFACES: GuideSurface[] = [
   {
     path: '/admin/leads',
     name: 'Leads',
-    purpose: 'Inbound demo requests and what was said on the call.',
-    does: ['Read a lead, record the call, and move it along.'],
+    purpose: 'The sales pipeline: inbound demo requests, grouped by how far each has got.',
+    does: [
+      'Stage tabs from new through to live, plus lost.',
+      'Every stage is computed from something that happened — a call logged, a tour code redeemed, a walkthrough booked — so nothing here is dragged between columns by hand.',
+    ],
+    audience: 'PLATFORM',
+  },
+  {
+    path: '/admin/leads/[leadId]',
+    name: 'One lead',
+    purpose: 'The founder’s desk for a single prospect: the call, the code, the walkthrough, the dealership.',
+    does: [
+      'Record what was said, issue a tour code, book or move the walkthrough, mark it lost with a reason.',
+      'Provision their dealership, which creates the organisation and invites their administrator.',
+      'An append-only timeline of everything that has happened to this lead.',
+    ],
     audience: 'PLATFORM',
   },
 ]

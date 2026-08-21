@@ -1,5 +1,5 @@
 import { pgTable, uuid, text, timestamp, integer, boolean, index, unique } from 'drizzle-orm/pg-core'
-import { users } from './tenancy'
+import { organizations, users } from './tenancy'
 
 /**
  * Public-site lead capture.
@@ -29,14 +29,71 @@ export const demoRequests = pgTable(
 
     contacted: boolean('contacted').notNull().default(false),
     contactedAt: timestamp('contacted_at', { withTimezone: true }),
+    /** The current position, rewritten each save. The history is `leadEvents`. */
     notes: text('notes'),
+
+    /*
+      The pipeline, as facts rather than as a stage (migration 0035).
+
+      There is deliberately no `stage` column. Every stage is computed from
+      what happened — rung, code issued, code redeemed, walkthrough booked,
+      organisation provisioned, first menu presented — by `src/lib/crm/stage.ts`,
+      so a board can never disagree with the record it is drawn from. These
+      five are only the facts nothing else can stand in for.
+    */
+    walkthroughAt: timestamp('walkthrough_at', { withTimezone: true }),
+    /** Set by hand. Nothing observes whether a call actually happened. */
+    walkthroughDoneAt: timestamp('walkthrough_done_at', { withTimezone: true }),
+    lostAt: timestamp('lost_at', { withTimezone: true }),
+    lostReason: text('lost_reason'),
+    /** The organisation this lead became. SET NULL — see 0035. */
+    provisionedOrgId: uuid('provisioned_org_id').references(() => organizations.id, {
+      onDelete: 'set null',
+    }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('demo_requests_created_idx').on(t.createdAt),
     index('demo_requests_email_idx').on(t.email),
+    index('demo_requests_walkthrough_idx').on(t.walkthroughAt),
+    index('demo_requests_provisioned_org_idx').on(t.provisionedOrgId),
   ],
+)
+
+/**
+ * What happened to a lead, in order.
+ *
+ * The activity log the single `notes` textarea cannot be: that field is the
+ * current position and every save overwrites the last call, so "what did we
+ * actually say to them in March" had nowhere to live.
+ *
+ * Append-only by convention — nothing in the application updates or deletes a
+ * row, the same discipline `lifecycleEvents` carries. Distinct from
+ * `auditLog`, which keeps a closed vocabulary for the security record; this is
+ * the business narrative, and the actions that matter write both.
+ */
+export const leadEvents = pgTable(
+  'lead_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    demoRequestId: uuid('demo_request_id')
+      .notNull()
+      .references(() => demoRequests.id, { onDelete: 'cascade' }),
+
+    /** NOTE and CALL are typed by a person; STAGE and SYSTEM by the action. */
+    kind: text('kind').notNull(),
+    body: text('body').notNull(),
+
+    /** When it happened, not when it was typed. */
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+  },
+  (t) => [index('lead_events_lead_idx').on(t.demoRequestId, t.occurredAt)],
 )
 
 /**

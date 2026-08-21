@@ -111,9 +111,18 @@ export default function PrivacyPage() {
       </P>
       <P>
         We use it to reply to you, to prepare a walkthrough that is about your store rather than a
-        generic one, to keep track of whether we have already got back to you — including any note
-        we make about that conversation — and, if we give you a tour code, to know whether you have
-        used it. That is the whole list.
+        generic one, to schedule that walkthrough and keep the date in our own calendar, to keep
+        track of where the conversation has got to — whether we have called, whether a walkthrough
+        happened, and if it went nowhere, that it did and why — and, if we give you a tour code, to
+        know whether you have used it. That is the whole list.
+      </P>
+      <P>
+        Alongside the form&rsquo;s answers we keep a short activity log against your request: notes
+        of what was said on a call, the walkthrough&rsquo;s date, and entries the software writes
+        itself when it issues a code or sets your dealership up. It is written by us rather than by
+        you, it is only ever added to, and it is only read by DealerTech staff. If your request
+        becomes a dealership account, we record which account it became — the link is what stops us
+        chasing a customer as though they were still a prospect.
       </P>
 
       <H3>Tour codes</H3>
@@ -232,7 +241,8 @@ export default function PrivacyPage() {
       </P>
       <Term label="Demo requests">
         Kept while they are useful as a business record, and deleted on request. There is no
-        automatic expiry.
+        automatic expiry. The activity log described in section 2 is attached to the request and
+        goes with it — deleting a demo request deletes what we wrote about the conversation.
       </Term>
       <Term label="Tour codes">
         A code stops working seven days after it is issued, or sooner if we withdraw it. The row

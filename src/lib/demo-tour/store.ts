@@ -53,6 +53,10 @@ export interface IssuedTourCode {
  * deliberately no "resend" and no "show it to me again" — a credential the
  * database can hand back is a credential the database is responsible for
  * keeping, and re-issuing is one click.
+ *
+ * Three writes in one transaction: the code, the lead's timeline entry, and
+ * the audit row. See the note beside the `lead_events` insert for why the
+ * narrative one lives here rather than in the action that calls this.
  */
 export async function issueTourCode(params: {
   label: string
@@ -78,6 +82,36 @@ export async function issueTourCode(params: {
       .returning({ id: schema.demoTourCodes.id })
 
     if (!row) throw new Error('The code was not written.')
+
+    /*
+      The lead's own timeline, in the same transaction as the code.
+
+      Here rather than in `issueTourCodeForLead` deliberately, and the reason is
+      the one the provisioning transaction was written for: a code that exists
+      with no timeline entry beside it is the half-completed state, and an
+      insert after this function returns would be a second transaction that can
+      fail on its own. The audit row and the narrative row commit with the thing
+      they describe or not at all.
+
+      Three consequences follow from it, and all three were wrong without it.
+      The timeline was missing its most common system event. The privacy policy
+      claims we write entries "when it issues a code", which was an over-claim.
+      And `lastActivityAt` never moved, so a lead could be flagged as having
+      gone quiet the morning after Dan sent them a code.
+
+      Null `demoRequestId` — a conference handout — has no lead to write to, and
+      skipping is right: the audit row above still records that a code was
+      issued and to whom.
+    */
+    if (params.demoRequestId) {
+      await tx.insert(schema.leadEvents).values({
+        demoRequestId: params.demoRequestId,
+        kind: 'SYSTEM',
+        body: `Tour code issued to ${params.label}. It opens /tour and expires `
+          + `${expiresAt.toISOString().slice(0, 10)}.`,
+        createdByUserId: params.createdByUserId,
+      })
+    }
 
     await recordAudit(tx, {
       action: 'DEMO_TOUR_CODE_ISSUED',

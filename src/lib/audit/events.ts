@@ -64,6 +64,36 @@ export const AUDIT_ACTIONS = [
   /** Somebody rang a lead back and wrote down what happened. */
   'LEAD_OUTCOME_RECORDED',
   /**
+   * A walkthrough was put in the diary, or moved.
+   *
+   * Rebooking overwrites one datetime on the lead, so the row it replaces is
+   * gone — this is the only place that remembers a demo was moved three times
+   * before it happened, which is itself the answer to how a deal went.
+   */
+  'LEAD_WALKTHROUGH_BOOKED',
+  /**
+   * A deal ended, with the reason, or was reopened.
+   *
+   * The reason is required at the call site rather than here, for the same
+   * reason every discretionary lifecycle act demands one: a loss nobody
+   * explained teaches nothing. Reopening writes the same action with
+   * `reopened: true` rather than earning a fifth verb — a mis-click that
+   * permanently removed a lead from every stage would be a worse outcome than
+   * one extra field on a row, and both directions belong in one place.
+   */
+  'LEAD_MARKED_LOST',
+  /**
+   * A lead became a dealership.
+   *
+   * The most consequential thing this console does — it creates an
+   * organisation, a rooftop and an administrator's invitation — and it wrote
+   * no audit row at all until the pipeline work. `LEAD_OUTCOME_RECORDED` was
+   * being written by the note form and nothing was written by provisioning,
+   * so the log said somebody had made a note and stayed silent about the
+   * tenant appearing.
+   */
+  'LEAD_PROVISIONED',
+  /**
    * A gated demo tour: issued, withdrawn, and walked.
    *
    * `DEMO_TOUR_REDEEMED` is the one that earns its place. The code table keeps

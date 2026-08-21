@@ -1,7 +1,9 @@
 import 'server-only'
 import { eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
+import type { ScopedDb } from '@/db/scoped'
 import { getSupabaseAdminClient } from '@/lib/supabase/admin'
+import { defaultCadenceRulesFor } from '@/lib/cadence/defaults'
 import { normaliseEmail } from './invite'
 
 /**
@@ -83,8 +85,24 @@ export async function createStore(
   input: NewStore,
   suffix: string,
 ): Promise<{ organizationId: string; storeId: string }> {
-  const db = getDb()
+  return getDb().transaction((tx) => createStoreOn(tx, input, suffix))
+}
 
+/**
+ * The same, on a transaction the caller already opened.
+ *
+ * Exported for the reason `nextRoNumberScoped` is: sales-led provisioning has
+ * to create the organisation, the rooftop and the administrator's invitation
+ * as one act, and the wrapper above cannot be used for that. It opens a
+ * transaction of its own, and the pool is `max: 1` behind a pooler — asking
+ * for a second connection while holding the first is a deadlock, not a slow
+ * query. See src/db/README.md.
+ */
+export async function createStoreOn(
+  db: ScopedDb,
+  input: NewStore,
+  suffix: string,
+): Promise<{ organizationId: string; storeId: string }> {
   const [org] = await db.insert(schema.organizations).values({
     name: input.dealershipName,
     slug: slugify(input.dealershipName, suffix),
@@ -100,6 +118,21 @@ export async function createStore(
     laborRate: input.laborRate.toFixed(2),
   }).returning({ id: schema.stores.id })
   if (!store) throw new Error('store insert returned nothing')
+
+  /*
+    The follow-up programme, on by default.
+
+    Here rather than in each caller, so both ways a dealership arrives get the
+    same eight rules and neither can be the one that forgot. Without them
+    `generateTasks` produces nothing for ever: the store's follow-up list reads
+    "nothing to work" rather than "nobody has set this up", which is
+    indistinguishable from the product deciding there is no work to do.
+
+    A store edits or disables them from its own settings and nothing re-applies
+    them — see src/lib/cadence/defaults.ts on why these are a starting position
+    rather than a policy.
+  */
+  await db.insert(schema.cadenceRules).values(defaultCadenceRulesFor(store.id))
 
   return { organizationId: org.id, storeId: store.id }
 }

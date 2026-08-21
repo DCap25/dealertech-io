@@ -4,6 +4,7 @@ import type { PgTable } from 'drizzle-orm/pg-core'
 import { getDb, schema } from '../client'
 import { chance, int, isoDate, makeVin, pick, reseed, rnd, sample, stableId, daysAgo, daysFrom } from './random'
 import { demoNow } from '@/lib/demo-day'
+import { defaultCadenceRulesFor } from '@/lib/cadence/defaults'
 
 /**
  * Seeds one realistic dealership.
@@ -883,17 +884,19 @@ export async function seed(connectionString?: string) {
     }).where(eq(schema.customers.id, introVehicle.customerId))
   }
 
-  // ------------------------------------------------------- cadence rules
-  await db.insert(schema.cadenceRules).values([
-    { storeId, name: 'Thank you / quality check', trigger: 'POST_VISIT_THANK_YOU', offsetDays: 2, assignToRole: 'BDC', talkTrack: 'Thank them, confirm the concern is resolved, catch a detractor before the OEM survey lands.' },
-    { storeId, name: 'CSI pre-emption', trigger: 'CSI_PRE_EMPTION', offsetDays: 4, assignToRole: 'ADVISOR', talkTrack: 'Ask directly whether anything fell short. Fix it before the manufacturer asks.' },
-    { storeId, name: 'Declined service re-offer', trigger: 'DECLINED_SERVICE_FOLLOW_UP', offsetDays: 10, assignToRole: 'BDC', cooldownDays: 45, talkTrack: 'Reference the exact item declined and re-quote at today prices. Lead with safety, not discount.' },
-    { storeId, name: 'Second declined re-offer', trigger: 'DECLINED_SERVICE_FOLLOW_UP', offsetDays: 40, assignToRole: 'BDC', cooldownDays: 45 },
-    { storeId, name: 'Maintenance due by mileage', trigger: 'MAINTENANCE_DUE_MILEAGE', offsetMiles: 500, assignToRole: 'BDC', talkTrack: 'Projected to hit the interval within two weeks. Offer two appointment times, not an open question.' },
-    { storeId, name: 'Prepaid plan expiring', trigger: 'PPM_EXPIRING', offsetDays: -45, assignToRole: 'BDC', talkTrack: 'They already paid for these visits. Use it or lose it — book before expiry.' },
-    { storeId, name: 'Factory warranty expiring', trigger: 'WARRANTY_EXPIRING', offsetDays: -90, assignToRole: 'ADVISOR', talkTrack: 'Coverage is about to end. Present a service contract while the vehicle still qualifies.' },
-    { storeId, name: 'Dormant customer recovery', trigger: 'DORMANT_CUSTOMER', offsetDays: 400, assignToRole: 'BDC', cooldownDays: 120, talkTrack: 'Over a year since the last visit. Lead with a complimentary inspection, not a discount.' },
-  ])
+  /*
+    ------------------------------------------------------- cadence rules
+
+    The same eight every provisioned dealership now gets, imported rather than
+    written out here.
+
+    These lived only in this file, which meant the demonstration store was the
+    only one on the platform with a working follow-up list — a real tenant's
+    was empty on day one and stayed that way, because nothing outside the seed
+    created a rule. Sharing the list is what stops the store a prospect walks
+    through and the store they are handed behaving differently.
+  */
+  await db.insert(schema.cadenceRules).values(defaultCadenceRulesFor(storeId))
 
   const counts = {
     customers: customers.length,

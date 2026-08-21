@@ -15,6 +15,53 @@ import { ago } from '../ui'
 const INITIAL: TourCodeState = {}
 
 /**
+ * The message, already written.
+ *
+ * Everything a prospect needs and nothing they do not: the code, where to put
+ * it, and when it stops working. The expiry is in the body deliberately —
+ * "seven days" is the sort of detail that gets left out of a hand-typed email
+ * and turns into a support call on day nine.
+ *
+ * `encodeURIComponent` on both parts, and the body is built with real newlines
+ * before encoding. A raw newline in a `mailto:` is not portable; the encoding
+ * is what makes the paragraph breaks survive the handoff to a mail client.
+ */
+function mailtoFor(params: {
+  email: string
+  contactName: string
+  dealershipName: string
+  code: string
+  origin: string
+  expiresAt: string | null
+}): string {
+  const firstName = params.contactName.trim().split(/\s+/)[0] || 'there'
+  const expiry = params.expiresAt
+    ? new Date(params.expiresAt).toLocaleDateString()
+    : 'in seven days'
+
+  const subject = `Your DealerTech tour code — ${params.dealershipName}`
+  const body = [
+    `Hi ${firstName},`,
+    '',
+    'Here is the code for your walkthrough of DealerTech. It opens a demonstration '
+      + 'dealership with real-looking service history, so you can walk the drive, a prep sheet '
+      + 'and a customer menu exactly as an advisor would.',
+    '',
+    `Code: ${params.code}`,
+    `Open: ${params.origin}/tour`,
+    `It stops working on ${expiry}.`,
+    '',
+    'Nothing in there is a real customer, and nothing you do in it is kept.',
+    '',
+    'Dan',
+  ].join('\n')
+
+  return `mailto:${encodeURIComponent(params.email)}`
+    + `?subject=${encodeURIComponent(subject)}`
+    + `&body=${encodeURIComponent(body)}`
+}
+
+/**
  * Tour codes for one lead: issue, see, withdraw.
  *
  * ---------------------------------------------------------------------------
@@ -37,12 +84,18 @@ export function TourCodes({
   leadId,
   dealershipName,
   contactName,
+  contactEmail,
+  origin,
   codes,
   now,
 }: {
   leadId: string
   dealershipName: string
   contactName: string
+  /** Where the prefilled message is addressed. See `mailtoFor`. */
+  contactEmail: string
+  /** The site's own origin, resolved server-side, for the /tour link. */
+  origin: string
   codes: TourCodeSummary[]
   now: number
 }) {
@@ -83,6 +136,29 @@ export function TourCodes({
             {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
+        {/*
+          Delivery, one click plus Send.
+
+          There is no email SDK in this application and adding one would be a
+          fifth subprocessor and a same-day change to three trust pages, for a
+          message one person sends by hand a few times a month. A `mailto:`
+          costs nothing, keeps the sending account Dan's own, and — the part
+          that actually matters — means the code and the /tour link are typed
+          by the machine that generated them rather than transcribed.
+        */}
+        <a
+          href={mailtoFor({
+            email: contactEmail,
+            contactName,
+            dealershipName,
+            code: pretty,
+            origin,
+            expiresAt: state.expiresAt ?? null,
+          })}
+          className="mt-2 inline-block rounded-md border border-sky-300 px-3 py-1.5 text-xs font-semibold text-sky-900 transition hover:bg-sky-100 dark:border-sky-800 dark:text-sky-200 dark:hover:bg-sky-900"
+        >
+          Email it to {contactEmail}
+        </a>
       </div>
     )
   }

@@ -1,8 +1,12 @@
 import Link from 'next/link'
 import { requirePlatformAdmin } from '@/lib/auth/session'
 import { signOut } from '@/app/login/actions'
-import { loadLeads, loadNeedsAttention, loadRecentJobRuns, loadTenants } from '@/lib/platform/load'
+import {
+  loadLeads, loadNeedsAttention, loadRecentJobRuns, loadTenants, loadUpcomingWalkthroughs,
+} from '@/lib/platform/load'
+import { isOnFounderDay } from '@/lib/crm/founder-day'
 import { LifecycleBadge, ago } from './ui'
+import { LocalTime } from './local-time'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Platform' }
@@ -75,13 +79,26 @@ export default async function AdminPage() {
   const session = await requirePlatformAdmin()
   // One instant for the whole page. See the notes on `nowMs` and `ago`.
   const now = nowMs()
-  const [tenants, leads, runs, attention] = await Promise.all([
+  const [tenants, leads, runs, attention, walkthroughs] = await Promise.all([
     loadTenants(),
     // Five, because five are shown. The count on the tile above comes from its
     // own aggregate, so this is not what any number on the page is derived from.
     loadLeads(5),
     loadRecentJobRuns(10),
-    loadNeedsAttention(),
+    loadNeedsAttention(new Date(now)),
+    /*
+      A list rather than a count, unlike everything else here: "when, and who"
+      is the whole content of a walkthrough, and a number would send somebody
+      to another page to read four words. See `loadUpcomingWalkthroughs`.
+
+      Loaded twice on purpose — `loadNeedsAttention` fetches the same rows to
+      count today's from them. Two small reads beat one shared one here: the
+      alternative is the tile taking its number from whatever this page happens
+      to have in hand, which makes the rollup depend on its caller and puts the
+      count somewhere `stage.test.ts` cannot reach it. The agreement between
+      the tile and the section below is worth one repeated query.
+    */
+    loadUpcomingWalkthroughs(7, new Date(now)),
   ])
 
   const needAttention = tenants.filter(
@@ -176,14 +193,19 @@ export default async function AdminPage() {
           tone={attention.failingSyncs > 0 ? 'bad' : 'good'}
         />
         <Stat
-          label="Leads not contacted"
-          value={String(attention.uncontactedLeads)}
-          tone={attention.uncontactedLeads > 0 ? 'warn' : 'good'}
           /*
-            The only tile that goes anywhere, because it is the only one whose
-            work lives on a page of its own. The rest resolve into a tenant,
-            which is one click further down and needs the list to choose from.
+            "New leads", not "Leads not contacted".
+
+            The label followed the old aggregate, which counted the `contacted`
+            flag while the tab behind the link showed the derived NEW stage —
+            so a lead nobody had rung but who had been sent a tour code was on
+            the tile and absent from the tab it opened. The count comes from
+            the derivation now, and NEW means nothing has happened at all, so
+            the honest name for it is the stage's own.
           */
+          label="New leads"
+          value={String(attention.newLeads)}
+          tone={attention.newLeads > 0 ? 'warn' : 'good'}
           href="/admin/leads?filter=new"
         />
         <Stat
@@ -191,7 +213,94 @@ export default async function AdminPage() {
           value={String(needAttention.length)}
           tone={needAttention.length > 0 ? 'bad' : 'good'}
         />
+        {/*
+          The funnel, on the same rollup as the infrastructure, because the
+          test for being here is the same: each of these is a thing somebody
+          has to do something about today. A walkthrough at two o'clock is the
+          most time-bound item on the whole page and it was visible nowhere.
+
+          Every one links to the place that shows the leads it counted, and
+          that is a property rather than an intention — each count is computed
+          by the same predicate that decides what the destination contains.
+          See `loadNeedsAttention`, and `stage.test.ts` where it is pinned.
+        */}
+        <Stat
+          label="Walkthroughs today"
+          value={String(attention.walkthroughsToday)}
+          tone={attention.walkthroughsToday > 0 ? 'warn' : 'good'}
+          /*
+            Down the page, not off it.
+
+            This one counts appointments rather than a stage, and a demo whose
+            dealership has already been provisioned is on no stage tab that
+            mentions walkthroughs — so a link to `?filter=walkthrough-booked`
+            would name a number the destination cannot show. The section below
+            renders exactly the rows this was counted from.
+          */
+          href="#walkthroughs"
+        />
+        <Stat
+          label="Codes expiring unused"
+          value={String(attention.codesExpiringUnused)}
+          tone={attention.codesExpiringUnused > 0 ? 'warn' : 'good'}
+          href="/admin/leads?filter=code-sent"
+        />
+        <Stat
+          label="Leads gone quiet"
+          value={String(attention.quietLeads)}
+          tone={attention.quietLeads > 0 ? 'warn' : 'good'}
+          href="/admin/leads"
+        />
       </div>
+
+      {/*
+        This week, in full.
+
+        The one section on this page that is not a count and not a health
+        check. It is here because it is the only thing on the morning read with
+        a time attached — everything else can be done at eleven or at four, and
+        a demo cannot.
+
+        Rendered even when empty, because the "Walkthroughs today" tile links
+        to it by anchor: a section that disappears at zero is a link that
+        scrolls nowhere, which is a worse answer than "nothing booked".
+      */}
+      <Section title="Walkthroughs this week" id="walkthroughs">
+        {walkthroughs.length === 0 ? (
+          <Empty>Nothing booked between now and next week.</Empty>
+        ) : (
+          <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+            {walkthroughs.map((w) => (
+              <li key={w.leadId}>
+                <Link
+                  href={`/admin/leads/${w.leadId}`}
+                  className="flex flex-wrap items-center justify-between gap-3 p-3 hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">
+                      {w.dealershipName}
+                      {/*
+                        Which rows the tile counted, said on the rows
+                        themselves. The count is a filter over this list, so
+                        marking its members is the whole of the explanation.
+                      */}
+                      {isOnFounderDay(w.walkthroughAt, new Date(now)) && (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                          today
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-neutral-500">{w.contactName}</p>
+                  </div>
+                  <span className="shrink-0 text-xs font-medium">
+                    <LocalTime iso={w.walkthroughAt.toISOString()} />
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
 
       {attention.foreignWebhooks > 0 && (
         /*
@@ -210,6 +319,7 @@ export default async function AdminPage() {
         {tenants.length === 0 ? (
           <Empty>Nobody has signed up yet.</Empty>
         ) : (
+          <>
           <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
             {tenants.map((t) => (
               <li key={t.storeId}>
@@ -247,6 +357,20 @@ export default async function AdminPage() {
               </li>
             ))}
           </ul>
+          {/*
+            The navigation gap, closed.
+
+            `/admin/tenants` has existed for a phase with nothing linking to
+            it: every route into a tenant went through a row of this list, so
+            the searchable page with lifecycle status and MRR on it was
+            reachable only by typing the URL or by going back from a tenant.
+          */}
+          <div className="border-t border-neutral-100 p-3 dark:border-neutral-800">
+            <Link href="/admin/tenants" className="text-sm font-semibold hover:underline">
+              Every dealership, with plan and standing →
+            </Link>
+          </div>
+          </>
         )}
       </Section>
 
@@ -268,7 +392,9 @@ export default async function AdminPage() {
               {leads.map((l) => (
                 <li key={l.id}>
                   <Link
-                    href="/admin/leads"
+                    // The lead itself now, not the list it is on. The desk is
+                    // where anything is done about it.
+                    href={`/admin/leads/${l.id}`}
                     className="flex flex-wrap items-start justify-between gap-3 p-3 hover:bg-neutral-50 dark:hover:bg-neutral-900"
                   >
                     <div className="min-w-0">
@@ -362,9 +488,13 @@ function Stat({ label, value, tone, href }: {
   return <div className={shell}>{body}</div>
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, id, children }: {
+  title: string; id?: string; children: React.ReactNode
+}) {
   return (
-    <section className="mt-8">
+    // `scroll-mt` so an anchored jump does not tuck the heading under the top
+    // of the viewport — the tile above links here by fragment.
+    <section className="mt-8 scroll-mt-6" id={id}>
       <h2 className="text-sm font-bold uppercase tracking-widest text-neutral-500">{title}</h2>
       <div className="mt-2 rounded-xl border border-neutral-200 dark:border-neutral-800">
         {children}

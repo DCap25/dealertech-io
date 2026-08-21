@@ -582,7 +582,12 @@ describe('showsHelpLauncher', () => {
   })
 
   it('stays off the signed-out doors and the operations console', () => {
-    for (const path of ['/', '/demo', '/login', '/signup', '/invite/tok', '/admin', '/admin/leads']) {
+    for (const path of [
+      '/', '/demo', '/login', '/signup', '/invite/tok',
+      // Every /admin route, nested ones included — the lead desk is a console
+      // page like any other and a launcher there would 401 on every tap.
+      '/admin', '/admin/leads', '/admin/leads/lead-1', '/admin/tenants/org-1',
+    ]) {
       expect(showsHelpLauncher(path)).toBe(false)
     }
   })

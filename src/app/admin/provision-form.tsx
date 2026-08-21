@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useActionState, useState } from 'react'
 import { provisionFromLead, type ProvisionState } from './actions'
 
@@ -61,6 +62,23 @@ export function ProvisionForm({
             {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
+        {/*
+          Straight through to the onboarding.
+
+          This used to end here: a green box and a link, with the new
+          dealership reachable only by going back to the tenant list and
+          finding it by name. Provisioning is the start of the work, not the
+          end of it — the go-live checklist on that page is the next thing
+          somebody looks at.
+        */}
+        {state.organizationId && (
+          <Link
+            href={`/admin/tenants/${state.organizationId}`}
+            className="mt-2 inline-block text-xs font-semibold text-emerald-900 underline underline-offset-2 dark:text-emerald-200"
+          >
+            Open {state.dealershipName} and work the checklist →
+          </Link>
+        )}
       </div>
     )
   }

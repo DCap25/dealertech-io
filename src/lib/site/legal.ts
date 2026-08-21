@@ -87,7 +87,7 @@ export const POSTAL_ADDRESS: string | null = null
  * that lags the text is worse than none.
  */
 export const LAST_UPDATED = {
-  privacy: '2026-08-19',
+  privacy: '2026-08-20',
   terms: '2026-08-19',
   cookies: '2026-08-19',
   security: '2026-08-19',
