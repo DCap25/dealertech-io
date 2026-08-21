@@ -235,11 +235,20 @@ the UI has one shape to render regardless of vendor. `DMS_ADAPTER=mock` with
   `CASHIER`, `SERVICE_MANAGER`, `FIXED_OPS_DIRECTOR`, `ADMIN`. Managing staff
   requires one of the last three, with last-manager lockout guards.
 - `/admin` is the platform console — the morning read (a needs-attention
-  rollup), tenants, provisioning, sync runs. `/admin/tenants/[orgId]` is one
-  dealer group in full, with every commercial action on it; `/admin/leads` is
-  the inbound demo requests and what was said on the call. All of it returns
-  **404** to a non-platform-admin rather than 403, so it does not announce
-  itself.
+  rollup, including this week's walkthroughs), tenants, provisioning, sync
+  runs. `/admin/tenants/[orgId]` is one dealer group in full, with every
+  commercial action on it and a go-live checklist per rooftop. All of it
+  returns **404** to a non-platform-admin rather than 403, so it does not
+  announce itself.
+- **The founder's desk** (`docs/ADMIN_CRM_PLAN.md`). `/admin/leads` is the
+  sales pipeline and `/admin/leads/[leadId]` is one prospect in full: the call,
+  the tour code, the walkthrough booking with an `.ics` download, provisioning,
+  and an append-only timeline (`lead_events`, migration 0035). **Stages are
+  computed, never stored** — `src/lib/crm/stage.ts` derives them from facts
+  that already exist (rung, code issued, code redeemed, walkthrough booked or
+  held, organisation provisioned, first menu presented), so a board can never
+  disagree with the record. LOST is the one terminal state and needs a reason.
+  No owners, no assignment, no quotas, no email sending: one person is selling.
 - **Gated demo tours.** `/demo` — the coverage engine — stays open to anyone
   with a VIN. The *workspace* tour does not: a lead who books a walkthrough is
   issued a code from their own row on `/admin/leads`, and `/tour` trades it for

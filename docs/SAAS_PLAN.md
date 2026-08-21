@@ -536,8 +536,19 @@ Information architecture:
   for a fixed term (default 24h): writes `user_store_roles` with an expiry
   the session loader enforces, plus `audit_log`. Visible to the dealership on
   their own `/team` page — by design.
-- **`/admin/leads`** — today's list, plus convert-to-trial (invokes the
-  existing sales-led provisioning) and manual outcome notes.
+- **`/admin/leads`** — **superseded by `docs/ADMIN_CRM_PLAN.md`, built
+  2026-08-20.** This line described a list with convert-to-trial and manual
+  outcome notes, and stopped there because a pipeline "stays unbuilt until a
+  second person is selling" (the note in `recordLeadOutcome`, which is where
+  that decision was actually written down rather than here). What changed is
+  not the size of the sales team — still one person — but the number of facts
+  the product records: codes issued and redeemed, walkthroughs, provisioned
+  tenants, first menus. The stages are therefore **computed from those facts
+  and never stored** (`src/lib/crm/stage.ts`), which is not the stage enum this
+  document was refusing. `/admin/leads` is now the pipeline and
+  `/admin/leads/[leadId]` is the desk; see the CRM plan for the whole design,
+  including what is still deliberately absent (owners, assignment, quotas,
+  email sending).
 
 Permission model: `platform_admins` stays a single flag for now — the honest
 description of a company whose entire platform staff is Dan. What changes:
