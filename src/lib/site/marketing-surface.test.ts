@@ -409,6 +409,105 @@ describe('security.txt', () => {
 })
 
 /**
+ * The badge wall's proof links.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT ROTS, AND WHY A TEST IS THE ONLY THING THAT CATCHES IT
+ * ---------------------------------------------------------------------------
+ * `components/marketing/trust-badges.tsx` is the honest answer to a
+ * competitor's wall of certification logos: eight seals, none of them issued
+ * by anybody, each one a link into the section of this site that describes the
+ * mechanism it claims. That link is the entire justification for showing a
+ * badge at all — remove it and the wall is exactly the thing it was designed
+ * not to be.
+ *
+ * Links do not rot loudly. Somebody renames "Tenancy isolation" or moves the
+ * data-residency answer to another page, the badge keeps its confident
+ * sentence, and `/security#tenancy` quietly lands at the top of the page with
+ * the reader left to hunt for the paragraph that was supposed to back the
+ * claim. Nothing throws, nothing 404s, and the wall goes on asserting eight
+ * things whose proofs are no longer where it says they are.
+ *
+ * So: read the hrefs out of the badge list, and for each one require both that
+ * the page exists and that the id is still in its source.
+ *
+ * Also checked here, because they are the same promise: that both pages
+ * mounting the wall carry `id="not-held"` — the strip's closing line points at
+ * `#not-held` on whichever page it is rendered into, so the anchor has to
+ * exist on both — and that the four rows of the attribution strip point at
+ * their vendors' own pages rather than borrowing anything.
+ */
+describe('every trust badge links to a section that still exists', () => {
+  const source = readFileSync(join(SRC, 'components/marketing/trust-badges.tsx'), 'utf8')
+
+  /*
+    `href:` with a colon is the object-literal key in TRUST_BADGES, and it is
+    the only place in the file that shape appears — the JSX uses `href={…}` and
+    the vendor rows use `trustPage:`. So this collects the badge targets and
+    nothing else.
+  */
+  const hrefs = [...source.matchAll(/href:\s*'([^']+)'/g)].map((m) => m[1]!)
+
+  it('found all eight', () => {
+    // Guards the guard: a regex that matched nothing would pass every
+    // assertion in the loop below by never entering it.
+    expect(hrefs).toHaveLength(8)
+    expect(new Set(hrefs).size, 'two badges pointing at the same section').toBe(8)
+  })
+
+  for (const href of hrefs) {
+    it(`${href} resolves to a real page and a real anchor`, () => {
+      const [route, anchor] = href.split('#')
+      expect(anchor, `${href} has no fragment — a badge must land on its section`).toBeTruthy()
+
+      const page = join(SRC, 'app', route!.replace(/^\//, ''), 'page.tsx')
+      const pageSource = readFileSync(page, 'utf8')
+      expect(pageSource, `${route} does not carry id="${anchor}"`).toContain(`id="${anchor}"`)
+    })
+  }
+
+  it('the closing line’s #not-held anchor exists on both pages that mount the wall', () => {
+    for (const page of ['app/compliance/page.tsx', 'app/security/page.tsx']) {
+      const pageSource = readFileSync(join(SRC, page), 'utf8')
+      expect(pageSource, `${page} does not mount the wall`).toContain('<TrustBadges />')
+      expect(pageSource, `${page} has no id="not-held" for the strip to point at`).toContain(
+        'id="not-held"',
+      )
+    }
+  })
+
+  it('mounts the wall nowhere else', () => {
+    /*
+      Deliberately not on the homepage and not inside a legal document. On the
+      homepage a badge grid reads as sales decoration, which is the reading the
+      whole design spends its effort avoiding; in a document somebody may one
+      day have to enforce, a decorated grid sits oddly against the text.
+    */
+    const offenders = publicSources()
+      .filter((s) => s.path !== 'components/marketing/trust-badges.tsx')
+      .filter((s) => s.source.includes('<TrustBadges />'))
+      .map((s) => s.path)
+      .sort()
+    expect(offenders).toEqual(['app/compliance/page.tsx', 'app/security/page.tsx'])
+  })
+
+  it('attributes every subprocessor’s certifications to a link on their own site', () => {
+    /*
+      The strip states what Supabase, Stripe, Anthropic and Netlify hold. Every
+      such row must carry the vendor's own trust page, because we cannot verify
+      anybody's certificate and the only honest form of the claim is "go and
+      look at theirs". Four names, four outbound links.
+    */
+    for (const vendor of ['Supabase', 'Stripe', 'Anthropic', 'Netlify']) {
+      expect(source, `${vendor} has no row in the attribution strip`).toContain(`${vendor}: {`)
+    }
+    const trustPages = [...source.matchAll(/trustPage:\s*'([^']+)'/g)].map((m) => m[1]!)
+    expect(trustPages).toHaveLength(4)
+    for (const url of trustPages) expect(url).toMatch(/^https:\/\//)
+  })
+})
+
+/**
  * Not part of the cookie claim, but the same class of published fact: the
  * privacy, compliance and security pages all state that there are exactly four
  * subprocessors. That list is only true while the dependency list stays free

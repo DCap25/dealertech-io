@@ -109,7 +109,24 @@ export function MarketingFooter() {
           previews on this page are illustrative.
         </p>
 
-        <div className="space-y-1.5 border-t border-[var(--rule)] pt-6 text-xs">
+        {/*
+          One row, not a stack: identity on the left, the no-tracking sentence
+          on the right — the slot where a vendor with a consent manager puts
+          "Update Privacy Preferences". The LLC is named once; naming it twice
+          across two lines was repetition wearing a legal hat. Wraps back to
+          stacked only when the viewport forces it.
+        */}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1.5 border-t border-[var(--rule)] pt-6 text-xs">
+          <p>
+            Copyright © {PRODUCT_NAME} · a product of {LEGAL_ENTITY}, also makers of{' '}
+            <a
+              href={SIBLING_PRODUCT.url}
+              className="underline underline-offset-4 transition hover:text-[var(--ink)]"
+            >
+              thedasboard.com
+            </a>
+            .
+          </p>
           <p>
             No tracking, no analytics, no cookies until you sign in.{' '}
             <Link
@@ -118,19 +135,6 @@ export function MarketingFooter() {
             >
               What we do set, and when
             </Link>
-            .
-          </p>
-          <p>
-            Copyright © {PRODUCT_NAME} · {PRODUCT_NAME} is a product of {LEGAL_ENTITY}.
-          </p>
-          <p>
-            Also from {LEGAL_ENTITY}: {SIBLING_PRODUCT.description} at{' '}
-            <a
-              href={SIBLING_PRODUCT.url}
-              className="underline underline-offset-4 transition hover:text-[var(--ink)]"
-            >
-              thedasboard.com
-            </a>
             .
           </p>
         </div>

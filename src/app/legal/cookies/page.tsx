@@ -65,7 +65,7 @@ export default function CookiesPage() {
         </p>
       </Summary>
 
-      <H2>Before you sign in</H2>
+      <H2 id="before-you-sign-in">Before you sign in</H2>
       <P>
         Zero cookies. The marketing pages, the coverage demo, and every page you are reading now are
         rendered without setting anything in your browser and without loading anything from another

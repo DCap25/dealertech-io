@@ -9,6 +9,7 @@ import {
   TrustPage,
   UL,
 } from '@/components/marketing/trust-page'
+import { TrustBadges } from '@/components/marketing/trust-badges'
 import { CONTACT_EMAIL, PRODUCT_NAME, SUBPROCESSORS } from '@/lib/site/legal'
 
 export const metadata = {
@@ -67,8 +68,16 @@ export default function SecurityPage() {
         </p>
       </Summary>
 
+      {/*
+        Same wall as the compliance page, on purpose. An IT contact lands on
+        whichever of the two a colleague sent them, and the eight claims are
+        the fastest route from either one to the paragraph they came for. Four
+        of the eight point back into this page.
+      */}
+      <TrustBadges />
+
       {/* ---------------------------------------------------------- tenancy */}
-      <H2>Tenancy isolation</H2>
+      <H2 id="tenancy">Tenancy isolation</H2>
       <P>
         A dealer group&rsquo;s data being visible to another dealership is the failure that would end
         this company, so it is enforced at the lowest layer available rather than in application
@@ -237,7 +246,7 @@ export default function SecurityPage() {
       </P>
 
       {/* --------------------------------------------------- infrastructure */}
-      <H2>Infrastructure and encryption</H2>
+      <H2 id="infrastructure">Infrastructure and encryption</H2>
       <P>
         {PRODUCT_NAME} runs on four vendors. Each is named because a subprocessor list this short
         is worth publishing. One more external service receives data from the product:
@@ -288,7 +297,7 @@ export default function SecurityPage() {
       </UL>
 
       {/* ------------------------------------------------------ disclosure */}
-      <H2>Reporting a vulnerability</H2>
+      <H2 id="disclosure">Reporting a vulnerability</H2>
       <P>
         Email{' '}
         <a href={`mailto:${CONTACT_EMAIL}`} className="font-semibold text-[var(--ink)] underline underline-offset-4">
@@ -312,7 +321,11 @@ export default function SecurityPage() {
       </P>
 
       {/* --------------------------------------------------- certifications */}
-      <H2>What we do not have</H2>
+      <H2 id="not-held">What we do not have</H2>
+      <P>
+        Everything above this line is a control we can show you. This is the part of the vendor form
+        we fill in with a no, and it belongs on the same page as the rest.
+      </P>
       <Callout>
         <p>
           {PRODUCT_NAME} holds <strong className="text-[var(--ink)]">no security certifications</strong>.

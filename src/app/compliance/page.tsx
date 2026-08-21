@@ -9,6 +9,7 @@ import {
   TrustPage,
   UL,
 } from '@/components/marketing/trust-page'
+import { TrustBadges } from '@/components/marketing/trust-badges'
 import { CONTACT_EMAIL, LEGAL_ENTITY, PRODUCT_NAME, SUBPROCESSORS } from '@/lib/site/legal'
 
 export const metadata = {
@@ -39,9 +40,14 @@ export const metadata = {
  * host does this and publishes the details", it says so and points there.
  */
 
-function Faq({ q, children }: { q: string; children: React.ReactNode }) {
+/**
+ * `id` is optional and only set where something links here. The badge wall
+ * above points at the data-residency answer specifically, and a link into a
+ * FAQ that lands at the top of the FAQ is a link that has failed.
+ */
+function Faq({ q, id, children }: { q: string; id?: string; children: React.ReactNode }) {
   return (
-    <div className="mt-6">
+    <div id={id} className="mt-6 scroll-mt-20">
       <p className="font-bold">{q}</p>
       <div className="mt-2 space-y-3 leading-relaxed text-[var(--ink-soft)]">{children}</div>
     </div>
@@ -76,8 +82,18 @@ export default function CompliancePage() {
         </p>
       </Summary>
 
+      {/*
+        The badge wall sits here — after the short version, before the first
+        real section — because it is a table of contents for a reader who
+        arrived from a procurement checklist. Every seal on it is a link into
+        the page below, and the strip under it hands every actual certificate
+        back to the vendor that earned it before the reader reaches "What we
+        do not hold".
+      */}
+      <TrustBadges />
+
       {/* ------------------------------------------------------- safeguards */}
-      <H2>The FTC Safeguards Rule (GLBA)</H2>
+      <H2 id="safeguards">The FTC Safeguards Rule (GLBA)</H2>
       <P>
         This is the load-bearing one for a US franchise dealership, and it applies today.
       </P>
@@ -126,7 +142,7 @@ export default function CompliancePage() {
       </P>
 
       {/* ------------------------------------------------------------ tcpa */}
-      <H2>TCPA — no SMS, by design</H2>
+      <H2 id="tcpa">TCPA — no SMS, by design</H2>
       <P>
         {PRODUCT_NAME} <strong className="text-[var(--ink)]">does not send text messages</strong>.
         Not throttled, not opt-in-gated — the capability is not built.
@@ -216,7 +232,11 @@ export default function CompliancePage() {
       </P>
 
       {/* -------------------------------------------------------- not held */}
-      <H2>What we do not hold</H2>
+      <H2 id="not-held">What we do not hold</H2>
+      <P>
+        The wall at the top of this page is eight things we are prepared to be held to. This is the
+        other list, and it is the one a procurement form actually has a column for.
+      </P>
       <Callout>
         <p>
           No SOC 1, no SOC 2 Type I or Type II. No ISO 27001, 27701 or 42001. No PCI attestation of
@@ -273,7 +293,7 @@ export default function CompliancePage() {
         </p>
       </Faq>
 
-      <Faq q="Where does our data live?">
+      <Faq q="Where does our data live?" id="where-data-lives">
         <p>
           In the United States, with Supabase (database and document storage) and Netlify (hosting).
           We do not replicate dealership data outside the US.

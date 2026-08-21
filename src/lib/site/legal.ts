@@ -90,8 +90,10 @@ export const LAST_UPDATED = {
   privacy: '2026-08-20',
   terms: '2026-08-19',
   cookies: '2026-08-19',
-  security: '2026-08-19',
-  compliance: '2026-08-19',
+  // Re-dated when the badge wall and its attribution strip landed on both
+  // pages: new claims on the page, new date under the title.
+  security: '2026-08-21',
+  compliance: '2026-08-21',
   responsibleAi: '2026-08-19',
 } as const
 

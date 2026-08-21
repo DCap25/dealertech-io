@@ -187,7 +187,7 @@ export default function ResponsibleAiPage() {
       </UL>
 
       {/* ------------------------------------------------------ boundaries */}
-      <H2>What we will not do with it</H2>
+      <H2 id="boundaries">What we will not do with it</H2>
       <UL>
         <li>
           No model decides what a customer is charged. Prices resolve from your own op-code price
